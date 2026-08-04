@@ -10,6 +10,8 @@ final class CloudKitSharingPoC: ObservableObject {
 
     @Published private(set) var status = "尚未檢查 iCloud 帳號"
     @Published private(set) var lastWriterToken = "尚無驗證標記"
+    @Published private(set) var photoStatus = "尚無共享照片"
+    @Published private(set) var latestPhoto: UIImage?
     @Published private(set) var share: CKShare?
     @Published var isShowingSharingController = false
 
@@ -180,6 +182,101 @@ final class CloudKitSharingPoC: ObservableObject {
         }
     }
 
+    func uploadPhoto(_ sourceData: Data) async {
+        guard let location else {
+            photoStatus = "請先建立或接受一段共享關係"
+            return
+        }
+
+        photoStatus = "正在重新編碼並上傳照片…"
+
+        do {
+            let prepared = try PhotoAssetProcessor.prepare(sourceData)
+            let fullURL = temporaryAssetURL(label: "full")
+            let thumbnailURL = temporaryAssetURL(label: "thumbnail")
+            try prepared.fullData.write(to: fullURL, options: .atomic)
+            try prepared.thumbnailData.write(to: thumbnailURL, options: .atomic)
+            defer {
+                try? FileManager.default.removeItem(at: fullURL)
+                try? FileManager.default.removeItem(at: thumbnailURL)
+            }
+
+            let database = database(for: location)
+            let root = try await database.record(for: location.recordID)
+            let photoID = CKRecord.ID(
+                recordName: PhotoAssetPolicy.recordName(for: UUID()),
+                zoneID: location.recordID.zoneID
+            )
+            let photo = CKRecord(recordType: "PhotoPoC", recordID: photoID)
+            photo.parent = CKRecord.Reference(recordID: location.recordID, action: .none)
+            photo["createdAt"] = Date()
+            photo["fullAsset"] = CKAsset(fileURL: fullURL)
+            photo["thumbnailAsset"] = CKAsset(fileURL: thumbnailURL)
+            photo["fullByteCount"] = Int64(prepared.fullData.count)
+            photo["thumbnailByteCount"] = Int64(prepared.thumbnailData.count)
+            root["latestPhotoRecordName"] = photoID.recordName
+
+            let result = try await database.modifyRecords(
+                saving: [photo, root],
+                deleting: [],
+                savePolicy: .ifServerRecordUnchanged,
+                atomically: true
+            )
+            guard case .success? = result.saveResults[photoID] else {
+                throw PoCError.photoWasNotSaved
+            }
+
+            latestPhoto = prepared.preview
+            photoStatus = "照片已上傳；請在另一個裝置重新整理照片"
+        } catch {
+            photoStatus = "照片上傳失敗：\(error.localizedDescription)"
+        }
+    }
+
+    func refreshPhoto() async {
+        guard let location else {
+            photoStatus = "請先建立或接受一段共享關係"
+            return
+        }
+
+        photoStatus = "正在讀取共享照片…"
+
+        do {
+            let database = database(for: location)
+            let root = try await database.record(for: location.recordID)
+            guard let recordName = root["latestPhotoRecordName"] as? String else {
+                latestPhoto = nil
+                photoStatus = "共享關係尚無照片"
+                return
+            }
+
+            let photoID = CKRecord.ID(
+                recordName: recordName,
+                zoneID: location.recordID.zoneID
+            )
+            let photo = try await database.record(for: photoID)
+            guard let asset = photo["thumbnailAsset"] as? CKAsset,
+                  let fileURL = asset.fileURL,
+                  let image = UIImage(data: try Data(contentsOf: fileURL))
+            else {
+                throw PoCError.missingPhotoAsset
+            }
+
+            latestPhoto = image
+            photoStatus = "已讀取另一個裝置可見的共享照片"
+        } catch {
+            photoStatus = "照片讀取失敗：\(error.localizedDescription)"
+        }
+    }
+
+    func reportPhotoSelectionFailure(_ error: Error?) {
+        if let error {
+            photoStatus = "照片選取失敗：\(error.localizedDescription)"
+        } else {
+            photoStatus = "照片選取失敗：無法讀取圖片資料"
+        }
+    }
+
     private func database(for location: RelationshipLocation) -> CKDatabase {
         switch location.databaseScope {
         case .private:
@@ -188,18 +285,94 @@ final class CloudKitSharingPoC: ObservableObject {
             container.sharedCloudDatabase
         }
     }
+
+    private func temporaryAssetURL(label: String) -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("couplespace-\(label)-\(UUID().uuidString.lowercased()).jpg")
+    }
 }
 
 private enum PoCError: LocalizedError {
     case missingRootRecord
+    case missingPhotoAsset
+    case invalidPhotoData
+    case photoWasNotSaved
     case shareWasNotSaved
 
     var errorDescription: String? {
         switch self {
         case .missingRootRecord:
             "CloudKit 分享缺少根記錄"
+        case .missingPhotoAsset:
+            "CloudKit 照片記錄缺少縮圖"
+        case .invalidPhotoData:
+            "無法解碼或重新編碼所選照片"
+        case .photoWasNotSaved:
+            "CloudKit 未回傳已儲存的照片"
         case .shareWasNotSaved:
             "CloudKit 未回傳已儲存的分享"
+        }
+    }
+}
+
+private struct PreparedPhotoAssets {
+    let fullData: Data
+    let thumbnailData: Data
+    let preview: UIImage
+}
+
+private enum PhotoAssetProcessor {
+    static func prepare(_ data: Data) throws -> PreparedPhotoAssets {
+        guard let source = UIImage(data: data) else {
+            throw PoCError.invalidPhotoData
+        }
+
+        let width = Int(source.size.width.rounded())
+        let height = Int(source.size.height.rounded())
+        let fullDimensions = PhotoAssetPolicy.scaledDimensions(
+            width: width,
+            height: height,
+            maxDimension: PhotoAssetPolicy.fullMaxDimension
+        )
+        let thumbnailDimensions = PhotoAssetPolicy.scaledDimensions(
+            width: width,
+            height: height,
+            maxDimension: PhotoAssetPolicy.thumbnailMaxDimension
+        )
+        guard fullDimensions.width > 0, fullDimensions.height > 0,
+              thumbnailDimensions.width > 0, thumbnailDimensions.height > 0
+        else {
+            throw PoCError.invalidPhotoData
+        }
+
+        let fullImage = render(source, dimensions: fullDimensions)
+        let thumbnailImage = render(source, dimensions: thumbnailDimensions)
+        guard let fullData = fullImage.jpegData(
+            compressionQuality: PhotoAssetPolicy.jpegCompressionQuality
+        ),
+              let thumbnailData = thumbnailImage.jpegData(
+                compressionQuality: PhotoAssetPolicy.jpegCompressionQuality
+              )
+        else {
+            throw PoCError.invalidPhotoData
+        }
+
+        return PreparedPhotoAssets(
+            fullData: fullData,
+            thumbnailData: thumbnailData,
+            preview: thumbnailImage
+        )
+    }
+
+    private static func render(_ image: UIImage, dimensions: PhotoDimensions) -> UIImage {
+        let size = CGSize(width: dimensions.width, height: dimensions.height)
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = true
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.white.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            image.draw(in: CGRect(origin: .zero, size: size))
         }
     }
 }

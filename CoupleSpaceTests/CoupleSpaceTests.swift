@@ -38,6 +38,25 @@ struct CoupleSpaceTests {
         #expect(MessageOrderingValue.ordered(values).map(\.id) == [earlierID, laterID])
     }
 
+    @Test func photoAssetPolicyUsesStablePrivateRecordName() {
+        let id = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+
+        #expect(PhotoAssetPolicy.recordName(for: id) == "photo_aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+    }
+
+    @Test func photoAssetPolicyCapsDimensionsWithoutUpscaling() {
+        #expect(PhotoAssetPolicy.scaledDimensions(
+            width: 4_032,
+            height: 3_024,
+            maxDimension: PhotoAssetPolicy.fullMaxDimension
+        ) == PhotoDimensions(width: 1_600, height: 1_200))
+        #expect(PhotoAssetPolicy.scaledDimensions(
+            width: 300,
+            height: 200,
+            maxDimension: PhotoAssetPolicy.thumbnailMaxDimension
+        ) == PhotoDimensions(width: 300, height: 200))
+    }
+
     @Test func notificationEnvelopeDoesNotExposePrivateContent() {
         let envelope = PrivateNotificationEnvelope(
             relationshipID: UUID(),

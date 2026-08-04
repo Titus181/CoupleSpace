@@ -39,6 +39,42 @@ struct MessageIdentity {
     }
 }
 
+struct PhotoDimensions: Equatable {
+    let width: Int
+    let height: Int
+}
+
+struct PhotoAssetPolicy {
+    static let fullMaxDimension = 1_600
+    static let thumbnailMaxDimension = 320
+    static let jpegCompressionQuality = 0.8
+
+    static func recordName(for id: UUID) -> String {
+        "photo_\(id.uuidString.lowercased())"
+    }
+
+    static func scaledDimensions(
+        width: Int,
+        height: Int,
+        maxDimension: Int
+    ) -> PhotoDimensions {
+        guard width > 0, height > 0, maxDimension > 0 else {
+            return PhotoDimensions(width: 0, height: 0)
+        }
+
+        let largestDimension = max(width, height)
+        guard largestDimension > maxDimension else {
+            return PhotoDimensions(width: width, height: height)
+        }
+
+        let scale = Double(maxDimension) / Double(largestDimension)
+        return PhotoDimensions(
+            width: max(1, Int((Double(width) * scale).rounded())),
+            height: max(1, Int((Double(height) * scale).rounded()))
+        )
+    }
+}
+
 struct MessageOrderingValue: Equatable {
     let id: UUID
     let clientCreatedAt: Date
