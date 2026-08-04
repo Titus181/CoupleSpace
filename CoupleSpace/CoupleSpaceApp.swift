@@ -10,6 +10,10 @@ import SwiftData
 
 @main
 struct CoupleSpaceApp: App {
+#if os(iOS)
+    @UIApplicationDelegateAdaptor(CloudKitShareAppDelegate.self) private var appDelegate
+#endif
+
     var sharedModelContainer: ModelContainer = {
         let schema = Schema([
             Item.self,

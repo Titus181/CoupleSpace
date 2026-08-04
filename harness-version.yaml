@@ -1,0 +1,6 @@
+harness:
+  repository: "../../agent-harness"
+  version: "0.2.1"
+  tag: "v0.2.1"
+  commit: "3223d25f72b1d71b4884a5b63ea08c564b01b5df"
+  distribution: vendored

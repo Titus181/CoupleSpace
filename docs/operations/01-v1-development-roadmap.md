@@ -80,6 +80,8 @@ last_updated: 2026-08-04
 
 ## W1 必須關閉的技術閘門
 
+目前狀態為 `in_progress`。第一個 CloudKit Sharing 真機 spike、純邏輯驗證範圍與人工證據清單記錄於 [W1 技術驗證紀錄](02-w1-technical-validation.md)；尚未取得兩支真機／兩個 Apple ID 證據，因此 G1 與 M0 尚未通過。
+
 以下項目尚未決定，不得在規劃中默認某一實作方式：
 
 1. 兩個 Apple ID 如何共享同一段伴侶關係。
