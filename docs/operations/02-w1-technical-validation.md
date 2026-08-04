@@ -16,8 +16,8 @@ W1 不先完成正式產品架構。先以最小真機 spike 驗證最大未知�
 
 | 閘門 | CloudKit Sharing 假設 | 驗證狀態 | 否決條件 |
 | --- | --- | --- | --- |
-| 身分與配對 | 使用 iCloud 帳號接受私人 `CKShare`，一個 share 對應一段伴侶關係 | 待兩 Apple ID 真機驗證 | 無法穩定接受、恢復或限制為正確兩人 |
-| 同步與聊天 | `CKSyncEngine` 同步 private/shared database；client UUID 形成穩定 record name；server timestamp 加 UUID 決定順序；本機 outbox 顯示傳送狀態 | 純規則測試已建立；遠端同步未驗證 | 離線重送造成遺失、重複、不可預期錯序，或 shared database 行為不足以可靠恢復 |
+| 身分與配對 | 使用 iCloud 帳號接受私人 `CKShare`，一個 share 對應一段伴侶關係 | 真機 A＋Simulator B、兩個 Apple ID 初步通過；兩支真機待驗證 | 無法穩定接受、恢復或限制為正確兩人 |
+| 同步與聊天 | `CKSyncEngine` 同步 private/shared database；client UUID 形成穩定 record name；server timestamp 加 UUID 決定順序；本機 outbox 顯示傳送狀態 | 純規則測試已建立；共享標記雙向寫入與重啟恢復初步通過，離線與正式同步模型未驗證 | 離線重送造成遺失、重複、不可預期錯序，或 shared database 行為不足以可靠恢復 |
 | 照片 | 原檔與縮圖先在裝置端移除 metadata、壓縮，再以 `CKAsset` 儲存；正式尺寸、品質、容量與保存期依實測決定 | 尚未驗證 | 成本、速度、弱網恢復或刪除一致性不可接受 |
 | 推播 | database subscription 只作變更提示；抓取並驗證 relationship/recipient 後才更新 App；使用者可見內容固定為泛化文案 | 資料最小化規則測試已建立；真機未驗證 | 錯發、鎖定畫面洩漏內容，或背景同步不足以支撐體驗 |
 | 所有權與解除配對 | 建立分享者是 owner；另一方是 participant | 已知有結構性風險 | 無法提供雙方可理解、可稽核且不依賴單方善意的保留、匯出、刪除結果 |
@@ -58,6 +58,20 @@ W1 不先完成正式產品架構。先以最小真機 spike 驗證最大未知�
 - 兩個不同 Apple ID 的確認，但不得記錄完整 Email、token 或其他秘密。
 - 邀請接受、A→B 與 B→A 標記、重啟恢復的結果與時間。
 - 任一 CloudKit 錯誤的完整錯誤碼；截圖不得包含私人通知或其他無關內容。
+
+### 2026-08-04 初步實測證據
+
+本次以一支真實 iPhone 作為 owner、一台 iPhone 17 Pro Simulator（iOS 26.5）作為 participant，分別登入兩個不同 Apple ID。App 為 development build `1.0 (1)`；真機型號與 iOS 版本未記錄。未保存完整 Email、token 或分享 URL。
+
+- 真機 A 的 iCloud 帳號檢查可用，成功建立私人共享根記錄並邀請指定 participant。
+- Simulator B 接受邀請後，可重新整理 shared database 的同一筆根記錄。
+- A 寫入標記 `e15f87ab`，B 重新整理後看到相同值。
+- B 寫入標記 `30f811e4`，A 重新整理後看到相同值。
+- 雙方強制結束 App、重新開啟並重新整理後，仍看到 `30f811e4`。
+- 真機首次啟動曾因未使用的預設 SwiftData container 無法載入而中止；移除該啟動依賴後真機正常執行。
+- Simulator 首次開啟邀請時，App bundle 缺少 `CKSharingSupported`；改由來源 Info.plist 明確提供該鍵並確認建置產物為 `true` 後，邀請可交給 App 接受。
+
+此結果只證明 development environment 中，真機與 Simulator 的跨 Apple ID 私人分享、雙向標記與前景重啟恢復可行。它不等同兩支真實 iPhone，也不涵蓋背景同步、推播、弱網、離線重試、照片或資料生命週期，因此 G1 與 M0 仍未通過。
 
 ## W1 尚未關閉
 

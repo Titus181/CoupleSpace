@@ -14,7 +14,7 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 
 ## 目前狀態
 
-- `CoupleSpace/` 是 Xcode 預設 SwiftUI／SwiftData `Item` 範例，尚未形成產品領域架構。
+- `CoupleSpace/` 已以 W1 CloudKit Sharing spike 作為啟動畫面；預設 SwiftData `Item` 型別仍保留但未接入 App，尚未形成產品領域架構。
 - `CoupleSpaceTests/` 與 `CoupleSpaceUITests/` 目前只有 Xcode 範例測試。
 - `CoupleSpace Watch App Watch App/` 是獨立的初始 Watch 畫面，不是 iPhone MVP 必要流程。
 - 帳號、跨 Apple ID 分享、即時聊天、照片、推播與資料所有權仍屬 G1 技術閘門，不得在此假定實作方案。
