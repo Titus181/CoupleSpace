@@ -6,7 +6,32 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		754C798630205F16003388B5 /* CoupleSpace Watch App Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 754C796630205EEC003388B5 /* CoupleSpace Watch App Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
+		754C797330205F16003388B5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 75C55BAA30199E4A00BD923C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 754C796530205EEC003388B5;
+			remoteInfo = "CoupleSpace Watch App Watch App";
+		};
+		754C797D30205F16003388B5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 75C55BAA30199E4A00BD923C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 754C796530205EEC003388B5;
+			remoteInfo = "CoupleSpace Watch App Watch App";
+		};
+		754C798430205F16003388B5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 75C55BAA30199E4A00BD923C /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 754C796530205EEC003388B5;
+			remoteInfo = "CoupleSpace Watch App Watch App";
+		};
 		75C55BC230199E4C00BD923C /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 75C55BAA30199E4A00BD923C /* Project object */;
@@ -23,13 +48,45 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		754C798730205F16003388B5 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				754C798630205F16003388B5 /* CoupleSpace Watch App Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		754C796630205EEC003388B5 /* CoupleSpace Watch App Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "CoupleSpace Watch App Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		754C797230205F16003388B5 /* CoupleSpace Watch App Watch AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "CoupleSpace Watch App Watch AppTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
+		754C797C30205F16003388B5 /* CoupleSpace Watch App Watch AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "CoupleSpace Watch App Watch AppUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		75C55BB230199E4A00BD923C /* CoupleSpace.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CoupleSpace.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		75C55BC130199E4C00BD923C /* CoupleSpaceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CoupleSpaceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		75C55BCB30199E4C00BD923C /* CoupleSpaceUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CoupleSpaceUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		754C796730205EEC003388B5 /* CoupleSpace Watch App Watch App */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "CoupleSpace Watch App Watch App";
+			sourceTree = "<group>";
+		};
+		754C797530205F16003388B5 /* CoupleSpace Watch App Watch AppTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "CoupleSpace Watch App Watch AppTests";
+			sourceTree = "<group>";
+		};
+		754C797F30205F16003388B5 /* CoupleSpace Watch App Watch AppUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "CoupleSpace Watch App Watch AppUITests";
+			sourceTree = "<group>";
+		};
 		75C55BB430199E4A00BD923C /* CoupleSpace */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = CoupleSpace;
@@ -48,6 +105,27 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		754C796330205EEC003388B5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		754C796F30205F16003388B5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		754C797930205F16003388B5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		75C55BAF30199E4A00BD923C /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -78,6 +156,9 @@
 				75C55BB430199E4A00BD923C /* CoupleSpace */,
 				75C55BC430199E4C00BD923C /* CoupleSpaceTests */,
 				75C55BCE30199E4C00BD923C /* CoupleSpaceUITests */,
+				754C796730205EEC003388B5 /* CoupleSpace Watch App Watch App */,
+				754C797530205F16003388B5 /* CoupleSpace Watch App Watch AppTests */,
+				754C797F30205F16003388B5 /* CoupleSpace Watch App Watch AppUITests */,
 				75C55BB330199E4A00BD923C /* Products */,
 			);
 			sourceTree = "<group>";
@@ -88,6 +169,9 @@
 				75C55BB230199E4A00BD923C /* CoupleSpace.app */,
 				75C55BC130199E4C00BD923C /* CoupleSpaceTests.xctest */,
 				75C55BCB30199E4C00BD923C /* CoupleSpaceUITests.xctest */,
+				754C796630205EEC003388B5 /* CoupleSpace Watch App Watch App.app */,
+				754C797230205F16003388B5 /* CoupleSpace Watch App Watch AppTests.xctest */,
+				754C797C30205F16003388B5 /* CoupleSpace Watch App Watch AppUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -95,6 +179,74 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		754C796530205EEC003388B5 /* CoupleSpace Watch App Watch App */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 754C798E30205F16003388B5 /* Build configuration list for PBXNativeTarget "CoupleSpace Watch App Watch App" */;
+			buildPhases = (
+				754C796230205EEC003388B5 /* Sources */,
+				754C796330205EEC003388B5 /* Frameworks */,
+				754C796430205EEC003388B5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				754C796730205EEC003388B5 /* CoupleSpace Watch App Watch App */,
+			);
+			name = "CoupleSpace Watch App Watch App";
+			packageProductDependencies = (
+			);
+			productName = "CoupleSpace Watch App Watch App";
+			productReference = 754C796630205EEC003388B5 /* CoupleSpace Watch App Watch App.app */;
+			productType = "com.apple.product-type.application";
+		};
+		754C797130205F16003388B5 /* CoupleSpace Watch App Watch AppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 754C798F30205F16003388B5 /* Build configuration list for PBXNativeTarget "CoupleSpace Watch App Watch AppTests" */;
+			buildPhases = (
+				754C796E30205F16003388B5 /* Sources */,
+				754C796F30205F16003388B5 /* Frameworks */,
+				754C797030205F16003388B5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				754C797430205F16003388B5 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				754C797530205F16003388B5 /* CoupleSpace Watch App Watch AppTests */,
+			);
+			name = "CoupleSpace Watch App Watch AppTests";
+			packageProductDependencies = (
+			);
+			productName = "CoupleSpace Watch App Watch AppTests";
+			productReference = 754C797230205F16003388B5 /* CoupleSpace Watch App Watch AppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		754C797B30205F16003388B5 /* CoupleSpace Watch App Watch AppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 754C799030205F16003388B5 /* Build configuration list for PBXNativeTarget "CoupleSpace Watch App Watch AppUITests" */;
+			buildPhases = (
+				754C797830205F16003388B5 /* Sources */,
+				754C797930205F16003388B5 /* Frameworks */,
+				754C797A30205F16003388B5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				754C797E30205F16003388B5 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				754C797F30205F16003388B5 /* CoupleSpace Watch App Watch AppUITests */,
+			);
+			name = "CoupleSpace Watch App Watch AppUITests";
+			packageProductDependencies = (
+			);
+			productName = "CoupleSpace Watch App Watch AppUITests";
+			productReference = 754C797C30205F16003388B5 /* CoupleSpace Watch App Watch AppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 		75C55BB130199E4A00BD923C /* CoupleSpace */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 75C55BD530199E4C00BD923C /* Build configuration list for PBXNativeTarget "CoupleSpace" */;
@@ -102,10 +254,12 @@
 				75C55BAE30199E4A00BD923C /* Sources */,
 				75C55BAF30199E4A00BD923C /* Frameworks */,
 				75C55BB030199E4A00BD923C /* Resources */,
+				754C798730205F16003388B5 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				754C798530205F16003388B5 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				75C55BB430199E4A00BD923C /* CoupleSpace */,
@@ -173,6 +327,17 @@
 				LastSwiftUpdateCheck = 2660;
 				LastUpgradeCheck = 2660;
 				TargetAttributes = {
+					754C796530205EEC003388B5 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					754C797130205F16003388B5 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 754C796530205EEC003388B5;
+					};
+					754C797B30205F16003388B5 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 754C796530205EEC003388B5;
+					};
 					75C55BB130199E4A00BD923C = {
 						CreatedOnToolsVersion = 26.6;
 					};
@@ -203,11 +368,35 @@
 				75C55BB130199E4A00BD923C /* CoupleSpace */,
 				75C55BC030199E4C00BD923C /* CoupleSpaceTests */,
 				75C55BCA30199E4C00BD923C /* CoupleSpaceUITests */,
+				754C796530205EEC003388B5 /* CoupleSpace Watch App Watch App */,
+				754C797130205F16003388B5 /* CoupleSpace Watch App Watch AppTests */,
+				754C797B30205F16003388B5 /* CoupleSpace Watch App Watch AppUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		754C796430205EEC003388B5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		754C797030205F16003388B5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		754C797A30205F16003388B5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		75C55BB030199E4A00BD923C /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -232,6 +421,27 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		754C796230205EEC003388B5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		754C796E30205F16003388B5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		754C797830205F16003388B5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		75C55BAE30199E4A00BD923C /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -256,6 +466,21 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		754C797430205F16003388B5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 754C796530205EEC003388B5 /* CoupleSpace Watch App Watch App */;
+			targetProxy = 754C797330205F16003388B5 /* PBXContainerItemProxy */;
+		};
+		754C797E30205F16003388B5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 754C796530205EEC003388B5 /* CoupleSpace Watch App Watch App */;
+			targetProxy = 754C797D30205F16003388B5 /* PBXContainerItemProxy */;
+		};
+		754C798530205F16003388B5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 754C796530205EEC003388B5 /* CoupleSpace Watch App Watch App */;
+			targetProxy = 754C798430205F16003388B5 /* PBXContainerItemProxy */;
+		};
 		75C55BC330199E4C00BD923C /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 75C55BB130199E4A00BD923C /* CoupleSpace */;
@@ -269,6 +494,165 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		754C798830205F16003388B5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = HCL9F2N8EU;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "CoupleSpace Watch App";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.titus.CoupleSpace;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.titus.CoupleSpace.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				WATCHOS_DEPLOYMENT_TARGET = 26.5;
+			};
+			name = Debug;
+		};
+		754C798930205F16003388B5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = HCL9F2N8EU;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "CoupleSpace Watch App";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
+				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = com.titus.CoupleSpace;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.titus.CoupleSpace.watchkitapp;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 26.5;
+			};
+			name = Release;
+		};
+		754C798A30205F16003388B5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = HCL9F2N8EU;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.titus.CoupleSpace-Watch-App-Watch-AppTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CoupleSpace Watch App Watch App.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CoupleSpace Watch App Watch App";
+				WATCHOS_DEPLOYMENT_TARGET = 26.5;
+			};
+			name = Debug;
+		};
+		754C798B30205F16003388B5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = HCL9F2N8EU;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.titus.CoupleSpace-Watch-App-Watch-AppTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CoupleSpace Watch App Watch App.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/CoupleSpace Watch App Watch App";
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 26.5;
+			};
+			name = Release;
+		};
+		754C798C30205F16003388B5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = HCL9F2N8EU;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.titus.CoupleSpace-Watch-App-Watch-AppUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_TARGET_NAME = "CoupleSpace Watch App Watch App";
+				WATCHOS_DEPLOYMENT_TARGET = 26.5;
+			};
+			name = Debug;
+		};
+		754C798D30205F16003388B5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = HCL9F2N8EU;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "com.titus.CoupleSpace-Watch-App-Watch-AppUITests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = watchos;
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 4;
+				TEST_TARGET_NAME = "CoupleSpace Watch App Watch App";
+				VALIDATE_PRODUCT = YES;
+				WATCHOS_DEPLOYMENT_TARGET = 26.5;
+			};
+			name = Release;
+		};
 		75C55BD330199E4C00BD923C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -578,6 +962,33 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		754C798E30205F16003388B5 /* Build configuration list for PBXNativeTarget "CoupleSpace Watch App Watch App" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				754C798830205F16003388B5 /* Debug */,
+				754C798930205F16003388B5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		754C798F30205F16003388B5 /* Build configuration list for PBXNativeTarget "CoupleSpace Watch App Watch AppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				754C798A30205F16003388B5 /* Debug */,
+				754C798B30205F16003388B5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		754C799030205F16003388B5 /* Build configuration list for PBXNativeTarget "CoupleSpace Watch App Watch AppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				754C798C30205F16003388B5 /* Debug */,
+				754C798D30205F16003388B5 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		75C55BAD30199E4A00BD923C /* Build configuration list for PBXProject "CoupleSpace" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
