@@ -1,0 +1,51 @@
+---
+title: CoupleSpace 產品文件索引
+status: active
+last_updated: 2026-08-04
+---
+
+# CoupleSpace 產品文件
+
+本目錄是 CoupleSpace 的產品規劃 SSOT（Single Source of Truth）。目前以 iPhone 首版為主要範圍；尚未確認的技術方案不會在此假設為既定事實。
+
+## 快速摘要
+
+- **產品定位：** 給忙碌情侶維持生活互動、分享日常並保持連結的私人共同空間。
+- **核心承諾：** 再忙，也能每天留一點位置給彼此。
+- **品牌延伸句：** 把零碎日常，慢慢變成我們的生活。
+- **品牌氣質：** 80% 溫柔成熟的共同生活，20% 可愛療癒感。
+- **核心功能名稱：** `Moment・此刻`。
+- **產品邊界：** 聊天承接日常，Moment 保存值得留下的此刻，共同時間線累積兩人的生活。
+- **開發基準：** 14 週完成 iPhone TestFlight 候選版，再進行四週種子驗證。
+
+## 建議閱讀順序
+
+1. [產品願景與定位](product/01-vision-and-positioning.md)
+2. [目標客群與使用需求](product/02-target-audience-and-jobs.md)
+3. [核心體驗與資訊架構](product/03-experience-and-information-architecture.md)
+4. [iPhone 首版範圍](product/04-iphone-mvp-scope.md)
+5. [商業模式與市場成長](product/05-business-and-growth.md)
+6. [成功指標與驗證計畫](product/06-metrics-and-validation.md)
+7. [第一版開發路線圖](operations/01-v1-development-roadmap.md)
+8. [產品決策紀錄](decisions/product-decisions.md)
+
+## 文件維護原則
+
+- 已確認的產品決策，以[產品決策紀錄](decisions/product-decisions.md)為準。
+- 各主題文件負責解釋決策的脈絡、行為與範圍，不重複建立另一套互相衝突的規則。
+- 未有證據的數字應標示為「假設」或「測試區間」，不可描述成已驗證結果。
+- 新增功能前，先確認它屬於核心循環、首版支援能力或未來擴充。
+- 技術架構、資料模型、API、設計系統與研究紀錄，未來應建立獨立子目錄，不混入產品定位文件。
+
+## 目錄結構與未來擴充
+
+```text
+docs/
+├── README.md
+├── product/       # 產品定位、體驗、MVP、商業與指標
+├── decisions/     # 已確認決策與變更原因
+├── operations/    # 第一版路線圖、TestFlight、發布與事件處理
+├── architecture/  # 系統架構、同步、資料與安全
+├── design/        # 視覺、元件、文案與互動規範
+└── research/      # 使用者訪談、競品研究與實驗結果
+```
