@@ -10,7 +10,7 @@ last_updated: 2026-08-05
 
 W1 不先完成正式產品架構。先以最小真機 spike 驗證最大未知數，再依結果接受或否決候選方案。
 
-目前第一候選為 Apple 原生 CloudKit Sharing；替代候選為具備伺服器端身分、關係範圍授權、Realtime、物件儲存與推播 worker 的受管後端。替代候選只保留為比較基準，尚未建立外部專案或加入 SDK。
+目前並行驗證 Apple 原生 CloudKit Sharing，以及具備伺服器端身分、關係範圍授權、Realtime、物件儲存與推播 worker 的 Supabase。兩者都仍是 provisional 候選；必須完成各自尚缺的真機、弱網、資料生命週期與通知證據後，才進行正式架構決策。
 
 ## 候選方案狀態
 
@@ -189,10 +189,46 @@ Supabase Apple provider 已啟用，`com.titus.CoupleSpace` 的 App capability�
 
 此結果通過兩個正確 member 的雲端 RPC、RLS select／insert 與前景重啟恢復允許路徑。第三身分不可見、closing 後拒絕寫入與雙份 personal archive 的雲端行為仍只有本機 pgTAP 證據，不能由本次雙身分成功推論為已完成。
 
+### Supabase Realtime spike
+
+W1 Swift client 已加入 relationship-scoped `shared_items` insert 訂閱。訂閱只以 relationship UUID 作伺服器端 filter；收到事件後不直接信任或顯示 payload，而是重新執行既有 RLS select 取得最新 marker。登出、找不到有效 relationship 或手動停止時會移除 channel，避免下一個身分沿用前一個訂閱。
+
+新增 migration `202608050003_w1_shared_items_realtime.sql`，以可重複執行的條件將 `public.shared_items` 加入 `supabase_realtime` publication。新增 pgTAP assertion 驗證 publication membership；本機三份測試共 29 個案例通過，`public` schema lint 無錯誤，iPhone Simulator unsigned `build-for-testing` 通過。
+
+取得明確授權後已將 migration 部署至雲端。原始 push 在顯示套用成功後未自行結束，於遠端 migration history 已確認 local／remote 都有 `202608050003` 後中止 CLI 收尾程序；後續單一連線 dry-run 回報遠端已是最新狀態，`db lint --linked --schema public` 無錯誤。雙裝置免手動重新整理的實際事件傳遞尚未驗證，因此 Realtime 閘門仍為待實測。
+
+### 2026-08-05 雲端 Realtime 實測證據
+
+沿用真機 A 與 iPhone 17 Pro Simulator B 的兩個 Apple 身分及 relationship `201d2338…`。兩端都載入狀態 `active`、成員 `2/2` 並啟動 relationship-scoped Realtime：
+
+- A 寫入新的 marker 後，B 未按重新整理便收到事件，重新執行 RLS select 並顯示新 marker。
+- B 寫入另一個 marker 後，A 同樣未按重新整理便收到事件並顯示新 marker。
+- 截圖顯示狀態「收到 Realtime 變更，已重新讀取 RLS 資料」；未記錄完整 marker、user ID 或其他 payload。
+
+此結果通過同一 active relationship 內兩個正確 member 的雙向 Realtime insert 通知，以及事件後重新讀取 RLS 資料的 client 行為。斷線重連、背景喚醒與第三身分無法訂閱仍未由本次成功推論為通過。
+
+### Supabase Storage 私有照片 spike
+
+新增 migration `202608050004_w1_private_photo_storage.sql`，建立非公開 bucket `couplespace-w1-photos`，單檔限制 5 MiB 且只接受 JPEG。物件路徑固定為 `relationship UUID/client UUID.jpg`，不保存原始檔名；只有 active relationship member 可讀，只有上傳者可刪，第三身分不可讀寫，relationship 進入 `closing` 後禁止新增照片。
+
+Swift W1 client 沿用既有最長邊 1,600 px、JPEG quality 0.8 的裝置端重新編碼，先上傳 Storage，再以相同 client UUID 寫入 `shared_items` photo metadata；若 metadata 寫入失敗會嘗試刪除 orphan object。另一端由 RLS 取得最新 photo client UUID，再從私有 bucket 下載，不使用 public URL。
+
+本機四份 pgTAP 共 39 個案例通過，包含 bucket privacy／大小、兩位 member 讀取、第三人拒絕、非上傳者不可刪、closing 禁止上傳與上傳者可刪；刪除測試使用 Storage API 同等的 `storage.allow_delete_query` 受控旗標，未停用 Supabase 的直接刪除保護 trigger。iPhone Simulator unsigned `build-for-testing` 通過。migration 已部署至雲端；遠端 migration history 顯示本機與遠端 `202608050001`～`202608050004` 一致，後續 dry-run 回報資料庫已是最新狀態，linked `public` schema lint 無錯誤。CLI 在套用 `004` 後未自行返回，經 migration history 確認成功後中止等待程序。
+
+### 2026-08-05 雲端 Storage 跨裝置實測證據
+
+沿用同一 active relationship 內的真機 A 與 iPhone 17 Pro Simulator B，以及各自的 Apple 身分：
+
+- A 上傳私有測試照片後，B 手動重新整理 Supabase Storage 照片並成功顯示該照片。
+- B 上傳另一張私有測試照片後，A 手動重新整理並成功顯示該照片。
+- 截圖顯示私有照片上傳成功狀態、照片預覽與重新整理操作；未記錄 Storage object path、完整 relationship ID 或 user ID。
+
+此結果通過同一 active relationship 內兩位 member 的私有照片雙向上傳、metadata RLS 查詢與 private bucket 下載。自動即時更新、第三身分的雲端拒絕、closing／archive、弱網與刪除一致性仍未由本次成功推論為通過。
+
 ## W1 尚未關閉
 
 - CloudKit Sharing 的兩支真實 iPhone、兩個 Apple ID 雙向證據。
-- 以雲端 Supabase 測試專案驗證第三身分拒絕、closing／personal archive、Realtime 與 Storage；兩個 Apple 身分的 Auth、pairing 與 active relationship RLS 雙向 marker 已通過。
+- 以雲端 Supabase 測試專案驗證第三身分拒絕與 closing／personal archive；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件及 Storage 私有照片雙向上傳／讀取已通過。
 - 照片弱網、離線重試、大圖與方向組合、保存期限及刪除一致性實測。
 - 推播接收者、背景同步與鎖定畫面隱私真機實測。
 - 最終登入、同步、聊天、照片、推播與資料生命週期架構決策。

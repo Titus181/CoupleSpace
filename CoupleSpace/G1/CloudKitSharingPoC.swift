@@ -315,13 +315,13 @@ private enum PoCError: LocalizedError {
     }
 }
 
-private struct PreparedPhotoAssets {
+struct PreparedPhotoAssets {
     let fullData: Data
     let thumbnailData: Data
     let preview: UIImage
 }
 
-private enum PhotoAssetProcessor {
+enum PhotoAssetProcessor {
     static func prepare(_ data: Data) throws -> PreparedPhotoAssets {
         guard let source = UIImage(data: data) else {
             throw PoCError.invalidPhotoData

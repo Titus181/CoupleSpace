@@ -10,6 +10,7 @@ struct G1TechnicalSpikeView: View {
 #if os(iOS)
     @StateObject private var model = CloudKitSharingPoC.shared
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var supabaseSelectedPhoto: PhotosPickerItem?
     @State private var pairingInvitationInput = ""
 #endif
 
@@ -80,6 +81,37 @@ struct G1TechnicalSpikeView: View {
                         Button("重新整理 RLS 狀態") {
                             Task { await pairingModel.refresh() }
                         }
+
+                        LabeledContent("Realtime", value: pairingModel.realtimeStatus)
+                        if pairingModel.isRealtimeActive {
+                            Button("停止 Realtime") {
+                                Task { await pairingModel.stopRealtime() }
+                            }
+                        } else {
+                            Button("啟動 Realtime 驗證") {
+                                Task { await pairingModel.startRealtime() }
+                            }
+                        }
+                    }
+
+                    Section("Supabase Storage 私有照片") {
+                        Text(pairingModel.storageStatus)
+
+                        if let data = pairingModel.storagePhotoData,
+                           let image = UIImage(data: data) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .scaledToFit()
+                                .frame(maxHeight: 220)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        }
+
+                        PhotosPicker(selection: $supabaseSelectedPhoto, matching: .images) {
+                            Label("選擇並上傳私有測試照片", systemImage: "lock.photo")
+                        }
+                        Button("重新整理 Supabase Storage 照片") {
+                            Task { await pairingModel.refreshStoragePhoto() }
+                        }
                     }
                 }
 
@@ -140,7 +172,7 @@ struct G1TechnicalSpikeView: View {
                 if isSignedIn {
                     Task { await pairingModel.refresh() }
                 } else {
-                    pairingModel.reset()
+                    Task { await pairingModel.clearSession() }
                 }
             }
             .sheet(isPresented: $model.isShowingSharingController) {
@@ -160,6 +192,22 @@ struct G1TechnicalSpikeView: View {
                         await model.uploadPhoto(data)
                     } catch {
                         model.reportPhotoSelectionFailure(error)
+                    }
+                }
+            }
+            .onChange(of: supabaseSelectedPhoto) { _, item in
+                guard let item else { return }
+                Task {
+                    defer { supabaseSelectedPhoto = nil }
+                    do {
+                        guard let data = try await item.loadTransferable(type: Data.self) else {
+                            pairingModel.reportStoragePhotoSelectionFailure(nil)
+                            return
+                        }
+                        let prepared = try PhotoAssetProcessor.prepare(data)
+                        await pairingModel.uploadStoragePhoto(prepared.fullData)
+                    } catch {
+                        pairingModel.reportStoragePhotoSelectionFailure(error)
                     }
                 }
             }

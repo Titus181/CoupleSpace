@@ -1,7 +1,7 @@
 ---
 title: 第一版開發路線圖
 status: active
-last_updated: 2026-08-04
+last_updated: 2026-08-05
 ---
 
 # 第一版開發路線圖
@@ -80,7 +80,7 @@ last_updated: 2026-08-04
 
 ## W1 必須關閉的技術閘門
 
-目前狀態為 `in_progress`。第一個 CloudKit Sharing 真機 spike、純邏輯驗證範圍與人工證據清單記錄於 [W1 技術驗證紀錄](02-w1-technical-validation.md)；尚未取得兩支真機／兩個 Apple ID 證據，因此 G1 與 M0 尚未通過。
+目前狀態為 `in_progress`。CloudKit Sharing 已由真機 A＋Simulator B 完成跨 Apple ID 分享、雙向標記、照片與重啟恢復；Supabase 已由同兩個 Apple 身分完成 Auth、pairing、active relationship RLS 雙向寫入、Realtime 雙向事件，以及私有 Storage 照片的雙向上傳與手動重新整理讀取。兩支真實 iPhone、資料生命週期、弱網與推播證據仍未完成，因此 G1 與 M0 尚未通過。詳細證據記錄於 [W1 技術驗證紀錄](02-w1-technical-validation.md)。
 
 以下項目尚未決定，不得在規劃中默認某一實作方式：
 
