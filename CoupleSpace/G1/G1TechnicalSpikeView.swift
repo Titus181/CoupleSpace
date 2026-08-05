@@ -12,6 +12,8 @@ struct G1TechnicalSpikeView: View {
     @State private var selectedPhoto: PhotosPickerItem?
     @State private var supabaseSelectedPhoto: PhotosPickerItem?
     @State private var pairingInvitationInput = ""
+    @State private var isConfirmingBeginUnpairing = false
+    @State private var isConfirmingPersonalArchive = false
 #endif
 
     init(supabaseClient: SupabaseClient) {
@@ -113,6 +115,31 @@ struct G1TechnicalSpikeView: View {
                             Task { await pairingModel.refreshStoragePhoto() }
                         }
                     }
+
+                    Section("Supabase 資料生命週期 A1") {
+                        Text(pairingModel.lifecycleStatus)
+                        LabeledContent(
+                            "個人封存項目",
+                            value: "\(pairingModel.personalArchiveItemCount)"
+                        )
+
+                        Button("1. 開始解除配對（closing）", role: .destructive) {
+                            isConfirmingBeginUnpairing = true
+                        }
+                        .disabled(pairingModel.relationshipStatus != "active")
+
+                        Button("2. 建立個人唯讀封存") {
+                            isConfirmingPersonalArchive = true
+                        }
+                        .disabled(
+                            pairingModel.relationshipStatus != "closing"
+                                || pairingModel.hasPersonalArchive
+                        )
+
+                        Button("重新整理資料生命週期狀態") {
+                            Task { await pairingModel.refresh() }
+                        }
+                    }
                 }
 
                 Section("CloudKit Sharing 狀態") {
@@ -210,6 +237,30 @@ struct G1TechnicalSpikeView: View {
                         pairingModel.reportStoragePhotoSelectionFailure(error)
                     }
                 }
+            }
+            .confirmationDialog(
+                "開始解除配對？",
+                isPresented: $isConfirmingBeginUnpairing,
+                titleVisibility: .visible
+            ) {
+                Button("開始解除配對", role: .destructive) {
+                    Task { await pairingModel.beginUnpairing() }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("關係會進入 closing，雙方將不能再新增共同內容。此 W1 測試關係無法恢復為 active。")
+            }
+            .confirmationDialog(
+                "建立個人封存？",
+                isPresented: $isConfirmingPersonalArchive,
+                titleVisibility: .visible
+            ) {
+                Button("建立個人唯讀封存") {
+                    Task { await pairingModel.sealPersonalArchive() }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("伺服器會複製目前共同項目到只屬於你的封存；雙方都完成後，關係會轉為 archived。")
             }
         }
 #else

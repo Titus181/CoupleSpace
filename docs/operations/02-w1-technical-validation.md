@@ -187,7 +187,7 @@ Supabase Apple provider 已啟用，`com.titus.CoupleSpace` 的 App capability�
 - B 寫入新的 RLS marker 後，A 重新整理能看到同一標記；A 再寫入另一標記後，B 重新整理也能看到對方標記。標記完整值未記錄。
 - 兩端強制結束 App 並重開後，Supabase session、同一 relationship 與 `2/2` membership 都能重新載入。
 
-此結果通過兩個正確 member 的雲端 RPC、RLS select／insert 與前景重啟恢復允許路徑。第三身分不可見、closing 後拒絕寫入與雙份 personal archive 的雲端行為仍只有本機 pgTAP 證據，不能由本次雙身分成功推論為已完成。
+此結果通過兩個正確 member 的雲端 RPC、RLS select／insert 與前景重啟恢復允許路徑。第三身分不可見仍只有本機 pgTAP 證據；closing 與雙份 personal archive 的後續雲端證據另記於下節。
 
 ### Supabase Realtime spike
 
@@ -225,10 +225,31 @@ Swift W1 client 沿用既有最長邊 1,600 px、JPEG quality 0.8 的裝置端�
 
 此結果通過同一 active relationship 內兩位 member 的私有照片雙向上傳、metadata RLS 查詢與 private bucket 下載。自動即時更新、第三身分的雲端拒絕、closing／archive、弱網與刪除一致性仍未由本次成功推論為通過。
 
+### Supabase closing／personal archive client spike
+
+W1 Swift client 已接上既有 `begin_unpairing` 與 `seal_personal_archive` RPC，並加入明確的不可逆確認：第一步將測試關係轉為 `closing`，第二步由每位成員各自建立 owner-isolated personal archive。client 可顯示自己的封存項目數；雙方完成後，active relationship RLS 不再回傳共同關係，畫面只保留本人可讀的封存狀態。
+
+原 Storage policy 只允許 active member 讀取，會讓 relationship archived 後的 personal archive 留下 photo metadata 卻失去實際照片。新增 migration `202608050005_w1_archived_photo_access.sql`，讓持有該 relationship personal archive 的 owner 繼續唯讀原私有照片；刪除自己的 archive 只撤銷自己的存取，另一方仍可讀。Swift client 會由 personal archive item 的 client UUID 讀取照片，仍不使用 public URL。
+
+此變更不決定正式解除配對 UX、匯出格式、保存期限、兩份 archive 都刪除後的 object GC 或刪除排程。本機 reset 已成功套用 `001`～`005`；五份 pgTAP 共 46 個案例通過，新增案例涵蓋 archived 後雙方可讀照片、第三人不可讀，以及單方刪除 archive 不影響另一方；`public` schema lint 無錯誤，iPhone Simulator unsigned build 通過。
+
+取得明確授權後已將 `005` 部署至雲端測試專案。遠端 migration history 顯示本機與遠端 `202608050001`～`202608050005` 一致，後續 dry-run 回報資料庫已是最新狀態，linked `public` schema lint 無錯誤。CLI 在套用後未自行返回，經 migration history 確認成功後中止等待程序。
+
+### 2026-08-05 雲端 closing／personal archive 實測證據
+
+沿用同一 relationship 內的真機 A 與 iPhone 17 Pro Simulator B，以及各自的 Apple 身分：
+
+- A 開始解除配對後，兩端重啟 App 都顯示 relationship `closing`。
+- closing 狀態下，兩端分別嘗試新增 marker 與上傳照片，四個共同資料寫入操作都被伺服器拒絕。
+- 兩端各自完成 personal archive 並重新整理後，各自顯示封存項目數 `8`。
+- 兩端都能從自己的 personal archive 讀取原私有照片；未記錄照片內容、object path、完整 relationship ID 或 user ID。
+
+此結果通過 closing 後禁止共同 marker／photo 寫入、雙方各自建立 owner-isolated archive，以及 archived photo 的雙方唯讀允許路徑。第三身分的雲端拒絕、刪除單方 archive 後的實際存取撤銷、雙方都刪除後的 object GC 與兩支真實 iPhone 仍未由本次成功推論為通過。
+
 ## W1 尚未關閉
 
 - CloudKit Sharing 的兩支真實 iPhone、兩個 Apple ID 雙向證據。
-- 以雲端 Supabase 測試專案驗證第三身分拒絕與 closing／personal archive；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件及 Storage 私有照片雙向上傳／讀取已通過。
+- 以雲端 Supabase 測試專案驗證第三身分拒絕與 archive 刪除／GC；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件、Storage 私有照片雙向讀寫，以及 closing／雙份 personal archive／archived photo 已通過。
 - 照片弱網、離線重試、大圖與方向組合、保存期限及刪除一致性實測。
 - 推播接收者、背景同步與鎖定畫面隱私真機實測。
 - 最終登入、同步、聊天、照片、推播與資料生命週期架構決策。

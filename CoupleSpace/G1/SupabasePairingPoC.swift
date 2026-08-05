@@ -20,6 +20,14 @@ private struct AcceptPairingInvitationParameters: Encodable {
     }
 }
 
+private struct RelationshipLifecycleParameters: Encodable {
+    let targetRelationshipID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+    }
+}
+
 private struct RelationshipRow: Decodable {
     let id: UUID
     let status: String
@@ -63,6 +71,26 @@ private struct SharedItemInsert: Encodable {
     }
 }
 
+private struct PersonalArchiveRow: Decodable {
+    let id: UUID
+    let relationshipID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case relationshipID = "relationship_id"
+    }
+}
+
+private struct PersonalArchiveItemRow: Decodable {
+    let clientID: UUID
+    let itemKind: String
+
+    enum CodingKeys: String, CodingKey {
+        case clientID = "client_id"
+        case itemKind = "item_kind"
+    }
+}
+
 @MainActor
 final class SupabasePairingPoC: ObservableObject {
     @Published private(set) var status = "登入後可開始雙身分 RLS 驗證"
@@ -74,6 +102,10 @@ final class SupabasePairingPoC: ObservableObject {
     @Published private(set) var isRealtimeActive = false
     @Published private(set) var storageStatus = "尚無 Supabase Storage 照片"
     @Published private(set) var storagePhotoData: Data?
+    @Published private(set) var relationshipStatus: String?
+    @Published private(set) var lifecycleStatus = "尚未開始資料生命週期驗證"
+    @Published private(set) var personalArchiveItemCount = 0
+    @Published private(set) var hasPersonalArchive = false
 
     private let client: SupabaseClient
     private var relationshipID: UUID?
@@ -155,6 +187,51 @@ final class SupabasePairingPoC: ObservableObject {
             await refresh()
         } catch {
             reportFailure("寫入標記", error: error)
+        }
+    }
+
+    func beginUnpairing() async {
+        guard let relationshipID else {
+            lifecycleStatus = "請先建立或加入測試關係"
+            return
+        }
+
+        do {
+            try await client
+                .rpc(
+                    "begin_unpairing",
+                    params: RelationshipLifecycleParameters(
+                        targetRelationshipID: relationshipID
+                    )
+                )
+                .execute()
+            lifecycleStatus = "關係已進入 closing；共同內容應停止新增"
+            await refresh()
+        } catch {
+            lifecycleStatus = "開始解除配對失敗：\(error.localizedDescription)"
+        }
+    }
+
+    func sealPersonalArchive() async {
+        guard let relationshipID else {
+            lifecycleStatus = "請先建立或加入測試關係"
+            return
+        }
+
+        do {
+            let archiveID: UUID = try await client
+                .rpc(
+                    "seal_personal_archive",
+                    params: RelationshipLifecycleParameters(
+                        targetRelationshipID: relationshipID
+                    )
+                )
+                .execute()
+                .value
+            lifecycleStatus = "個人唯讀封存已建立：\(shortToken(archiveID))"
+            await refresh()
+        } catch {
+            lifecycleStatus = "建立個人封存失敗：\(error.localizedDescription)"
         }
     }
 
@@ -310,11 +387,32 @@ final class SupabasePairingPoC: ObservableObject {
 
             guard let relationship = relationships.first else {
                 await stopRealtime()
-                reset(message: "尚未建立 Supabase 測試關係")
+                let archives: [PersonalArchiveRow] = try await client
+                    .from("personal_archives")
+                    .select("id,relationship_id")
+                    .order("sealed_at", ascending: false)
+                    .limit(1)
+                    .execute()
+                    .value
+
+                if let archive = archives.first {
+                    relationshipID = nil
+                    relationshipStatus = "archived"
+                    relationshipToken = shortToken(archive.relationshipID)
+                    memberCount = 0
+                    latestMarkerToken = "共同資料已封存"
+                    storagePhotoData = nil
+                    storageStatus = "關係封存後不再讀取共同 Storage"
+                    try await refreshPersonalArchive(archive)
+                    status = "關係已封存；目前只能讀取自己的個人封存"
+                } else {
+                    reset(message: "尚未建立 Supabase 測試關係")
+                }
                 return
             }
 
             relationshipID = relationship.id
+            relationshipStatus = relationship.status
             relationshipToken = shortToken(relationship.id)
 
             let memberships: [RelationshipMembershipRow] = try await client
@@ -335,6 +433,23 @@ final class SupabasePairingPoC: ObservableObject {
                 .execute()
                 .value
             latestMarkerToken = markers.first.map { shortToken($0.clientID) } ?? "尚無標記"
+            let archives: [PersonalArchiveRow] = try await client
+                .from("personal_archives")
+                .select("id,relationship_id")
+                .eq("relationship_id", value: relationship.id)
+                .limit(1)
+                .execute()
+                .value
+            if let archive = archives.first {
+                try await refreshPersonalArchive(archive)
+                lifecycleStatus = "個人封存已建立；等待另一方完成"
+            } else {
+                hasPersonalArchive = false
+                personalArchiveItemCount = 0
+                lifecycleStatus = relationship.status == "closing"
+                    ? "關係 closing；請建立自己的個人封存"
+                    : "關係 active；尚未開始解除配對"
+            }
             status = "關係：\(relationship.status)，成員：\(memberCount)/2"
         } catch {
             reportFailure("重新整理 RLS 狀態", error: error)
@@ -348,13 +463,48 @@ final class SupabasePairingPoC: ObservableObject {
 
     private func reset(message: String = "登入後可開始雙身分 RLS 驗證") {
         relationshipID = nil
+        relationshipStatus = nil
         relationshipToken = "尚無關係"
         memberCount = 0
         latestMarkerToken = "尚無標記"
         invitationToken = nil
         storagePhotoData = nil
         storageStatus = "尚無 Supabase Storage 照片"
+        lifecycleStatus = "尚未開始資料生命週期驗證"
+        personalArchiveItemCount = 0
+        hasPersonalArchive = false
         status = message
+    }
+
+    private func refreshPersonalArchive(_ archive: PersonalArchiveRow) async throws {
+        let items: [PersonalArchiveItemRow] = try await client
+            .from("personal_archive_items")
+            .select("client_id,item_kind")
+            .eq("archive_id", value: archive.id)
+            .order("created_at", ascending: false)
+            .execute()
+            .value
+        hasPersonalArchive = true
+        personalArchiveItemCount = items.count
+
+        guard let photo = items.first(where: { $0.itemKind == "photo" }) else {
+            storagePhotoData = nil
+            storageStatus = "個人封存尚無照片"
+            return
+        }
+
+        do {
+            storagePhotoData = try await client.storage
+                .from("couplespace-w1-photos")
+                .download(path: storagePath(
+                    relationshipID: archive.relationshipID,
+                    clientID: photo.clientID
+                ))
+            storageStatus = "已從個人封存讀取私有照片"
+        } catch {
+            storagePhotoData = nil
+            storageStatus = "個人封存照片讀取失敗：\(error.localizedDescription)"
+        }
     }
 
     private func receiveRealtimeChange() async {
