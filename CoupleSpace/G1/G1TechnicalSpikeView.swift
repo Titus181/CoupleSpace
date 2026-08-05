@@ -14,6 +14,7 @@ struct G1TechnicalSpikeView: View {
     @State private var pairingInvitationInput = ""
     @State private var isConfirmingBeginUnpairing = false
     @State private var isConfirmingPersonalArchive = false
+    @State private var isConfirmingArchiveDeletion = false
 #endif
 
     init(supabaseClient: SupabaseClient) {
@@ -139,6 +140,20 @@ struct G1TechnicalSpikeView: View {
                         Button("重新整理資料生命週期狀態") {
                             Task { await pairingModel.refresh() }
                         }
+
+                        Button("3. 刪除自己的個人封存", role: .destructive) {
+                            isConfirmingArchiveDeletion = true
+                        }
+                        .disabled(
+                            pairingModel.relationshipStatus != "archived"
+                                || !pairingModel.hasPersonalArchive
+                        )
+
+                        if pairingModel.relationshipStatus == "archived" {
+                            Button("重試照片清理佇列") {
+                                Task { await pairingModel.retryStorageGC() }
+                            }
+                        }
                     }
                 }
 
@@ -261,6 +276,18 @@ struct G1TechnicalSpikeView: View {
                 Button("取消", role: .cancel) {}
             } message: {
                 Text("伺服器會複製目前共同項目到只屬於你的封存；雙方都完成後，關係會轉為 archived。")
+            }
+            .confirmationDialog(
+                "永久刪除自己的個人封存？",
+                isPresented: $isConfirmingArchiveDeletion,
+                titleVisibility: .visible
+            ) {
+                Button("永久刪除個人封存", role: .destructive) {
+                    Task { await pairingModel.deletePersonalArchive() }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("此操作無法復原。另一方的封存不受影響；若這是最後一份封存，伺服器會清理共同照片。")
             }
         }
 #else

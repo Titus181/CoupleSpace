@@ -193,8 +193,12 @@ select results_eq(
 );
 
 select lives_ok(
-    $$ delete from public.personal_archives $$,
-    'first participant can delete their personal archive'
+    $$
+        select public.delete_personal_archive(
+            (select id from public.personal_archives limit 1)
+        )
+    $$,
+    'first participant can delete their personal archive through the RPC'
 );
 
 reset role;

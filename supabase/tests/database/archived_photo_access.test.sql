@@ -78,8 +78,12 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000031', true);
 
 select lives_ok(
-    $$ delete from public.personal_archives $$,
-    'first owner can delete only their personal archive'
+    $$
+        select public.delete_personal_archive(
+            (select id from public.personal_archives limit 1)
+        )
+    $$,
+    'first owner can delete only their personal archive through the RPC'
 );
 
 select results_eq(

@@ -20,7 +20,7 @@ W1 不先完成正式產品架構。先以最小真機 spike 驗證最大未知�
 | 同步與聊天 | `CKSyncEngine` 同步 private/shared database；client UUID 形成穩定 record name；server timestamp 加 UUID 決定順序；本機 outbox 顯示傳送狀態 | 純規則測試已建立；共享標記雙向寫入與重啟恢復初步通過，離線與正式同步模型未驗證 | 離線重送造成遺失、重複、不可預期錯序，或 shared database 行為不足以可靠恢復 |
 | 照片 | 顯示圖與縮圖先在裝置端重新編碼，再以 `CKAsset` 儲存；正式尺寸、品質、容量與保存期依實測決定 | 真機 A＋Simulator B、兩個 Apple ID 的雙向讀寫與重啟恢復初步通過；兩支真機、弱網與刪除待驗證 | 成本、速度、弱網恢復或刪除一致性不可接受 |
 | 推播 | database subscription 只作變更提示；抓取並驗證 relationship/recipient 後才更新 App；使用者可見內容固定為泛化文案 | 資料最小化規則測試已建立；真機未驗證 | 錯發、鎖定畫面洩漏內容，或背景同步不足以支撐體驗 |
-| 所有權與解除配對 | 雙方各自保留不可被對方剝奪的唯讀封存 | A1 政策已確認；Supabase 本機 RLS／封存測試、雲端 schema、Swift client、兩個 Apple 身分 Auth 與雙身分 pairing／RLS 通過；雲端第三身分拒絕與封存實測待驗證 | 無法提供雙方可理解、可稽核且不依賴單方善意的保留、匯出、刪除結果 |
+| 所有權與解除配對 | 雙方各自保留不可被對方剝奪的唯讀封存 | A1 政策已確認；Supabase closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過；匯出仍待驗證 | 無法提供雙方可理解、可稽核且不依賴單方善意的保留、匯出、刪除結果 |
 | 有意義雙向互動 | 同一 relationship、同一 interaction object 內，兩個目前伴侶各至少有一次符合資格的 contribution；只記 ID、種類與時間，不記內容 | 純規則測試已建立 | 事件無法區分單方重複操作與真正雙方參與，或需要記錄私密內容 |
 
 ## CloudKit Sharing PoC
@@ -246,10 +246,26 @@ W1 Swift client 已接上既有 `begin_unpairing` 與 `seal_personal_archive` RP
 
 此結果通過 closing 後禁止共同 marker／photo 寫入、雙方各自建立 owner-isolated archive，以及 archived photo 的雙方唯讀允許路徑。第三身分的雲端拒絕、刪除單方 archive 後的實際存取撤銷、雙方都刪除後的 object GC 與兩支真實 iPhone 仍未由本次成功推論為通過。
 
+### 個人封存刪除與 Storage GC spike
+
+新增 migration `202608050006_w1_personal_archive_deletion_queue.sql`，取消 App 對 `personal_archives` 的直接 `DELETE` 權限，改由 `delete_personal_archive` RPC 驗證 owner 與 relationship 已為 `archived`。第一位 owner 刪除只移除自己的封存；最後一份封存刪除後，伺服器才依既有 deterministic path 將 photo object 排入受保護的 `storage_gc_queue`。這可避免 direct delete 繞過最後引用判斷，也避免任一方在解除配對尚未完成時先刪除封存而卡住流程。
+
+實際物件由 `process-storage-gc` Edge Function 使用 Storage API 刪除，不直接刪除 `storage.objects` metadata。這遵循 Supabase 的 [Delete objects](https://supabase.com/docs/guides/storage/management/delete-objects) 與 [Storage schema](https://supabase.com/docs/guides/storage/schema/design) 指引，避免留下仍佔空間的 orphan object。worker 不接受 client 指定 path，只讀取伺服器建立的 queue；登入驗證失敗即拒絕，Storage API 失敗則保留工作並增加 attempt count。App 在 archived 狀態提供明確的清理重試入口，避免刪除封存成功但短暫網路錯誤後無法再次觸發 worker。
+
+本機 reset 已成功套用 `001`～`006`；六份 pgTAP 共 57 個案例全數通過，涵蓋 direct delete 禁止、closing 階段禁止刪除、第三人拒絕、第一份封存刪除不排入 GC、最後一份封存刪除只排入 photo path，以及另一方封存不受影響。`public` schema lint 無錯誤，Edge Function runtime 成功 bundle／啟動，iPhone Simulator unsigned build 通過。
+
+取得明確授權後，已將 `006` 套用至雲端測試專案並部署 `process-storage-gc` version 1。遠端 migration history 顯示本機與遠端 `001`～`006` 一致，後續 dry-run 回報資料庫已是最新狀態，linked `public` schema lint 無錯誤；Function 清單顯示狀態 `ACTIVE` 且 `verify_jwt = true`，不含 authorization header 的請求回傳 HTTP 401。CLI 套用 migration 後曾出現 migration catalog cache 連線逾時警告，但 migration history、dry-run 與 lint 均成功，因此沒有重複套用。
+
+部署完成當下尚未刪除雲端測試資料；破壞性驗證依序確認單方刪除後另一方仍可讀，再確認最後一方刪除後 object 與 queue 都被清除。
+
+第一階段雲端刪除實測已通過：真機 A 永久刪除自己的 personal archive 後，封存項目數歸零、封存照片消失，且 App 明確提示另一方不受影響；Simulator B 隨後重新整理仍顯示 `8` 個封存項目並可讀取原私人照片。此結果證明 owner-only archive delete 與「尚有另一份封存時不排入照片 GC」的允許路徑。最後一份封存刪除及實際 object／queue 清理仍待驗證。
+
+第二階段雲端刪除實測亦通過：Simulator B 永久刪除最後一份 personal archive 後，封存項目數歸零、照片消失，App 顯示最後一份照片已完成清理。隨後以 Management API 執行只讀聚合查詢，確認 `storage_gc_queue = 0`、`personal_archives = 0`，且私有 bucket `couplespace-w1-photos` 的 `storage.objects = 0`。因此本次測試同時證明 queue 已完成、兩份個人封存都已刪除，以及實際 Storage object 已移除，不只是在 App 端失去讀取權限。
+
 ## W1 尚未關閉
 
 - CloudKit Sharing 的兩支真實 iPhone、兩個 Apple ID 雙向證據。
-- 以雲端 Supabase 測試專案驗證第三身分拒絕與 archive 刪除／GC；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件、Storage 私有照片雙向讀寫，以及 closing／雙份 personal archive／archived photo 已通過。
+- 以雲端 Supabase 測試專案驗證第三身分拒絕；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件、Storage 私有照片雙向讀寫、closing／雙份 personal archive／archived photo，以及 owner-only archive delete／最後引用 object GC 已通過。
 - 照片弱網、離線重試、大圖與方向組合、保存期限及刪除一致性實測。
 - 推播接收者、背景同步與鎖定畫面隱私真機實測。
 - 最終登入、同步、聊天、照片、推播與資料生命週期架構決策。

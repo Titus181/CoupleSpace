@@ -109,6 +109,7 @@ final class SupabasePairingPoC: ObservableObject {
 
     private let client: SupabaseClient
     private var relationshipID: UUID?
+    private var personalArchiveID: UUID?
     private var realtimeChannel: RealtimeChannelV2?
     private var realtimeTask: Task<Void, Never>?
 
@@ -232,6 +233,50 @@ final class SupabasePairingPoC: ObservableObject {
             await refresh()
         } catch {
             lifecycleStatus = "建立個人封存失敗：\(error.localizedDescription)"
+        }
+    }
+
+    func deletePersonalArchive() async {
+        guard let personalArchiveID else {
+            lifecycleStatus = "目前沒有可刪除的個人封存"
+            return
+        }
+
+        do {
+            let queuedObjectCount: Int = try await client
+                .rpc(
+                    "delete_personal_archive",
+                    params: ["target_archive_id": personalArchiveID]
+                )
+                .execute()
+                .value
+
+            self.personalArchiveID = nil
+            hasPersonalArchive = false
+            personalArchiveItemCount = 0
+            storagePhotoData = nil
+
+            if queuedObjectCount > 0 {
+                do {
+                    try await client.functions.invoke("process-storage-gc")
+                    lifecycleStatus = "個人封存已刪除；最後一份照片已完成清理"
+                } catch {
+                    lifecycleStatus = "個人封存已刪除；照片已排入清理佇列，稍後可重試"
+                }
+            } else {
+                lifecycleStatus = "個人封存已刪除；另一方封存與照片不受影響"
+            }
+        } catch {
+            lifecycleStatus = "刪除個人封存失敗：\(error.localizedDescription)"
+        }
+    }
+
+    func retryStorageGC() async {
+        do {
+            try await client.functions.invoke("process-storage-gc")
+            lifecycleStatus = "照片清理佇列已處理"
+        } catch {
+            lifecycleStatus = "照片清理重試失敗：\(error.localizedDescription)"
         }
     }
 
@@ -444,6 +489,7 @@ final class SupabasePairingPoC: ObservableObject {
                 try await refreshPersonalArchive(archive)
                 lifecycleStatus = "個人封存已建立；等待另一方完成"
             } else {
+                personalArchiveID = nil
                 hasPersonalArchive = false
                 personalArchiveItemCount = 0
                 lifecycleStatus = relationship.status == "closing"
@@ -473,6 +519,7 @@ final class SupabasePairingPoC: ObservableObject {
         lifecycleStatus = "尚未開始資料生命週期驗證"
         personalArchiveItemCount = 0
         hasPersonalArchive = false
+        personalArchiveID = nil
         status = message
     }
 
@@ -484,6 +531,7 @@ final class SupabasePairingPoC: ObservableObject {
             .order("created_at", ascending: false)
             .execute()
             .value
+        personalArchiveID = archive.id
         hasPersonalArchive = true
         personalArchiveItemCount = items.count
 
