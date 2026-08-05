@@ -1,0 +1,1 @@
+-- W1 lifecycle spike creates isolated test data inside pgTAP transactions.

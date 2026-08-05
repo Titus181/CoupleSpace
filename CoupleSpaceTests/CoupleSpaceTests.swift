@@ -57,6 +57,44 @@ struct CoupleSpaceTests {
         ) == PhotoDimensions(width: 300, height: 200))
     }
 
+    @Test func unpairingRequiresBothIndependentArchives() {
+        let first = UUID()
+        let second = UUID()
+        let expected = Set([first, second])
+
+        #expect(!RelationshipArchivePolicy.canFinalizeUnpairing(
+            expectedParticipants: expected,
+            archivedParticipants: [first]
+        ))
+        #expect(RelationshipArchivePolicy.canFinalizeUnpairing(
+            expectedParticipants: expected,
+            archivedParticipants: expected
+        ))
+    }
+
+    @Test func closingRelationshipBlocksNewSharedContent() {
+        #expect(RelationshipArchivePolicy.canWriteSharedContent(in: .active))
+        #expect(!RelationshipArchivePolicy.canWriteSharedContent(in: .closing))
+        #expect(!RelationshipArchivePolicy.canWriteSharedContent(in: .archived))
+    }
+
+    @Test func eachParticipantControlsOnlyTheirPersonalArchive() {
+        let first = UUID()
+        let second = UUID()
+
+        #expect(RelationshipArchivePolicy.canManagePersonalArchive(
+            actorID: first,
+            archiveOwnerID: first
+        ))
+        #expect(!RelationshipArchivePolicy.canManagePersonalArchive(
+            actorID: first,
+            archiveOwnerID: second
+        ))
+        #expect(RelationshipArchivePolicy.personalArchiveDeletionTargets(
+            requestedBy: first
+        ) == [first])
+    }
+
     @Test func notificationEnvelopeDoesNotExposePrivateContent() {
         let envelope = PrivateNotificationEnvelope(
             relationshipID: UUID(),

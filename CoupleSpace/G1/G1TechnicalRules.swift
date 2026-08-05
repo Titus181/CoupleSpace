@@ -75,6 +75,33 @@ struct PhotoAssetPolicy {
     }
 }
 
+enum RelationshipLifecyclePhase: Equatable {
+    case active
+    case closing
+    case archived
+}
+
+struct RelationshipArchivePolicy {
+    static func canWriteSharedContent(in phase: RelationshipLifecyclePhase) -> Bool {
+        phase == .active
+    }
+
+    static func canFinalizeUnpairing(
+        expectedParticipants: Set<UUID>,
+        archivedParticipants: Set<UUID>
+    ) -> Bool {
+        expectedParticipants.count == 2 && archivedParticipants == expectedParticipants
+    }
+
+    static func canManagePersonalArchive(actorID: UUID, archiveOwnerID: UUID) -> Bool {
+        actorID == archiveOwnerID
+    }
+
+    static func personalArchiveDeletionTargets(requestedBy participantID: UUID) -> Set<UUID> {
+        [participantID]
+    }
+}
+
 struct MessageOrderingValue: Equatable {
     let id: UUID
     let clientCreatedAt: Date
