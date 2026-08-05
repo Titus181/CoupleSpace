@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		754C798630205F16003388B5 /* CoupleSpace Watch App Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 754C796630205EEC003388B5 /* CoupleSpace Watch App Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A15000013040000100000001 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = A15000023040000100000001 /* Supabase */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -63,6 +64,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A15000033040000100000001 /* CoupleSpace.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/CoupleSpace.xcconfig; sourceTree = "<group>"; };
 		754C796630205EEC003388B5 /* CoupleSpace Watch App Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "CoupleSpace Watch App Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		754C797230205F16003388B5 /* CoupleSpace Watch App Watch AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "CoupleSpace Watch App Watch AppTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		754C797C30205F16003388B5 /* CoupleSpace Watch App Watch AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "CoupleSpace Watch App Watch AppUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -130,6 +132,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A15000013040000100000001 /* Supabase in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -153,6 +156,7 @@
 		75C55BA930199E4A00BD923C = {
 			isa = PBXGroup;
 			children = (
+				A15000033040000100000001 /* CoupleSpace.xcconfig */,
 				75C55BB430199E4A00BD923C /* CoupleSpace */,
 				75C55BC430199E4C00BD923C /* CoupleSpaceTests */,
 				75C55BCE30199E4C00BD923C /* CoupleSpaceUITests */,
@@ -266,6 +270,7 @@
 			);
 			name = CoupleSpace;
 			packageProductDependencies = (
+				A15000023040000100000001 /* Supabase */,
 			);
 			productName = CoupleSpace;
 			productReference = 75C55BB230199E4A00BD923C /* CoupleSpace.app */;
@@ -365,6 +370,9 @@
 			);
 			mainGroup = 75C55BA930199E4A00BD923C;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A15000043040000100000001 /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 75C55BB330199E4A00BD923C /* Products */;
 			projectDirPath = "";
@@ -776,6 +784,7 @@
 		};
 		75C55BD630199E4C00BD923C /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A15000033040000100000001 /* CoupleSpace.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -822,6 +831,7 @@
 		};
 		75C55BD730199E4C00BD923C /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A15000033040000100000001 /* CoupleSpace.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -1035,6 +1045,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A15000043040000100000001 /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.46.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A15000023040000100000001 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A15000043040000100000001 /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 75C55BAA30199E4A00BD923C /* Project object */;
 }

@@ -135,7 +135,7 @@ Supabase 的 [Swift 入門](https://supabase.com/docs/guides/getting-started/tut
 
 ### 2026-08-05 Supabase schema spike 證據
 
-以 Supabase CLI 2.111.0 與 local stack 建立可重現 migration，先在本機驗證後再部署至專用雲端測試專案；尚未加入 Swift SDK。schema 只保存 relationship、membership、無內容 shared item 與 personal archive metadata，不含真實訊息、照片或帳號資料。
+以 Supabase CLI 2.111.0 與 local stack 建立可重現 migration，先在本機驗證後再部署至專用雲端測試專案。schema 只保存 relationship、membership、無內容 shared item 與 personal archive metadata，不含真實訊息、照片或帳號資料。
 
 - `supabase db reset --local` 成功從 migration 重建資料庫。
 - `supabase test db` 的 16 個 pgTAP 案例全部通過：兩位 member 可見、第三人拒絕、一人不可同時加入兩段未封存關係、active 可寫、closing 禁止新內容、單方封存不足以結束、雙方封存後才 archived、伺服器複製共同項目、個人封存只能本人讀取與刪除、刪除一方封存不影響另一方。
@@ -144,13 +144,17 @@ Supabase 的 [Swift 入門](https://supabase.com/docs/guides/getting-started/tut
 - 遠端 dry-run 只列出 `202608050001_w1_relationship_archive_spike.sql`；取得明確授權後已套用至雲端測試專案。
 - 遠端 migration 歷史顯示 local／remote 皆為 `202608050001`，再次 dry-run 回報資料庫已是最新狀態。
 - `supabase db lint --linked` 對遠端 `extensions` 與 `public` schema 回報沒有 schema error。
+- iPhone target 已加入官方 `supabase-swift` package，解析並鎖定至 2.54.1；App composition 可從 bundle 設定建立 `SupabaseClient`。
+- Project URL 可提交；publishable key 只由被 Git 忽略的 `Config/Secrets.xcconfig` 注入。repo 只保存無值的 include 與範本，產出的 App plist 已確認具有正確 URL 與 publishable-key 類型值，驗證過程未輸出 key。
+- iPhone Simulator build 與 `build-for-testing` 通過，新增的設定允許／拒絕測試可編譯。`xcodebuild test` 在 Simulator runner 啟動階段約 90 秒無測試事件後人工中止，因此不可標示 runtime unit tests 通過。
+- 人工啟動 iPhone 17 Pro Simulator 可正常顯示 W1 畫面。Supabase 2.x 首次啟動曾輸出 initial-session 遷移警告；client 明確啟用 `emitLocalSessionAsInitialSession` 新行為後重新啟動，Console 已確認無相同警告。正式登入狀態仍須在使用 session 前檢查 `isExpired`。
 
-此結果驗證本機 Postgres constraint、transaction、security-definer function 與 RLS 測試，以及相同 migration 可部署至雲端且通過 schema lint；尚未驗證雲端 Supabase Auth／Sign in with Apple、兩個身分的實際 RLS 行為、Swift SDK、Realtime、Storage、弱網、Push、服務中斷或計費。因此 Supabase 仍是 provisional 候選，不能標示為正式架構。
+此結果驗證本機 Postgres constraint、transaction、security-definer function 與 RLS 測試、相同 migration 的雲端部署與 schema lint，以及 Swift SDK 的設定、連結與建置；尚未驗證雲端 Supabase Auth／Sign in with Apple、兩個身分的實際 RLS 行為、Realtime、Storage、弱網、Push、服務中斷或計費。因此 Supabase 仍是 provisional 候選，不能標示為正式架構。
 
 ## W1 尚未關閉
 
 - CloudKit Sharing 的兩支真實 iPhone、兩個 Apple ID 雙向證據。
-- 以雲端 Supabase 測試專案與兩個測試身分驗證 Auth、RLS、Realtime、Storage，再進行 Swift SDK 最小整合；schema 部署已完成。
+- 以雲端 Supabase 測試專案與兩個測試身分驗證 Auth、RLS、Realtime、Storage；schema 部署與 Swift SDK client 建置已完成。
 - 照片弱網、離線重試、大圖與方向組合、保存期限及刪除一致性實測。
 - 推播接收者、背景同步與鎖定畫面隱私真機實測。
 - 最終登入、同步、聊天、照片、推播與資料生命週期架構決策。

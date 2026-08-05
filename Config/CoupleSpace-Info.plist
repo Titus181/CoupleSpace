@@ -4,5 +4,9 @@
 <dict>
 	<key>CKSharingSupported</key>
 	<true/>
+	<key>SupabasePublishableKey</key>
+	<string>$(SUPABASE_PUBLISHABLE_KEY)</string>
+	<key>SupabaseURL</key>
+	<string>https://lyqiyuzuwbqorwmhkfed.supabase.co</string>
 </dict>
 </plist>

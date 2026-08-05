@@ -5,3 +5,6 @@ xcuserdata/
 # Local build output
 DerivedData/
 .build/
+
+# Local service configuration
+/Config/Secrets.xcconfig

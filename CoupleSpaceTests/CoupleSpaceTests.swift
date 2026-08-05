@@ -12,6 +12,25 @@ import Testing
 @MainActor
 struct CoupleSpaceTests {
 
+    @Test func supabaseConfigurationAcceptsProjectURLAndPublishableKey() throws {
+        let configuration = try SupabaseConfiguration(values: [
+            "SupabaseURL": "https://example.supabase.co",
+            "SupabasePublishableKey": "sb_publishable_test",
+        ])
+
+        #expect(configuration.url == URL(string: "https://example.supabase.co"))
+        #expect(configuration.publishableKey == "sb_publishable_test")
+    }
+
+    @Test func supabaseConfigurationRejectsUnresolvedBuildSetting() {
+        #expect(throws: SupabaseConfigurationError.invalidPublishableKey) {
+            try SupabaseConfiguration(values: [
+                "SupabaseURL": "https://example.supabase.co",
+                "SupabasePublishableKey": "$(SUPABASE_PUBLISHABLE_KEY)",
+            ])
+        }
+    }
+
     @Test func retryKeepsOneStableMessageIdentity() {
         let id = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
 
