@@ -31,6 +31,26 @@ struct CoupleSpaceTests {
         }
     }
 
+    @Test func expiredSupabaseSessionIsNotAcceptedAsSignedIn() {
+        #expect(SupabaseSessionPolicy.decision(
+            hasSession: false,
+            isExpired: false
+        ) == .signedOut)
+        #expect(SupabaseSessionPolicy.decision(
+            hasSession: true,
+            isExpired: true
+        ) == .refreshingExpiredSession)
+        #expect(SupabaseSessionPolicy.decision(
+            hasSession: true,
+            isExpired: false
+        ) == .signedIn)
+    }
+
+    @Test func appleSignInNonceHashIsDeterministic() {
+        #expect(AppleSignInNonce.hash("CoupleSpace-W1") ==
+                "3639d0045c9968cfb5182d7a7591aa078f00a411a40ca34943d9b3339358bf15")
+    }
+
     @Test func retryKeepsOneStableMessageIdentity() {
         let id = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
 

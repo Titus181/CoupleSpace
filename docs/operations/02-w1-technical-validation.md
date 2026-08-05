@@ -20,7 +20,7 @@ W1 不先完成正式產品架構。先以最小真機 spike 驗證最大未知�
 | 同步與聊天 | `CKSyncEngine` 同步 private/shared database；client UUID 形成穩定 record name；server timestamp 加 UUID 決定順序；本機 outbox 顯示傳送狀態 | 純規則測試已建立；共享標記雙向寫入與重啟恢復初步通過，離線與正式同步模型未驗證 | 離線重送造成遺失、重複、不可預期錯序，或 shared database 行為不足以可靠恢復 |
 | 照片 | 顯示圖與縮圖先在裝置端重新編碼，再以 `CKAsset` 儲存；正式尺寸、品質、容量與保存期依實測決定 | 真機 A＋Simulator B、兩個 Apple ID 的雙向讀寫與重啟恢復初步通過；兩支真機、弱網與刪除待驗證 | 成本、速度、弱網恢復或刪除一致性不可接受 |
 | 推播 | database subscription 只作變更提示；抓取並驗證 relationship/recipient 後才更新 App；使用者可見內容固定為泛化文案 | 資料最小化規則測試已建立；真機未驗證 | 錯發、鎖定畫面洩漏內容，或背景同步不足以支撐體驗 |
-| 所有權與解除配對 | 雙方各自保留不可被對方剝奪的唯讀封存 | A1 政策已確認；Supabase 本機 RLS／封存測試與雲端 schema 部署通過，Auth、雲端雙身分行為及 Swift 整合待驗證 | 無法提供雙方可理解、可稽核且不依賴單方善意的保留、匯出、刪除結果 |
+| 所有權與解除配對 | 雙方各自保留不可被對方剝奪的唯讀封存 | A1 政策已確認；Supabase 本機 RLS／封存測試、雲端 schema、Swift client、兩個 Apple 身分 Auth 與雙身分 pairing／RLS 通過；雲端第三身分拒絕與封存實測待驗證 | 無法提供雙方可理解、可稽核且不依賴單方善意的保留、匯出、刪除結果 |
 | 有意義雙向互動 | 同一 relationship、同一 interaction object 內，兩個目前伴侶各至少有一次符合資格的 contribution；只記 ID、種類與時間，不記內容 | 純規則測試已建立 | 事件無法區分單方重複操作與真正雙方參與，或需要記錄私密內容 |
 
 ## CloudKit Sharing PoC
@@ -149,12 +149,50 @@ Supabase 的 [Swift 入門](https://supabase.com/docs/guides/getting-started/tut
 - iPhone Simulator build 與 `build-for-testing` 通過，新增的設定允許／拒絕測試可編譯。`xcodebuild test` 在 Simulator runner 啟動階段約 90 秒無測試事件後人工中止，因此不可標示 runtime unit tests 通過。
 - 人工啟動 iPhone 17 Pro Simulator 可正常顯示 W1 畫面。Supabase 2.x 首次啟動曾輸出 initial-session 遷移警告；client 明確啟用 `emitLocalSessionAsInitialSession` 新行為後重新啟動，Console 已確認無相同警告。正式登入狀態仍須在使用 session 前檢查 `isExpired`。
 
-此結果驗證本機 Postgres constraint、transaction、security-definer function 與 RLS 測試、相同 migration 的雲端部署與 schema lint，以及 Swift SDK 的設定、連結與建置；尚未驗證雲端 Supabase Auth／Sign in with Apple、兩個身分的實際 RLS 行為、Realtime、Storage、弱網、Push、服務中斷或計費。因此 Supabase 仍是 provisional 候選，不能標示為正式架構。
+此階段先驗證本機 Postgres constraint、transaction、security-definer function 與 RLS 測試、相同 migration 的雲端部署與 schema lint，以及 Swift SDK 的設定、連結與建置；後續 Apple Auth 與雙身分 RLS 實測證據記於下節。Realtime、Storage、弱網、Push、服務中斷與計費仍未驗證，因此 Supabase 仍是 provisional 候選，不能標示為正式架構。
+
+### Supabase Apple Auth 原生 spike
+
+W1 App 已加入原生 `SignInWithAppleButton`，每次請求建立隨機 nonce，傳給 Apple 前以 SHA-256 雜湊，取得 Apple identity token 後再將原始 nonce 與 token 交給 Supabase `signInWithIdToken`。App 不要求姓名或 Email scope，不記錄 token、nonce、完整 Apple ID 或完整 Supabase user ID；畫面只顯示 Supabase UUID 的前八碼供雙身分實測辨識。
+
+登入狀態由 Supabase `authStateChanges` 恢復。local session 若已過期，只顯示「等待更新」而不視為登入成功；有效 session 才開放登出操作。純規則測試涵蓋無 session、過期 session 與有效 session，並以固定輸入驗證 nonce 雜湊；iPhone Simulator unsigned build 與 `build-for-testing` 均通過。沿用先前 runner 卡住的限制，本輪未宣稱 runtime unit tests 通過。
+
+### 2026-08-05 Apple Auth 實測證據
+
+Supabase Apple provider 已啟用，`com.titus.CoupleSpace` 的 App capability、entitlement 與 development signing 生效。以先前的 iPhone 17 Pro Simulator（iOS 26.5）Apple ID B 與真實 iPhone Apple ID A 分別登入：
+
+- Simulator B 建立 Supabase user `260fd271…`；第一次 Apple authorization 在取得 credential 前回報 `AKAuthenticationError -7071`／`AuthorizationError 1000`，第二次成功。強制結束 App 後 session 正常恢復，登出正常。
+- 真機 A 建立不同的 Supabase user `6b60ac09…`；首次登入成功，強制結束 App 後 session 正常恢復，登出正常。
+- App 畫面與紀錄只保留 UUID 前八碼，未保存完整 user ID、Apple ID、Email、identity token、nonce 或 Supabase session token。
+
+兩個原生 Apple 身分、token 交換、session 恢復與登出均通過，因此 Apple Auth 閘門關閉。Simulator 首次錯誤列為非阻塞的 Apple authorization 暫時失敗；若真機重現或失敗率升高才重新開啟調查。
+
+### Pairing invitation RPC
+
+新增 migration `202608050002_w1_pairing_invitation_rpc.sql`，提供兩個只授權給 `authenticated` 的 security-definer RPC：建立／取回一小時有效的 invitation，以及由另一個身分接受 invitation。Invitation table 不授權 App 直接讀取；建立者不能接受自己的 token，已使用或過期 token 使用相同拒絕結果，並沿用每人最多一段 active relationship 的唯一約束。建立者在 invitation 尚未接受時可再次取得同一 token；若已過期則由伺服器輪替，避免 App 重啟後永久失去 pairing 能力。
+
+- 本機資料庫由兩個 migrations 完整重建成功。
+- 新舊兩份 pgTAP 共 28 個案例全部通過；新增案例包含 invitation 建立／恢復、本人拒絕、第二人接受、第三人不能重用、已配對者不能建立第二段關係、過期拒絕與建立者輪替過期 token。
+- `supabase db lint --local` 對 `extensions`／`public` 無 schema error。
+- Swift W1 畫面已加入 invitation 建立／分享／接受、relationship member count、RLS marker 寫入與重新整理；iPhone Simulator `build-for-testing` 通過。
+- 遠端 dry-run 只列出 `202608050002_w1_pairing_invitation_rpc.sql`，未包含 seed、role 或其他 migration；取得明確授權後已部署。
+- 遠端 migration history 顯示 local／remote 皆有 `202608050001` 與 `202608050002`；部署後再次 dry-run 回報已是最新狀態，`db lint --linked` 對 `extensions`／`public` 無 schema error。
+- 推送完成後，CLI 的 migration catalog 快取輔助步驟曾發生 2.5 秒連線逾時；migration history、再次 dry-run 與 linked lint 三項獨立驗證均成功，因此不影響部署結果。
+
+### 2026-08-05 雲端雙身分 pairing／RLS 實測證據
+
+沿用真機 A 的 Supabase user `6b60ac09…` 與 Simulator B 的 `260fd271…`，只建立無內容的 W1 測試 relationship 與 marker metadata；未保存 invitation token 或完整 user ID。
+
+- A 建立一次性 invitation，B 成功接受；兩端重新整理後都看到 relationship `201d2338…`、狀態 `active` 與成員 `2/2`。
+- B 寫入新的 RLS marker 後，A 重新整理能看到同一標記；A 再寫入另一標記後，B 重新整理也能看到對方標記。標記完整值未記錄。
+- 兩端強制結束 App 並重開後，Supabase session、同一 relationship 與 `2/2` membership 都能重新載入。
+
+此結果通過兩個正確 member 的雲端 RPC、RLS select／insert 與前景重啟恢復允許路徑。第三身分不可見、closing 後拒絕寫入與雙份 personal archive 的雲端行為仍只有本機 pgTAP 證據，不能由本次雙身分成功推論為已完成。
 
 ## W1 尚未關閉
 
 - CloudKit Sharing 的兩支真實 iPhone、兩個 Apple ID 雙向證據。
-- 以雲端 Supabase 測試專案與兩個測試身分驗證 Auth、RLS、Realtime、Storage；schema 部署與 Swift SDK client 建置已完成。
+- 以雲端 Supabase 測試專案驗證第三身分拒絕、closing／personal archive、Realtime 與 Storage；兩個 Apple 身分的 Auth、pairing 與 active relationship RLS 雙向 marker 已通過。
 - 照片弱網、離線重試、大圖與方向組合、保存期限及刪除一致性實測。
 - 推播接收者、背景同步與鎖定畫面隱私真機實測。
 - 最終登入、同步、聊天、照片、推播與資料生命週期架構決策。

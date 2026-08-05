@@ -64,13 +64,13 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		A15000033040000100000001 /* CoupleSpace.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/CoupleSpace.xcconfig; sourceTree = "<group>"; };
 		754C796630205EEC003388B5 /* CoupleSpace Watch App Watch App.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "CoupleSpace Watch App Watch App.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		754C797230205F16003388B5 /* CoupleSpace Watch App Watch AppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "CoupleSpace Watch App Watch AppTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		754C797C30205F16003388B5 /* CoupleSpace Watch App Watch AppUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "CoupleSpace Watch App Watch AppUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		75C55BB230199E4A00BD923C /* CoupleSpace.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CoupleSpace.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		75C55BC130199E4C00BD923C /* CoupleSpaceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CoupleSpaceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		75C55BCB30199E4C00BD923C /* CoupleSpaceUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CoupleSpaceUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A15000033040000100000001 /* Config/CoupleSpace.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Config/CoupleSpace.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -156,7 +156,7 @@
 		75C55BA930199E4A00BD923C = {
 			isa = PBXGroup;
 			children = (
-				A15000033040000100000001 /* CoupleSpace.xcconfig */,
+				A15000033040000100000001 /* Config/CoupleSpace.xcconfig */,
 				75C55BB430199E4A00BD923C /* CoupleSpace */,
 				75C55BC430199E4C00BD923C /* CoupleSpaceTests */,
 				75C55BCE30199E4C00BD923C /* CoupleSpaceUITests */,
@@ -346,6 +346,9 @@
 					75C55BB130199E4A00BD923C = {
 						CreatedOnToolsVersion = 26.6;
 						SystemCapabilities = {
+							com.apple.SignInWithApple = {
+								enabled = 1;
+							};
 							com.apple.iCloud = {
 								enabled = 1;
 							};
@@ -784,7 +787,7 @@
 		};
 		75C55BD630199E4C00BD923C /* Debug */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = A15000033040000100000001 /* CoupleSpace.xcconfig */;
+			baseConfigurationReference = A15000033040000100000001 /* Config/CoupleSpace.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -797,7 +800,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Config/CoupleSpace-Info.plist;
+				INFOPLIST_FILE = "Config/CoupleSpace-Info.plist";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;
@@ -831,7 +834,7 @@
 		};
 		75C55BD730199E4C00BD923C /* Release */ = {
 			isa = XCBuildConfiguration;
-			baseConfigurationReference = A15000033040000100000001 /* CoupleSpace.xcconfig */;
+			baseConfigurationReference = A15000033040000100000001 /* Config/CoupleSpace.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -844,7 +847,7 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Config/CoupleSpace-Info.plist;
+				INFOPLIST_FILE = "Config/CoupleSpace-Info.plist";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents[sdk=iphoneos*]" = YES;

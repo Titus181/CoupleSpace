@@ -156,3 +156,16 @@ struct MeaningfulInteractionRule {
         return Set(contributions.map(\.participantID)) == expectedParticipants
     }
 }
+
+enum SupabaseSessionDecision: Equatable {
+    case signedOut
+    case refreshingExpiredSession
+    case signedIn
+}
+
+struct SupabaseSessionPolicy {
+    static func decision(hasSession: Bool, isExpired: Bool) -> SupabaseSessionDecision {
+        guard hasSession else { return .signedOut }
+        return isExpired ? .refreshingExpiredSession : .signedIn
+    }
+}

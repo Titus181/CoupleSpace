@@ -48,4 +48,14 @@ enum CoupleSpaceSupabaseClient {
             )
         )
     }
+
+    static var preview: SupabaseClient {
+        SupabaseClient(
+            supabaseURL: URL(string: "https://example.supabase.co")!,
+            supabaseKey: "sb_publishable_preview",
+            options: SupabaseClientOptions(
+                auth: .init(emitLocalSessionAsInitialSession: true)
+            )
+        )
+    }
 }

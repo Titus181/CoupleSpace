@@ -6,13 +6,16 @@
 //
 
 import SwiftUI
+import Supabase
 
 struct ContentView: View {
+    let supabaseClient: SupabaseClient
+
     var body: some View {
-        G1TechnicalSpikeView()
+        G1TechnicalSpikeView(supabaseClient: supabaseClient)
     }
 }
 
 #Preview {
-    ContentView()
+    ContentView(supabaseClient: CoupleSpaceSupabaseClient.preview)
 }

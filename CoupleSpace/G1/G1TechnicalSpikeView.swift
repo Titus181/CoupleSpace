@@ -1,16 +1,88 @@
+import AuthenticationServices
 import PhotosUI
+import Supabase
 import SwiftUI
 
 struct G1TechnicalSpikeView: View {
+    @StateObject private var authModel: SupabaseAppleAuthPoC
+    @StateObject private var pairingModel: SupabasePairingPoC
+
 #if os(iOS)
     @StateObject private var model = CloudKitSharingPoC.shared
     @State private var selectedPhoto: PhotosPickerItem?
+    @State private var pairingInvitationInput = ""
 #endif
+
+    init(supabaseClient: SupabaseClient) {
+        _authModel = StateObject(
+            wrappedValue: SupabaseAppleAuthPoC(client: supabaseClient)
+        )
+        _pairingModel = StateObject(
+            wrappedValue: SupabasePairingPoC(client: supabaseClient)
+        )
+    }
 
     var body: some View {
 #if os(iOS)
         NavigationStack {
             Form {
+                Section("Supabase Apple Auth") {
+                    Text(authModel.status)
+                    LabeledContent("使用者代碼", value: authModel.userToken)
+
+                    if authModel.isSignedIn {
+                        Button("登出 Supabase", role: .destructive) {
+                            Task { await authModel.signOut() }
+                        }
+                    } else {
+                        SignInWithAppleButton(
+                            .signIn,
+                            onRequest: authModel.prepare,
+                            onCompletion: authModel.complete
+                        )
+                        .signInWithAppleButtonStyle(.black)
+                        .frame(height: 44)
+                    }
+                }
+
+                if authModel.isSignedIn {
+                    Section("Supabase 雙身分 RLS") {
+                        Text(pairingModel.status)
+                        LabeledContent("關係代碼", value: pairingModel.relationshipToken)
+                        LabeledContent("成員", value: "\(pairingModel.memberCount)/2")
+                        LabeledContent("最新標記", value: pairingModel.latestMarkerToken)
+
+                        Button("A. 建立或取回 pairing invitation") {
+                            Task { await pairingModel.createInvitation() }
+                        }
+
+                        if let invitationToken = pairingModel.invitationToken {
+                            Text(invitationToken)
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                            ShareLink(item: invitationToken) {
+                                Label("分享 invitation token", systemImage: "square.and.arrow.up")
+                            }
+                        }
+
+                        TextField("B. 貼上 invitation token", text: $pairingInvitationInput)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Button("B. 接受 pairing invitation") {
+                            Task {
+                                await pairingModel.acceptInvitation(pairingInvitationInput)
+                            }
+                        }
+
+                        Button("寫入新的 RLS 驗證標記") {
+                            Task { await pairingModel.writeMarker() }
+                        }
+                        Button("重新整理 RLS 狀態") {
+                            Task { await pairingModel.refresh() }
+                        }
+                    }
+                }
+
                 Section("CloudKit Sharing 狀態") {
                     Text(model.status)
                     LabeledContent("最新標記", value: model.lastWriterToken)
@@ -61,6 +133,16 @@ struct G1TechnicalSpikeView: View {
                 }
             }
             .navigationTitle("W1 技術驗證")
+            .task {
+                await authModel.observeAuthState()
+            }
+            .onChange(of: authModel.isSignedIn) { _, isSignedIn in
+                if isSignedIn {
+                    Task { await pairingModel.refresh() }
+                } else {
+                    pairingModel.reset()
+                }
+            }
             .sheet(isPresented: $model.isShowingSharingController) {
                 if let share = model.share {
                     CloudSharingController(share: share)
@@ -93,5 +175,5 @@ struct G1TechnicalSpikeView: View {
 }
 
 #Preview {
-    G1TechnicalSpikeView()
+    G1TechnicalSpikeView(supabaseClient: CoupleSpaceSupabaseClient.preview)
 }
