@@ -14,10 +14,12 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 
 ## 目前狀態
 
-- `CoupleSpace/` 已以 W1 CloudKit Sharing spike 作為啟動畫面；預設 SwiftData `Item` 型別仍保留但未接入 App，尚未形成產品領域架構。
-- `CoupleSpaceTests/` 與 `CoupleSpaceUITests/` 目前只有 Xcode 範例測試。
+- TD-001 已接受 Supabase 作為 iPhone v1 使用者身分、伴侶關係、共同資料與資料生命週期的唯一遠端系統紀錄；正式 App 不使用 CloudKit／Supabase 雙寫。
+- `CoupleSpace/` 目前仍是 W1 技術驗證畫面；預設 SwiftData `Item` 型別保留但未接入 App，尚未形成產品領域架構。
+- `CoupleSpaceTests/` 已涵蓋設定、登入 session、nonce、冪等／FIFO outbox、排序、照片政策、解除配對與通知隱私等純規則；`CoupleSpaceUITests/` 仍只有 Xcode 範例測試。
 - `CoupleSpace Watch App Watch App/` 是獨立的初始 Watch 畫面，不是 iPhone MVP 必要流程。
-- 帳號、跨 Apple ID 分享、即時聊天、照片、推播與資料所有權仍屬 G1 技術閘門，不得在此假定實作方案。
+- Supabase Auth、pairing／RLS、Realtime 變更提示、私有 Storage、marker FIFO outbox、單張照片持久 outbox 及資料生命週期已完成 W1 最小 spike；正式訊息模型、照片政策、匯出與推播細節仍屬 G1 技術閘門。
+- CloudKit Sharing PoC 保留為實驗紀錄，不再是 v1 共同資料候選。
 
 ## 目標責任邊界
 
@@ -29,7 +31,7 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 | Presentation | SwiftUI 畫面、navigation、顯示狀態與使用者意圖 |
 | Application | 配對、Moment、共同約定、約定討論、聊天、收藏、時間線與資料生命週期 use cases |
 | Domain | 不依賴 UI／儲存框架的規則、狀態轉換與 value types |
-| Data／Services | 儲存、同步、帳號、通知、照片、分析與其 adapter |
+| Data／Services | Supabase Auth、Postgres／RLS／RPC、Realtime 變更提示、私有 Storage、持久 outbox、通知與分析 adapter |
 | Platform | Face ID、background、push、Apple framework integration |
 
 ## 依賴方向
@@ -49,12 +51,12 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 → Application use case
 → Domain 規則與授權判斷
 → Data／Platform adapter
-→ 本機或核准的遠端服務
+→ 本機 outbox 或 Supabase 受管服務
 → 明確的成功／失敗／重試狀態
 → Presentation
 ```
 
-任何遠端寫入都必須帶有可驗證的使用者與伴侶關係範圍。同步事件與重試需要穩定識別，避免重複建立訊息或 Moment；正式模型由 G1 實測後決定。
+任何遠端寫入都必須由 Supabase session 與伺服器端伴侶關係範圍驗證。Realtime 事件只作變更提示，client 必須重新經 RLS 讀取；同步事件與重試使用穩定 client UUID，避免重複建立訊息或 Moment。正式產品資料模型由後續垂直切片依已驗證的不變量最小化建立。
 
 ## 敏感資料邊界
 
@@ -81,4 +83,4 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 6. iPhone 核心流程不依賴 Watch 或非 MVP 平台。
 7. 未通過 G1 實測的外部技術選擇維持 provisional，不寫成既定事實。
 
-其中第 1–5 項的精確資料模型與伺服器 enforcement，必須在 G1 決策後補充並轉成 unit／integration／real-device regression gates。
+其中第 1–5 項由 Supabase constraint、RLS、RPC、私有 Storage 與受控 Edge Function 執行伺服器端 enforcement；精確產品資料模型仍須在後續垂直切片中補充，並轉成 unit／integration／real-device regression gates。

@@ -109,6 +109,141 @@ struct MarkerOutboxStore {
     }
 }
 
+struct PhotoOutboxEntry: Codable, Equatable {
+    let relationshipID: UUID
+    let clientID: UUID
+    var attemptCount: Int
+    let localFileName: String
+}
+
+enum PhotoOutboxStoreError: LocalizedError, Equatable {
+    case pendingPhotoExists
+    case invalidLocalFileName
+    case missingLocalFile
+
+    var errorDescription: String? {
+        switch self {
+        case .pendingPhotoExists:
+            "已有一張待送照片"
+        case .invalidLocalFileName:
+            "待送照片的本機檔名無效"
+        case .missingLocalFile:
+            "待送照片的本機檔案遺失"
+        }
+    }
+}
+
+struct PhotoOutboxStore {
+    private let defaults: UserDefaults
+    private let directoryURL: URL
+    private let fileManager: FileManager
+    private let keyPrefix = "couplespace.w1.photo-outbox."
+
+    init(
+        defaults: UserDefaults = .standard,
+        directoryURL: URL? = nil,
+        fileManager: FileManager = .default
+    ) {
+        self.defaults = defaults
+        self.fileManager = fileManager
+        self.directoryURL = directoryURL
+            ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+                .first
+                .map { $0.appendingPathComponent("W1PhotoOutbox", isDirectory: true) }
+            ?? fileManager.temporaryDirectory
+                .appendingPathComponent("W1PhotoOutbox", isDirectory: true)
+    }
+
+    func create(
+        jpegData: Data,
+        relationshipID: UUID,
+        clientID: UUID,
+        userID: UUID
+    ) throws -> PhotoOutboxEntry {
+        guard try load(userID: userID) == nil else {
+            throw PhotoOutboxStoreError.pendingPhotoExists
+        }
+
+        try fileManager.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: true
+        )
+        let entry = PhotoOutboxEntry(
+            relationshipID: relationshipID,
+            clientID: clientID,
+            attemptCount: 0,
+            localFileName: fileName(clientID: clientID)
+        )
+        let fileURL = try validatedFileURL(for: entry)
+        try jpegData.write(
+            to: fileURL,
+            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+        )
+
+        do {
+            defaults.set(try JSONEncoder().encode(entry), forKey: key(userID))
+        } catch {
+            try? fileManager.removeItem(at: fileURL)
+            throw error
+        }
+        return entry
+    }
+
+    func load(userID: UUID) throws -> PhotoOutboxEntry? {
+        guard let data = defaults.data(forKey: key(userID)) else { return nil }
+        let entry = try JSONDecoder().decode(PhotoOutboxEntry.self, from: data)
+        _ = try validatedFileURL(for: entry)
+        return entry
+    }
+
+    func beginAttempt(userID: UUID) throws -> PhotoOutboxEntry? {
+        guard var entry = try load(userID: userID) else { return nil }
+        entry.attemptCount += 1
+        defaults.set(try JSONEncoder().encode(entry), forKey: key(userID))
+        return entry
+    }
+
+    func data(for entry: PhotoOutboxEntry) throws -> Data {
+        let fileURL = try validatedFileURL(for: entry)
+        guard fileManager.fileExists(atPath: fileURL.path) else {
+            throw PhotoOutboxStoreError.missingLocalFile
+        }
+        return try Data(contentsOf: fileURL)
+    }
+
+    func clear(_ entry: PhotoOutboxEntry, userID: UUID) throws {
+        let fileURL = try validatedFileURL(for: entry)
+        if fileManager.fileExists(atPath: fileURL.path) {
+            try fileManager.removeItem(at: fileURL)
+        }
+        defaults.removeObject(forKey: key(userID))
+    }
+
+    private func key(_ userID: UUID) -> String {
+        keyPrefix + userID.uuidString.lowercased()
+    }
+
+    private func fileName(clientID: UUID) -> String {
+        clientID.uuidString.lowercased() + ".jpg"
+    }
+
+    private func validatedFileURL(for entry: PhotoOutboxEntry) throws -> URL {
+        guard entry.localFileName == fileName(clientID: entry.clientID) else {
+            throw PhotoOutboxStoreError.invalidLocalFileName
+        }
+        return directoryURL.appendingPathComponent(entry.localFileName, isDirectory: false)
+    }
+}
+
+struct PhotoOutboxLifecyclePolicy {
+    static func canBeginUnpairing(
+        hasPendingPhoto: Bool,
+        isSendingPhoto: Bool
+    ) -> Bool {
+        !hasPendingPhoto && !isSendingPhoto
+    }
+}
+
 struct PhotoDimensions: Equatable {
     let width: Int
     let height: Int

@@ -28,10 +28,12 @@ last_updated: 2026-08-06
 6. [成功指標與驗證計畫](product/06-metrics-and-validation.md)
 7. [第一版開發路線圖](operations/01-v1-development-roadmap.md)
 8. [產品決策紀錄](decisions/product-decisions.md)
+9. [技術決策紀錄](decisions/technical-decisions.md)
 
 ## 文件維護原則
 
 - 已確認的產品決策，以[產品決策紀錄](decisions/product-decisions.md)為準。
+- 技術候選、接受狀態與取代脈絡，以[技術決策紀錄](decisions/technical-decisions.md)為準。
 - 各主題文件負責解釋決策的脈絡、行為與範圍，不重複建立另一套互相衝突的規則。
 - 未有證據的數字應標示為「假設」或「測試區間」，不可描述成已驗證結果。
 - 新增功能前，先確認它屬於核心循環、首版支援能力或未來擴充。

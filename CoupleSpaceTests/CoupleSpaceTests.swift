@@ -142,6 +142,114 @@ struct CoupleSpaceTests {
         }
     }
 
+    @Test func photoOutboxPersistsDataAndAttemptAcrossStoreInstances() throws {
+        let suiteName = "PhotoOutboxStoreTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(suiteName, isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+
+        let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000071")!
+        let relationshipID = UUID(uuidString: "90000000-0000-0000-0000-000000000001")!
+        let clientID = UUID(uuidString: "92000000-0000-0000-0000-000000000001")!
+        let jpegData = Data([0xFF, 0xD8, 0xFF, 0xD9])
+        let firstStore = PhotoOutboxStore(defaults: defaults, directoryURL: directoryURL)
+
+        let created = try firstStore.create(
+            jpegData: jpegData,
+            relationshipID: relationshipID,
+            clientID: clientID,
+            userID: userID
+        )
+        #expect(created.attemptCount == 0)
+
+        let restoredStore = PhotoOutboxStore(defaults: defaults, directoryURL: directoryURL)
+        let attemptedEntry = try restoredStore.beginAttempt(userID: userID)
+        let sending = try #require(attemptedEntry)
+        #expect(sending.attemptCount == 1)
+        #expect(try restoredStore.data(for: sending) == jpegData)
+
+        try restoredStore.clear(sending, userID: userID)
+        #expect(try restoredStore.load(userID: userID) == nil)
+    }
+
+    @Test func photoOutboxDoesNotReplaceAnExistingPendingPhoto() throws {
+        let suiteName = "PhotoOutboxDuplicateTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(suiteName, isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+
+        let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000072")!
+        let relationshipID = UUID(uuidString: "90000000-0000-0000-0000-000000000001")!
+        let store = PhotoOutboxStore(defaults: defaults, directoryURL: directoryURL)
+        _ = try store.create(
+            jpegData: Data([1]),
+            relationshipID: relationshipID,
+            clientID: UUID(uuidString: "92000000-0000-0000-0000-000000000002")!,
+            userID: userID
+        )
+
+        #expect(throws: PhotoOutboxStoreError.pendingPhotoExists) {
+            try store.create(
+                jpegData: Data([2]),
+                relationshipID: relationshipID,
+                clientID: UUID(uuidString: "92000000-0000-0000-0000-000000000003")!,
+                userID: userID
+            )
+        }
+    }
+
+    @Test func photoOutboxReportsMissingLocalDataWithoutDiscardingMetadata() throws {
+        let suiteName = "PhotoOutboxMissingFileTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(suiteName, isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+
+        let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000073")!
+        let clientID = UUID(uuidString: "92000000-0000-0000-0000-000000000004")!
+        let store = PhotoOutboxStore(defaults: defaults, directoryURL: directoryURL)
+        let entry = try store.create(
+            jpegData: Data([1]),
+            relationshipID: UUID(uuidString: "90000000-0000-0000-0000-000000000001")!,
+            clientID: clientID,
+            userID: userID
+        )
+        try FileManager.default.removeItem(
+            at: directoryURL.appendingPathComponent(entry.localFileName)
+        )
+
+        #expect(throws: PhotoOutboxStoreError.missingLocalFile) {
+            try store.data(for: entry)
+        }
+        #expect(try store.load(userID: userID) == entry)
+    }
+
+    @Test func pendingOrSendingPhotoBlocksUnpairing() {
+        #expect(PhotoOutboxLifecyclePolicy.canBeginUnpairing(
+            hasPendingPhoto: false,
+            isSendingPhoto: false
+        ))
+        #expect(!PhotoOutboxLifecyclePolicy.canBeginUnpairing(
+            hasPendingPhoto: true,
+            isSendingPhoto: false
+        ))
+        #expect(!PhotoOutboxLifecyclePolicy.canBeginUnpairing(
+            hasPendingPhoto: false,
+            isSendingPhoto: true
+        ))
+    }
+
     @Test func serverTimestampAndIDProduceDeterministicOrder() {
         let sameServerDate = Date(timeIntervalSince1970: 100)
         let earlierID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!

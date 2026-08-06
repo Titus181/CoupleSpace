@@ -1,26 +1,26 @@
 ---
 title: W1 技術驗證紀錄
 status: in_progress
-last_updated: 2026-08-05
+last_updated: 2026-08-06
 ---
 
 # W1 技術驗證紀錄
 
 ## 本週決策方式
 
-W1 不先完成正式產品架構。先以最小真機 spike 驗證最大未知數，再依結果接受或否決候選方案。
+W1 不先完成正式產品功能。先以最小真機 spike 驗證最大未知數，再依結果接受或否決候選方案。
 
-目前並行驗證 Apple 原生 CloudKit Sharing，以及具備伺服器端身分、關係範圍授權、Realtime、物件儲存與推播 worker 的 Supabase。兩者都仍是 provisional 候選；必須完成各自尚缺的真機、弱網、資料生命週期與通知證據後，才進行正式架構決策。
+2026-08-06 已接受 TD-001：Supabase 是 iPhone v1 使用者身分、伴侶關係、共同資料與資料生命週期的唯一遠端系統紀錄；CloudKit Sharing 保留為實驗證據，不進行雙寫。照片政策、匯出、推播與必要真機證據仍未完成，因此 G1 與 M0 尚未通過。
 
 ## 候選方案狀態
 
-| 閘門 | CloudKit Sharing 假設 | 驗證狀態 | 否決條件 |
+| 閘門 | TD-001 已接受方向 | 驗證狀態 | 尚未關閉的風險 |
 | --- | --- | --- | --- |
-| 身分與配對 | 使用 iCloud 帳號接受私人 `CKShare`，一個 share 對應一段伴侶關係 | 真機 A＋Simulator B、兩個 Apple ID 初步通過；兩支真機待驗證 | 無法穩定接受、恢復或限制為正確兩人 |
-| 同步與聊天 | client UUID 形成穩定識別；server timestamp 加 UUID 決定順序；本機 outbox 顯示傳送狀態 | Supabase 單筆及三筆 FIFO marker metadata outbox 的真機 A＋Simulator B 斷網、重啟、重連、順序與雙裝置一致性通過；正式訊息內容、較長佇列與弱網仍待驗證 | 離線重送造成遺失、重複、不可預期錯序，或同步行為不足以可靠恢復 |
-| 照片 | 顯示圖與縮圖先在裝置端重新編碼，再以 `CKAsset` 儲存；正式尺寸、品質、容量與保存期依實測決定 | 真機 A＋Simulator B、兩個 Apple ID 的雙向讀寫與重啟恢復初步通過；兩支真機、弱網與刪除待驗證 | 成本、速度、弱網恢復或刪除一致性不可接受 |
-| 推播 | database subscription 只作變更提示；抓取並驗證 relationship/recipient 後才更新 App；使用者可見內容固定為泛化文案 | 資料最小化規則測試已建立；真機未驗證 | 錯發、鎖定畫面洩漏內容，或背景同步不足以支撐體驗 |
-| 所有權與解除配對 | 雙方各自保留不可被對方剝奪的唯讀封存 | A1 政策已確認；Supabase closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過；匯出仍待驗證 | 無法提供雙方可理解、可稽核且不依賴單方善意的保留、匯出、刪除結果 |
+| 身分與配對 | Sign in with Apple credential 交由 Supabase Auth；Postgres constraint、RLS 與 RPC 管理一對一 relationship | 真機 A＋Simulator B、兩個 Apple ID 的登入、配對、session 恢復與雙向 RLS 初步通過 | 第三身分雲端拒絕與兩支真實 iPhone 待驗證 |
+| 同步與聊天 | Realtime 只作變更提示並重新經 RLS 讀取；client UUID、server timestamp 與持久 outbox 提供冪等和穩定順序 | 單筆及三筆 FIFO marker metadata outbox 的斷網、重啟、重連、順序與雙裝置一致性通過 | 正式訊息內容、較長佇列、自動排程與弱網仍待驗證 |
+| 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；單張持久 upload outbox 已完成本機實作與編譯 | outbox 真機斷網重啟、大圖、方向、容量與保存期限待驗證 |
+| 推播 | 伺服器驗證 relationship／recipient 後才送出泛化 APNs 文案；App 收到提示後重新讀取 | 資料最小化規則測試已建立；真機未驗證 | 錯發、鎖定畫面洩漏內容、背景或終止狀態送達不足 |
+| 所有權與解除配對 | Supabase 伺服器建立雙份 owner-isolated 唯讀封存，兩人可獨立刪除 | closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過 | 匯出格式、交付與大型封存待驗證 |
 | 有意義雙向互動 | 同一 relationship、同一 interaction object 內，兩個目前伴侶各至少有一次符合資格的 contribution；只記 ID、種類與時間，不記內容 | 純規則測試已建立 | 事件無法區分單方重複操作與真正雙方參與，或需要記錄私密內容 |
 
 ## CloudKit Sharing PoC
@@ -111,7 +111,7 @@ Apple 的 [`CKShare.Participant`](https://developer.apple.com/documentation/clou
 | B | 共同歷史由雙方一起刪除，解除後都不保留 | 不足：只有 owner 能刪除共享根記錄 | participant 必須信任 owner 完成刪除 |
 | C | owner 保留，participant 解除後失去共同歷史 | 原生模型最簡單 | 權利不對等，與「共同生活空間」定位衝突 |
 
-2026-08-05 已確認採 A1，且雙方保留權不可被另一方單方面剝奪是硬性需求。因此 CloudKit Sharing 保留為 Apple 原生能力驗證結果，不升格為正式共同資料架構；下一步建立受管後端最小 spike，驗證伺服器端對等授權、封存確認與個人封存隔離。現階段仍不實作解除配對或刪除真實遠端資料。
+2026-08-05 已確認採 A1，且雙方保留權不可被另一方單方面剝奪是硬性需求。因此 CloudKit Sharing 保留為 Apple 原生能力驗證結果，不升格為正式共同資料架構。後續 Supabase spike 已完成伺服器端對等授權、封存確認、個人封存隔離、獨立刪除與最後引用 Storage GC；2026-08-06 由 TD-001 正式接受為 v1 共同資料受管後端。
 
 ## 受管後端候選
 
@@ -245,7 +245,7 @@ W1 Swift client 已加入 relationship-scoped `shared_items` insert 訂閱。訂
 
 新增 migration `202608050004_w1_private_photo_storage.sql`，建立非公開 bucket `couplespace-w1-photos`，單檔限制 5 MiB 且只接受 JPEG。物件路徑固定為 `relationship UUID/client UUID.jpg`，不保存原始檔名；只有 active relationship member 可讀，只有上傳者可刪，第三身分不可讀寫，relationship 進入 `closing` 後禁止新增照片。
 
-Swift W1 client 沿用既有最長邊 1,600 px、JPEG quality 0.8 的裝置端重新編碼，先上傳 Storage，再以相同 client UUID 寫入 `shared_items` photo metadata；若 metadata 寫入失敗會嘗試刪除 orphan object。另一端由 RLS 取得最新 photo client UUID，再從私有 bucket 下載，不使用 public URL。
+Swift W1 client 沿用既有最長邊 1,600 px、JPEG quality 0.8 的裝置端重新編碼，先上傳 Storage，再以相同 client UUID 寫入 `shared_items` photo metadata。另一端由 RLS 取得最新 photo client UUID，再從私有 bucket 下載，不使用 public URL；後續持久重試接縫記於下節。
 
 本機四份 pgTAP 共 39 個案例通過，包含 bucket privacy／大小、兩位 member 讀取、第三人拒絕、非上傳者不可刪、closing 禁止上傳與上傳者可刪；刪除測試使用 Storage API 同等的 `storage.allow_delete_query` 受控旗標，未停用 Supabase 的直接刪除保護 trigger。iPhone Simulator unsigned `build-for-testing` 通過。migration 已部署至雲端；遠端 migration history 顯示本機與遠端 `202608050001`～`202608050004` 一致，後續 dry-run 回報資料庫已是最新狀態，linked `public` schema lint 無錯誤。CLI 在套用 `004` 後未自行返回，經 migration history 確認成功後中止等待程序。
 
@@ -258,6 +258,29 @@ Swift W1 client 沿用既有最長邊 1,600 px、JPEG quality 0.8 的裝置端�
 - 截圖顯示私有照片上傳成功狀態、照片預覽與重新整理操作；未記錄 Storage object path、完整 relationship ID 或 user ID。
 
 此結果通過同一 active relationship 內兩位 member 的私有照片雙向上傳、metadata RLS 查詢與 private bucket 下載。自動即時更新、第三身分的雲端拒絕、closing／archive、弱網與刪除一致性仍未由本次成功推論為通過。
+
+### Supabase 單張照片持久 outbox 本機 spike
+
+為驗證照片在斷網及 App 重啟後仍可明確重試，而不先建立正式相簿或多照片佇列，W1 client 新增單張 `PhotoOutboxEntry`：依 Supabase user UUID 保存 relationship UUID、client UUID、attempt count 與受控本機檔名；重新編碼後的 JPEG 以完整檔案保護寫入 Application Support。已有待送照片時不允許選取另一張覆寫，待送照片完成前也不允許由本裝置開始解除配對。
+
+每次重試沿用同一 client UUID 及 deterministic Storage path。第二次以後會先確認同一路徑是否已存在，處理 App 在 object upload 後中止的情境；寫入 metadata 前亦查核既有 row 必須屬於同一 creator 且種類為 `photo`。只有 Storage object 與 RLS metadata 都確認成功後才刪除本機 JPEG 與 outbox metadata。損壞 metadata、非法檔名或遺失檔案不會被靜默視為空 outbox。
+
+- 新增 deterministic tests：跨 store instance 恢復資料與 attempt、拒絕覆寫待送照片、遺失本機檔案時保留 metadata 並明確報錯。
+- 一次性 macOS smoke 直接編譯同一份 `G1TechnicalRules.swift`，實際寫入、重新載入、增加 attempt、拒絕覆寫與清除，輸出 `photo-outbox-smoke-ok`。
+- iPhone Simulator generic `build-for-testing` 通過，且 actor-isolation warning 已清除。
+- 後續由 Xcode crash report 定位，runner 無事件並非單純 infrastructure stall：測試 host 啟動 W1 畫面時提前建立 `CloudKitSharingPoC.shared`，`CKContainer.default()` 在測試簽署環境觸發 `SIGABRT`。TD-001 已將 CloudKit PoC 退居實驗紀錄，因此已從目前 Supabase W1 畫面移除該 singleton 與 CloudKit 操作區，不刪除歷史 PoC 原始碼。同一 Simulator 指令重跑後，`CoupleSpaceTests` 21 個案例全數通過，包含照片 outbox 跨 store 恢復、拒絕覆寫、遺失檔案保留 metadata 與 pending photo 阻擋解除配對。
+- 本切片沒有新增 migration。它不包含多張照片、背景自動重送、退避、網路監聽、容量／保存期限政策，亦未宣稱永久拒絕或解除配對競態下的 orphan cleanup 已完整處理。
+
+真機 A＋Simulator B 驗證步驟：
+
+1. 確認雙方登入同一個 `active` relationship，B 保持連線。
+2. A 關閉網路後選取一張不含私人內容的測試照片；等待 Photo Outbox 顯示待重試。
+3. A 保持離線強制結束並重開 App；重新整理後應仍顯示同一張待送照片及 attempt count。
+4. A 恢復網路，只按一次「重試待送照片」；成功後 Photo Outbox 應清空。
+5. B 點「重新整理 Supabase Storage 照片」，應看見 A 上傳的同一張測試照片。
+6. A 再次強制結束並重開；不得重新出現已送達的待送照片。
+
+2026-08-06 真機 A＋Simulator B 已完成上述全流程：A 斷網選照後 Outbox 顯示待送，強制關閉並重啟後仍恢復同一張待送照片；恢復網路並只重試一次後，B 重新整理即看見同一張照片，A 再次重啟也未復活已送達項目。因此單張照片的離線持久化、人工重送、跨裝置可見性與成功後清除已通過。這不代表多照片 FIFO、背景自動重送、網路頻繁切換、大圖與方向組合已通過。
 
 ### Supabase closing／personal archive client spike
 
@@ -298,10 +321,11 @@ W1 Swift client 已接上既有 `begin_unpairing` 與 `seal_personal_archive` RP
 
 ## W1 尚未關閉
 
-- CloudKit Sharing 的兩支真實 iPhone、兩個 Apple ID 雙向證據。
-- 以雲端 Supabase 測試專案驗證第三身分拒絕；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件、Storage 私有照片雙向讀寫、單筆 marker 離線持久 outbox／冪等重送、closing／雙份 personal archive／archived photo，以及 owner-only archive delete／最後引用 object GC 已通過。
+- Supabase 路徑的兩支真實 iPhone、兩個 Apple ID 登入、配對、雙向資料與重啟證據。
+- 以雲端 Supabase 測試專案驗證第三身分拒絕；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件、Storage 私有照片雙向讀寫、單筆及三筆 FIFO marker 離線持久 outbox／冪等重送、closing／雙份 personal archive／archived photo，以及 owner-only archive delete／最後引用 object GC 已通過。
 - 照片弱網、離線重試、大圖與方向組合、保存期限及刪除一致性實測。
 - 推播接收者、背景同步與鎖定畫面隱私真機實測。
-- 最終登入、同步、聊天、照片、推播與資料生命週期架構決策。
+- 個人封存匯出格式、交付方式與大型資料處理實測。
+- 正式訊息、照片政策、推播與背景重試的剩餘子決策；受管後端與共同資料系統紀錄已由 TD-001 關閉。
 
 在上述證據完成前，G1 與 M0 維持未通過，不進入大量功能實作。

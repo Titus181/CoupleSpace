@@ -81,16 +81,15 @@ last_updated: 2026-08-06
 
 ## W1 必須關閉的技術閘門
 
-目前狀態為 `in_progress`。CloudKit Sharing 已由真機 A＋Simulator B 完成跨 Apple ID 分享、雙向標記、照片與重啟恢復；Supabase 已由同兩個 Apple 身分完成 Auth、pairing、active relationship RLS 雙向寫入、Realtime 雙向事件、私有 Storage 照片雙向讀寫、closing 後拒絕共同寫入、雙份 personal archive、archived photo 讀取、owner-only 獨立刪除與最後引用 Storage GC。單筆與三筆 FIFO marker metadata outbox 均已完成斷網、App 重啟、恢復網路重送及雙裝置一致性實測。兩支真實 iPhone、第三身分雲端拒絕、完整弱網、正式訊息多筆佇列、匯出與推播證據仍未完成，因此 G1 與 M0 尚未通過。詳細證據記錄於 [W1 技術驗證紀錄](02-w1-technical-validation.md)。
+目前狀態為 `in_progress`。TD-001 已接受 Supabase 作為 iPhone v1 使用者身分、伴侶關係、共同資料與資料生命週期的唯一遠端系統紀錄，CloudKit Sharing 不進入正式共同資料架構。Supabase 已由兩個 Apple 身分完成 Auth、pairing、active relationship RLS 雙向寫入、Realtime 雙向事件、私有 Storage 照片雙向讀寫、closing 後拒絕共同寫入、雙份 personal archive、archived photo 讀取、owner-only 獨立刪除與最後引用 Storage GC。單筆與三筆 FIFO marker metadata outbox 均已完成斷網、App 重啟、恢復網路重送及雙裝置一致性實測；單張照片持久 outbox 亦已完成本機實作、smoke、21 個 Simulator runtime tests，以及真機 A＋Simulator B 的斷網、App 重啟、恢復網路單次重送與跨裝置可見性實測。兩支真實 iPhone、第三身分雲端拒絕、完整照片弱網與多圖組合、正式訊息、匯出與推播證據仍未完成，因此 G1 與 M0 尚未通過。詳細證據記錄於 [W1 技術驗證紀錄](02-w1-technical-validation.md)，接受脈絡記錄於 [技術決策紀錄](../decisions/technical-decisions.md)。
 
-以下項目尚未決定，不得在規劃中默認某一實作方式：
+以下實作細節尚未決定，不得在規劃中默認某一實作方式：
 
-1. 兩個 Apple ID 如何共享同一段伴侶關係。
-2. 即時聊天、訊息排序、冪等、離線佇列與重試模型。
-3. 照片原檔、縮圖、壓縮、容量、保存與刪除方式。
-4. 共同資料由誰擁有，以及解除配對後雙方各自取得什麼。
-5. 推播接收者驗證與敏感內容隱藏規則。
-6. 「有意義雙向互動」的正式事件定義與資料最小化方式。
+1. 正式訊息資料模型、長佇列、自動排程、退避與背景重試。
+2. 照片 upload outbox、縮圖、壓縮、容量、保存期限與刪除一致性。
+3. 個人封存匯出格式、交付方式與大型資料處理。
+4. 推播接收者驗證、背景／終止狀態送達與敏感內容隱藏規則。
+5. 「有意義雙向互動」的正式事件定義與資料最小化方式。
 
 技術方案至少需以兩支真實裝置與兩個不同 Apple ID 完成小型驗證，不能只依文件或單機模擬結果判斷可行。
 
