@@ -65,23 +65,65 @@ struct CoupleSpaceTests {
         #expect(state == .sending(attempt: 2))
     }
 
-    @Test func markerOutboxPersistsStableIdentityAndAttemptCount() throws {
+    @Test func markerOutboxPersistsFIFOAndRemovesOnlyAcknowledgedHead() throws {
         let suiteName = "MarkerOutboxStoreTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000061")!
-        let entry = MarkerOutboxEntry(
+        let first = MarkerOutboxEntry(
             relationshipID: UUID(uuidString: "90000000-0000-0000-0000-000000000001")!,
             clientID: UUID(uuidString: "91000000-0000-0000-0000-000000000001")!,
+            attemptCount: 0
+        )
+        let second = MarkerOutboxEntry(
+            relationshipID: first.relationshipID,
+            clientID: UUID(uuidString: "91000000-0000-0000-0000-000000000002")!,
+            attemptCount: 0
+        )
+        let store = MarkerOutboxStore(defaults: defaults)
+        var queue = MarkerOutboxQueue()
+        queue.enqueue(first)
+        queue.enqueue(second)
+
+        try store.save(queue, userID: userID)
+        #expect(try store.load(userID: userID).entries == [first, second])
+
+        #expect(queue.beginFirstAttempt()?.clientID == first.clientID)
+        #expect(queue.first?.attemptCount == 1)
+        #expect(queue.entries[1].attemptCount == 0)
+        let didAcknowledgeTail = queue.acknowledgeFirst(clientID: second.clientID)
+        #expect(!didAcknowledgeTail)
+        #expect(queue.entries.map(\.clientID) == [first.clientID, second.clientID])
+
+        let didAcknowledgeHead = queue.acknowledgeFirst(clientID: first.clientID)
+        #expect(didAcknowledgeHead)
+        try store.save(queue, userID: userID)
+        #expect(try store.load(userID: userID).entries == [second])
+
+        let didAcknowledgeLastEntry = queue.acknowledgeFirst(clientID: second.clientID)
+        #expect(didAcknowledgeLastEntry)
+        try store.save(queue, userID: userID)
+        #expect(try store.load(userID: userID).isEmpty)
+    }
+
+    @Test func markerOutboxLoadsLegacySingleEntryWithoutDataLoss() throws {
+        let suiteName = "MarkerOutboxLegacyTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000063")!
+        let legacyEntry = MarkerOutboxEntry(
+            relationshipID: UUID(uuidString: "90000000-0000-0000-0000-000000000001")!,
+            clientID: UUID(uuidString: "91000000-0000-0000-0000-000000000003")!,
             attemptCount: 2
         )
+        defaults.set(
+            try JSONEncoder().encode(legacyEntry),
+            forKey: "couplespace.w1.marker-outbox.\(userID.uuidString.lowercased())"
+        )
 
-        try MarkerOutboxStore(defaults: defaults).save(entry, userID: userID)
-        #expect(try MarkerOutboxStore(defaults: defaults).load(userID: userID) == entry)
-
-        MarkerOutboxStore(defaults: defaults).clear(userID: userID)
-        #expect(try MarkerOutboxStore(defaults: defaults).load(userID: userID) == nil)
+        #expect(try MarkerOutboxStore(defaults: defaults).load(userID: userID).entries == [legacyEntry])
     }
 
     @Test func corruptedMarkerOutboxIsNotSilentlyDiscarded() throws {
@@ -96,7 +138,7 @@ struct CoupleSpaceTests {
         )
 
         #expect(throws: DecodingError.self) {
-            try MarkerOutboxStore(defaults: defaults).load(userID: userID)
+            _ = try MarkerOutboxStore(defaults: defaults).load(userID: userID)
         }
     }
 

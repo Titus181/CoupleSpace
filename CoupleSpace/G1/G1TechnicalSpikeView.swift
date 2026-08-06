@@ -55,6 +55,14 @@ struct G1TechnicalSpikeView: View {
                         LabeledContent("關係代碼", value: pairingModel.relationshipToken)
                         LabeledContent("成員", value: "\(pairingModel.memberCount)/2")
                         LabeledContent("最新標記", value: pairingModel.latestMarkerToken)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("最近 3 個標記（舊 → 新）")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(pairingModel.recentMarkerTokens)
+                                .font(.caption.monospaced())
+                                .textSelection(.enabled)
+                        }
                         LabeledContent("Outbox", value: pairingModel.markerOutboxStatus)
 
                         Button("A. 建立或取回 pairing invitation") {
@@ -82,10 +90,12 @@ struct G1TechnicalSpikeView: View {
                         Button("寫入新的 RLS 驗證標記") {
                             Task { await pairingModel.writeMarker() }
                         }
+                        .disabled(pairingModel.isMarkerOutboxSending)
                         if pairingModel.hasPendingMarker {
                             Button("重試待送標記") {
                                 Task { await pairingModel.retryPendingMarker() }
                             }
+                            .disabled(pairingModel.isMarkerOutboxSending)
                         }
                         Button("重新整理 RLS 狀態") {
                             Task { await pairingModel.refresh() }

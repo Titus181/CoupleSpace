@@ -17,7 +17,7 @@ W1 不先完成正式產品架構。先以最小真機 spike 驗證最大未知�
 | 閘門 | CloudKit Sharing 假設 | 驗證狀態 | 否決條件 |
 | --- | --- | --- | --- |
 | 身分與配對 | 使用 iCloud 帳號接受私人 `CKShare`，一個 share 對應一段伴侶關係 | 真機 A＋Simulator B、兩個 Apple ID 初步通過；兩支真機待驗證 | 無法穩定接受、恢復或限制為正確兩人 |
-| 同步與聊天 | client UUID 形成穩定識別；server timestamp 加 UUID 決定順序；本機 outbox 顯示傳送狀態 | Supabase 單筆 marker outbox、持久 metadata 與 idempotent RPC 已部署；真機 A＋Simulator B 的斷網、重啟、重連與雙裝置一致性通過；正式訊息內容、多筆佇列、弱網與排序仍待驗證 | 離線重送造成遺失、重複、不可預期錯序，或同步行為不足以可靠恢復 |
+| 同步與聊天 | client UUID 形成穩定識別；server timestamp 加 UUID 決定順序；本機 outbox 顯示傳送狀態 | Supabase 單筆及三筆 FIFO marker metadata outbox 的真機 A＋Simulator B 斷網、重啟、重連、順序與雙裝置一致性通過；正式訊息內容、較長佇列與弱網仍待驗證 | 離線重送造成遺失、重複、不可預期錯序，或同步行為不足以可靠恢復 |
 | 照片 | 顯示圖與縮圖先在裝置端重新編碼，再以 `CKAsset` 儲存；正式尺寸、品質、容量與保存期依實測決定 | 真機 A＋Simulator B、兩個 Apple ID 的雙向讀寫與重啟恢復初步通過；兩支真機、弱網與刪除待驗證 | 成本、速度、弱網恢復或刪除一致性不可接受 |
 | 推播 | database subscription 只作變更提示；抓取並驗證 relationship/recipient 後才更新 App；使用者可見內容固定為泛化文案 | 資料最小化規則測試已建立；真機未驗證 | 錯發、鎖定畫面洩漏內容，或背景同步不足以支撐體驗 |
 | 所有權與解除配對 | 雙方各自保留不可被對方剝奪的唯讀封存 | A1 政策已確認；Supabase closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過；匯出仍待驗證 | 無法提供雙方可理解、可稽核且不依賴單方善意的保留、匯出、刪除結果 |
@@ -213,7 +213,7 @@ W1 Swift client 已加入 relationship-scoped `shared_items` insert 訂閱。訂
 
 新增 migration `202608050007_w1_idempotent_marker_rpc.sql`，由 authenticated session 推導 creator，且只在 active relationship 接受 marker。相同 relationship／client UUID 由同一 creator 重送時回傳既有 server timestamp；另一 creator 嘗試冒領同一 UUID、第三人寫入或 closing 後重送均被拒絕。這是 marker spike，不代表正式訊息內容已選擇 `UserDefaults`，也不包含多筆佇列、自動背景排程、退避、網路監聽或照片 upload outbox。
 
-本機 reset 已成功套用 `001`～`007`；七份 pgTAP 共 64 個案例全部通過，新增案例涵蓋首次寫入、相同識別重送不重複、creator／kind 由 session 決定、身分碰撞、第三人與 closing 拒絕。`public` schema lint 無錯誤；iPhone Simulator unsigned build 與 `build-for-testing` 通過。Simulator test runner 再次停在既有測試啟動問題、未進入案例，因此不宣稱 runtime unit suite 通過；另以實際 `G1TechnicalRules.swift` 完成三個獨立程序的 write／read／clear smoke test，確認 metadata 可跨程序恢復。
+本機 reset 已成功套用 `001`～`007`；七份 pgTAP 目前共 67 個案例全部通過，案例涵蓋首次寫入、相同識別重送不重複、兩個不同識別各自建立且重送後維持兩筆、creator／kind 由 session 決定、身分碰撞、第三人與 closing 拒絕。`public` schema lint 無錯誤；iPhone Simulator unsigned build 與 `build-for-testing` 通過。Simulator test runner 再次停在既有測試啟動問題、未進入案例，因此不宣稱 runtime unit suite 通過；另以實際 `G1TechnicalRules.swift` 完成三個獨立程序的 write／read／clear smoke test，確認單筆 metadata 可跨程序恢復。
 
 `007` 已部署至 Supabase 測試專案。2026-08-06 使用真實 iPhone A 與 iPhone 17 Pro Simulator B、兩個不同 Apple 身分建立新的 active relationship，雙方確認關係代碼 `dd36812f` 與成員 `2/2` 一致後完成以下驗證：
 
@@ -223,6 +223,23 @@ W1 Swift client 已加入 relationship-scoped `shared_items` insert 訂閱。訂
 - B 重新整理後看到相同 marker；雙方再次強制結束、重開並重新整理後，仍看到同一識別。
 
 此結果通過單筆 marker metadata 的離線失敗、跨啟動保存、明確重試與跨裝置恢復；資料庫 pgTAP 另證明相同 client UUID 重送只保留一筆。它不代表正式聊天內容、多筆佇列、自動背景重送、退避、弱網錯序或照片 upload outbox 已完成。
+
+### Supabase 多筆 FIFO outbox 本機 spike
+
+在不加入正式訊息內容的前提下，單筆 store 已擴為同一 Supabase user key 下的 ordered metadata queue。舊版單一 `MarkerOutboxEntry` JSON 仍可 fallback decode 成一筆 queue，不會把既有離線資料視為損壞；其他 malformed data 繼續明確拋錯。每次「寫入新的」會建立新的 client UUID 並加到尾端；processor 一次只傳 head，送出前只增加 head 的 attempt count，RPC 成功後亦只在 client UUID 符合時移除該 head。若中途失敗，失敗的 head 與所有 tail 都保留；任何 session 或網路 `await` 前即鎖住 enqueue／drain 路徑，傳送期間 UI 也禁止啟動第二個 processor，避免 async interleaving 以舊 snapshot 覆寫 queue。畫面只顯示最近三筆 marker 的 8 碼短 token（舊到新），供跨裝置驗證筆數與順序，不揭露完整 UUID 或內容。
+
+既有 `007` RPC 已以 `(relationship_id, client_id)` 獨立冪等，不需新增 migration。pgTAP 新增兩個不同 client UUID 各自建立及重送案例後，七份檔案共 67 個案例通過。iPhone target build 與含新增 Swift regressions 的 `build-for-testing` 通過；regressions 涵蓋 FIFO round-trip、只移除已確認 head、tail attempt 不變、最後一筆移除後清空、legacy 單筆 decode 與 corruption throw。Simulator test runner 等待 60 秒仍未進入案例，因此中止且不宣稱 runtime suite 通過；另以實際 `G1TechnicalRules.swift` 執行 runtime smoke，確認兩筆順序、head attempt 與移除 head 後保留 tail。
+
+2026-08-06 沿用同一 active relationship 的真實 iPhone A 與 iPhone 17 Pro Simulator B，完成三筆 FIFO 人工驗證：
+
+- 雙方先確認 relationship `active`、成員 `2/2` 且關係代碼一致。
+- A 斷網後依序建立三筆 marker；每次都等待離線錯誤返回，Outbox 最終顯示三筆待送。
+- A 保持離線強制結束並重開 App，三筆 Outbox 全部保留。
+- A 恢復網路、重新整理關係後只按一次重試，三筆依序送達且 Outbox 清空。
+- A 與 B 的「最近 3 個標記（舊 → 新）」顯示三個相同短 token，順序完全一致。
+- 雙方再次強制結束、重開並重新整理後，仍顯示相同三筆與順序。完整 UUID 與內容未記錄。
+
+此結果通過三筆 metadata queue 的離線 enqueue、跨啟動保存、單一 processor FIFO drain、跨裝置筆數／順序一致及重啟恢復。尚未加入自動背景重送、退避、網路監聽、容量上限或正式 message sequence，也未涵蓋較長佇列與受控弱網延遲；這些限制保留為後續驗證邊界。
 
 ### Supabase Storage 私有照片 spike
 

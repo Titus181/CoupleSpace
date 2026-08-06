@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(7);
+select plan(10);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password)
 values
@@ -61,6 +61,42 @@ select results_eq(
     $$,
     array['00000000-0000-0000-0000-000000000051/marker'::text],
     'the RPC derives creator identity and marker kind from the session'
+);
+
+set local role authenticated;
+select lives_ok(
+    $$
+        select public.write_shared_marker(
+            '90000000-0000-0000-0000-000000000001',
+            '91000000-0000-0000-0000-000000000004'
+        )
+    $$,
+    'the same member can create a second marker with a different client identity'
+);
+
+select lives_ok(
+    $$
+        select public.write_shared_marker(
+            '90000000-0000-0000-0000-000000000001',
+            '91000000-0000-0000-0000-000000000004'
+        )
+    $$,
+    'retrying the second marker identity is accepted independently'
+);
+
+reset role;
+select results_eq(
+    $$
+        select count(*)::integer
+        from public.shared_items
+        where relationship_id = '90000000-0000-0000-0000-000000000001'
+          and client_id in (
+              '91000000-0000-0000-0000-000000000001',
+              '91000000-0000-0000-0000-000000000004'
+          )
+    $$,
+    array[2],
+    'two independent marker identities produce exactly two rows after retries'
 );
 
 set local role authenticated;

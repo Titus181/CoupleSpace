@@ -45,6 +45,30 @@ struct MarkerOutboxEntry: Codable, Equatable {
     var attemptCount: Int
 }
 
+struct MarkerOutboxQueue: Codable, Equatable {
+    private(set) var entries: [MarkerOutboxEntry] = []
+
+    var isEmpty: Bool { entries.isEmpty }
+    var count: Int { entries.count }
+    var first: MarkerOutboxEntry? { entries.first }
+
+    mutating func enqueue(_ entry: MarkerOutboxEntry) {
+        entries.append(entry)
+    }
+
+    mutating func beginFirstAttempt() -> MarkerOutboxEntry? {
+        guard !entries.isEmpty else { return nil }
+        entries[0].attemptCount += 1
+        return entries[0]
+    }
+
+    mutating func acknowledgeFirst(clientID: UUID) -> Bool {
+        guard entries.first?.clientID == clientID else { return false }
+        entries.removeFirst()
+        return true
+    }
+}
+
 struct MarkerOutboxStore {
     private let defaults: UserDefaults
     private let keyPrefix = "couplespace.w1.marker-outbox."
@@ -53,13 +77,27 @@ struct MarkerOutboxStore {
         self.defaults = defaults
     }
 
-    func load(userID: UUID) throws -> MarkerOutboxEntry? {
-        guard let data = defaults.data(forKey: key(userID)) else { return nil }
-        return try JSONDecoder().decode(MarkerOutboxEntry.self, from: data)
+    func load(userID: UUID) throws -> MarkerOutboxQueue {
+        guard let data = defaults.data(forKey: key(userID)) else {
+            return MarkerOutboxQueue()
+        }
+
+        do {
+            return try JSONDecoder().decode(MarkerOutboxQueue.self, from: data)
+        } catch let queueError {
+            if let legacyEntry = try? JSONDecoder().decode(MarkerOutboxEntry.self, from: data) {
+                return MarkerOutboxQueue(entries: [legacyEntry])
+            }
+            throw queueError
+        }
     }
 
-    func save(_ entry: MarkerOutboxEntry, userID: UUID) throws {
-        defaults.set(try JSONEncoder().encode(entry), forKey: key(userID))
+    func save(_ queue: MarkerOutboxQueue, userID: UUID) throws {
+        guard !queue.isEmpty else {
+            clear(userID: userID)
+            return
+        }
+        defaults.set(try JSONEncoder().encode(queue), forKey: key(userID))
     }
 
     func clear(userID: UUID) {

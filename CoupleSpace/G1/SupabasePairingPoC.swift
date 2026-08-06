@@ -107,6 +107,7 @@ final class SupabasePairingPoC: ObservableObject {
     @Published private(set) var relationshipToken = "尚無關係"
     @Published private(set) var memberCount = 0
     @Published private(set) var latestMarkerToken = "尚無標記"
+    @Published private(set) var recentMarkerTokens = "尚無標記"
     @Published private(set) var invitationToken: String?
     @Published private(set) var realtimeStatus = "尚未啟動 Realtime"
     @Published private(set) var isRealtimeActive = false
@@ -118,6 +119,7 @@ final class SupabasePairingPoC: ObservableObject {
     @Published private(set) var hasPersonalArchive = false
     @Published private(set) var markerOutboxStatus = "尚無待送標記"
     @Published private(set) var hasPendingMarker = false
+    @Published private(set) var isMarkerOutboxSending = false
 
     private let client: SupabaseClient
     private let markerOutboxStore: MarkerOutboxStore
@@ -188,46 +190,57 @@ final class SupabasePairingPoC: ObservableObject {
             status = "請先建立或加入測試關係"
             return
         }
+        guard !isMarkerOutboxSending else {
+            markerOutboxStatus = "正在依序傳送，請稍候"
+            return
+        }
+        isMarkerOutboxSending = true
+        defer { isMarkerOutboxSending = false }
 
         do {
             let session = try await client.auth.session
-            let pendingEntry = try markerOutboxStore.load(userID: session.user.id)
-            let entry: MarkerOutboxEntry
-
-            if let pendingEntry {
-                guard pendingEntry.relationshipID == relationshipID else {
-                    markerOutboxStatus = "另一段關係仍有待送標記，未建立新項目"
-                    return
-                }
-                entry = pendingEntry
-            } else {
-                entry = MarkerOutboxEntry(
-                    relationshipID: relationshipID,
-                    clientID: UUID(),
-                    attemptCount: 0
-                )
+            var queue = try markerOutboxStore.load(userID: session.user.id)
+            guard queue.entries.allSatisfy({ $0.relationshipID == relationshipID }) else {
+                markerOutboxStatus = "另一段關係仍有待送標記，未建立新項目"
+                return
             }
 
-            await sendMarker(entry, userID: session.user.id)
+            queue.enqueue(MarkerOutboxEntry(
+                relationshipID: relationshipID,
+                clientID: UUID(),
+                attemptCount: 0
+            ))
+            try markerOutboxStore.save(queue, userID: session.user.id)
+            hasPendingMarker = true
+            markerOutboxStatus = "有 \(queue.count) 個待送標記"
+            await sendPendingMarkers(userID: session.user.id)
         } catch {
             markerOutboxStatus = "無法建立待送標記：\(error.localizedDescription)"
         }
     }
 
     func retryPendingMarker() async {
+        guard !isMarkerOutboxSending else {
+            markerOutboxStatus = "正在依序傳送，請稍候"
+            return
+        }
+        isMarkerOutboxSending = true
+        defer { isMarkerOutboxSending = false }
+
         do {
             let session = try await client.auth.session
-            guard let entry = try markerOutboxStore.load(userID: session.user.id) else {
+            let queue = try markerOutboxStore.load(userID: session.user.id)
+            guard !queue.isEmpty else {
                 hasPendingMarker = false
                 markerOutboxStatus = "尚無待送標記"
                 return
             }
-            guard entry.relationshipID == relationshipID else {
+            guard queue.entries.allSatisfy({ $0.relationshipID == relationshipID }) else {
                 markerOutboxStatus = "待送標記不屬於目前關係"
                 return
             }
 
-            await sendMarker(entry, userID: session.user.id)
+            await sendPendingMarkers(userID: session.user.id)
         } catch {
             markerOutboxStatus = "無法讀取待送標記：\(error.localizedDescription)"
         }
@@ -489,6 +502,7 @@ final class SupabasePairingPoC: ObservableObject {
                     relationshipToken = shortToken(archive.relationshipID)
                     memberCount = 0
                     latestMarkerToken = "共同資料已封存"
+                    recentMarkerTokens = "共同資料已封存"
                     storagePhotoData = nil
                     storageStatus = "關係封存後不再讀取共同 Storage"
                     try await refreshPersonalArchive(archive)
@@ -517,10 +531,16 @@ final class SupabasePairingPoC: ObservableObject {
                 .eq("relationship_id", value: relationship.id)
                 .eq("item_kind", value: "marker")
                 .order("created_at", ascending: false)
-                .limit(1)
+                .limit(3)
                 .execute()
                 .value
             latestMarkerToken = markers.first.map { shortToken($0.clientID) } ?? "尚無標記"
+            recentMarkerTokens = markers.reversed()
+                .map { shortToken($0.clientID) }
+                .joined(separator: " → ")
+            if recentMarkerTokens.isEmpty {
+                recentMarkerTokens = "尚無標記"
+            }
             let archives: [PersonalArchiveRow] = try await client
                 .from("personal_archives")
                 .select("id,relationship_id")
@@ -556,6 +576,7 @@ final class SupabasePairingPoC: ObservableObject {
         relationshipToken = "尚無關係"
         memberCount = 0
         latestMarkerToken = "尚無標記"
+        recentMarkerTokens = "尚無標記"
         invitationToken = nil
         storagePhotoData = nil
         storageStatus = "尚無 Supabase Storage 照片"
@@ -568,46 +589,65 @@ final class SupabasePairingPoC: ObservableObject {
         status = message
     }
 
-    private func sendMarker(_ entry: MarkerOutboxEntry, userID: UUID) async {
-        var sendingEntry = entry
-        sendingEntry.attemptCount += 1
-
+    private func sendPendingMarkers(userID: UUID) async {
         do {
-            try markerOutboxStore.save(sendingEntry, userID: userID)
-            hasPendingMarker = true
-            markerOutboxStatus = "正在傳送標記（第 \(sendingEntry.attemptCount) 次）"
+            var queue = try markerOutboxStore.load(userID: userID)
+            let originalCount = queue.count
+            var deliveredCount = 0
+            var lastDeliveredID: UUID?
 
-            try await client
-                .rpc(
-                    "write_shared_marker",
-                    params: SharedMarkerWriteParameters(
-                        targetRelationshipID: sendingEntry.relationshipID,
-                        targetClientID: sendingEntry.clientID
+            while let sendingEntry = queue.beginFirstAttempt() {
+                try markerOutboxStore.save(queue, userID: userID)
+                hasPendingMarker = true
+                markerOutboxStatus = "正在依序傳送第 \(deliveredCount + 1)/\(originalCount) 個標記（第 \(sendingEntry.attemptCount) 次）"
+
+                try await client
+                    .rpc(
+                        "write_shared_marker",
+                        params: SharedMarkerWriteParameters(
+                            targetRelationshipID: sendingEntry.relationshipID,
+                            targetClientID: sendingEntry.clientID
+                        )
                     )
-                )
-                .execute()
+                    .execute()
 
-            markerOutboxStore.clear(userID: userID)
+                guard queue.acknowledgeFirst(clientID: sendingEntry.clientID) else {
+                    markerOutboxStatus = "Outbox 順序不一致，已停止重送"
+                    return
+                }
+                try markerOutboxStore.save(queue, userID: userID)
+                deliveredCount += 1
+                lastDeliveredID = sendingEntry.clientID
+            }
+
             hasPendingMarker = false
             await refresh()
-            markerOutboxStatus = "標記已送達：\(shortToken(sendingEntry.clientID))"
-            status = "已寫入 RLS 驗證標記"
+            if let lastDeliveredID {
+                markerOutboxStatus = "已依序送達 \(deliveredCount) 個標記；最後：\(shortToken(lastDeliveredID))"
+                status = "已依序寫入 RLS 驗證標記"
+            }
         } catch {
             hasPendingMarker = true
-            markerOutboxStatus = "標記待重試（已嘗試 \(sendingEntry.attemptCount) 次）"
+            if let queue = try? markerOutboxStore.load(userID: userID),
+               let first = queue.first {
+                markerOutboxStatus = "尚有 \(queue.count) 個待送標記；第一個已嘗試 \(first.attemptCount) 次"
+            } else {
+                markerOutboxStatus = "Outbox 讀取失敗，已停止重送"
+            }
             status = "標記傳送失敗：\(error.localizedDescription)"
         }
     }
 
     private func refreshMarkerOutbox(userID: UUID) throws {
-        guard let entry = try markerOutboxStore.load(userID: userID) else {
+        let queue = try markerOutboxStore.load(userID: userID)
+        guard let first = queue.first else {
             hasPendingMarker = false
             markerOutboxStatus = "尚無待送標記"
             return
         }
 
         hasPendingMarker = true
-        markerOutboxStatus = "有 1 個待送標記（已嘗試 \(entry.attemptCount) 次）"
+        markerOutboxStatus = "有 \(queue.count) 個待送標記（第一個已嘗試 \(first.attemptCount) 次）"
     }
 
     private func refreshPersonalArchive(_ archive: PersonalArchiveRow) async throws {
