@@ -18,7 +18,7 @@ W1 不先完成正式產品功能。先以最小真機 spike 驗證最大未知�
 | --- | --- | --- | --- |
 | 身分與配對 | Sign in with Apple credential 交由 Supabase Auth；Postgres constraint、RLS 與 RPC 管理一對一 relationship | 真機 A＋Simulator B、兩個 Apple ID 的登入、配對、session 恢復與雙向 RLS 初步通過 | 第三身分雲端拒絕與兩支真實 iPhone 待驗證 |
 | 同步與聊天 | Realtime 只作變更提示並重新經 RLS 讀取；client UUID、server timestamp 與持久 outbox 提供冪等和穩定順序 | 單筆及三筆 FIFO marker metadata outbox 的斷網、重啟、重連、順序與雙裝置一致性通過 | 正式訊息內容、較長佇列、自動排程與弱網仍待驗證 |
-| 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；三張持久 FIFO upload outbox 的斷網、跨啟動、重送與順序通過 | 大圖、方向、容量與保存期限待驗證 |
+| 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；三張持久 FIFO upload outbox 的斷網、跨啟動、重送與順序通過；實際 JPEG regression 證明大圖縮放、方向正規化與 GPS 移除，真機高解析直向照片跨裝置方向／比例亦通過 | 頻繁弱網、容量與保存期限待驗證 |
 | 推播 | 伺服器驗證 relationship／recipient 後才送出泛化 APNs 文案；App 收到提示後重新讀取 | 資料最小化規則測試已建立；真機未驗證 | 錯發、鎖定畫面洩漏內容、背景或終止狀態送達不足 |
 | 所有權與解除配對 | Supabase 伺服器建立雙份 owner-isolated 唯讀封存，兩人可獨立刪除 | closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過 | 匯出格式、交付與大型封存待驗證 |
 | 有意義雙向互動 | 同一 relationship、同一 interaction object 內，兩個目前伴侶各至少有一次符合資格的 contribution；只記 ID、種類與時間，不記內容 | 純規則測試已建立 | 事件無法區分單方重複操作與真正雙方參與，或需要記錄私密內容 |
@@ -273,7 +273,7 @@ Swift W1 client 沿用既有最長邊 1,600 px、JPEG quality 0.8 的裝置端�
 - 後續由 Xcode crash report 定位，runner 無事件並非單純 infrastructure stall：測試 host 啟動 W1 畫面時提前建立 `CloudKitSharingPoC.shared`，`CKContainer.default()` 在測試簽署環境觸發 `SIGABRT`。TD-001 已將 CloudKit PoC 退居實驗紀錄，因此已從目前 Supabase W1 畫面移除該 singleton 與 CloudKit 操作區，不刪除歷史 PoC 原始碼。同一 Simulator 指令重跑後，`CoupleSpaceTests` 21 個案例全數通過，包含照片 outbox 跨 store 恢復、拒絕覆寫、遺失檔案保留 metadata 與 pending photo 阻擋解除配對。
 - 原始單張切片沒有新增 migration。當時不包含多張照片、背景自動重送、退避、網路監聽、容量／保存期限政策，亦未宣稱永久拒絕或解除配對競態下的 orphan cleanup 已完整處理。
 
-多張 FIFO 升級後，iPhone generic Simulator build 與 `build-for-testing` 通過；加入 relationship 顯示快照 regression 後，`CoupleSpaceTests` 25 個 runtime cases 全數通過。新增／更新案例涵蓋兩張照片的 FIFO、只允許 acknowledgement queue head、attempt 只增加在 head、舊單張 payload 與檔案無損載入、第一張檔案遺失時仍保留後續 metadata 與檔案，以及 relationship 快照依 Supabase user 隔離與清除。原本「單張拒絕覆寫」限制已由 append-only queue 取代；尚未加入自動背景重送、退避、網路監聽、容量上限、保存期限或正式相簿。
+多張 FIFO 升級後，iPhone generic Simulator build 與 `build-for-testing` 通過；加入 relationship 顯示快照及實際 JPEG regression 後，`CoupleSpaceTests` 26 個 runtime cases 全數通過。新增／更新案例涵蓋兩張照片的 FIFO、只允許 acknowledgement queue head、attempt 只增加在 head、舊單張 payload 與檔案無損載入、第一張檔案遺失時仍保留後續 metadata 與檔案、relationship 快照依 Supabase user 隔離與清除，以及含 EXIF orientation=6 與 GPS 的 2400×1200 JPEG。該 JPEG 經既有 production processor 後輸出正向 800×1600 full image、160×320 thumbnail，orientation 已正規化且 GPS dictionary 已移除，因此無需新增第二套照片處理器。原本「單張拒絕覆寫」限制已由 append-only queue 取代；尚未加入自動背景重送、退避、網路監聽、容量上限、保存期限或正式相簿。
 
 真機 A＋Simulator B 驗證步驟：
 
@@ -288,15 +288,19 @@ Swift W1 client 沿用既有最長邊 1,600 px、JPEG quality 0.8 的裝置端�
 
 同日再完成三張流程：A 斷網依序加入三張測試照片，強制結束並保持離線重開後 queue 與順序均保留；恢復網路只啟動一次重送，B 依原順序看到三張且 A 再次重啟沒有復活已送達項目。因此三張 FIFO 的離線 enqueue、跨啟動保存、單一 processor drain、跨裝置順序與成功清除通過。仍未涵蓋頻繁斷線、大圖、方向組合、自動退避與容量上限。
 
+高解析方向回歸亦於 2026-08-06 通過：真機上傳未編輯的直向高解析測試照片後，Simulator 重新整理可看到相同 client token；照片方向正確，沒有拉伸、裁切或比例錯誤。Simulator 強制結束、重開並再次整理後結果不變。這與 26 個 runtime cases 中的 EXIF orientation／GPS fixture 一起關閉本輪大圖方向風險；頻繁弱網、容量上限與保存期限仍未定案。
+
 ### 斷網冷啟動 relationship 顯示快照
 
 實測發現已登入使用者在完全斷網下強制結束並重開 App 時，遠端 `refresh` 尚未成功前，關係代碼與成員數會回到空狀態。W1 client 因此加入最小唯讀快照：每次 Supabase 成功回傳 relationship 與 membership 後，依 Supabase user UUID 保存 relationship UUID、status 與 member count；冷啟動先恢復這三個顯示欄位，再嘗試遠端更新。伺服器成功確認目前無關係或關係已封存時清除 active snapshot；登出只清空畫面，不把另一使用者的資料載入目前 session。
 
-此快照只改善離線顯示，不授權 marker、message、photo、Realtime 或解除配對操作；所有寫入仍必須有有效 session 並通過 RPC／RLS。UI 以「顯示上次已同步資料」和「Supabase 已更新」區分來源。`build-for-testing`、25 個 Simulator runtime tests、Harness 與 diff hygiene 已通過。
+此快照只改善離線顯示，不授權 marker、message、photo、Realtime 或解除配對操作；所有寫入仍必須有有效 session 並通過 RPC／RLS。UI 以「顯示上次已同步資料」和「Supabase 已更新」區分來源。加入後續照片 regression 後，`build-for-testing`、26 個 Simulator runtime tests、Harness 與 diff hygiene 已通過。
 
 2026-08-06 真機完成「在線整理 → 斷網 → 強制結束 → 重開 → 恢復網路再整理」回歸：離線重開後關係代碼與 `2/2` 立即由快照恢復，重新連線後亦能回到 Supabase 最新狀態。因此原本的斷網冷啟動空白問題已關閉。
 
-同次真機操作曾觀察到 Xcode development build／launch 過慢並出現跳窗，但當時沒有保留跳窗文字；macOS DiagnosticReports 與此專案 DerivedData logs 也沒有 CoupleSpace crash、watchdog `0x8badf00d`、launch timeout 或 debugger attach timeout 證據。此項目前標記為未能定位；若再次出現，需保留跳窗截圖、發生時間及 Xcode Report navigator 對應紀錄後再判斷，不先做猜測性效能修改。
+Xcode 26.6 真機 development run 的慢啟動跳窗已保留證據，內容為 `Launching “CoupleSpace” is taking longer than expected`，並明示 `LLDB is likely reading from device memory to resolve symbols`。本次選擇 Continue 後 App 正常啟動，且沒有 CoupleSpace crash、watchdog `0x8badf00d` 或 App 首畫面逾時證據，因此歸類為 debugger／symbol resolution 延遲，不當成 production App 啟動效能失敗。若後續脫離 Xcode 啟動仍然緩慢，或產生 watchdog／hang report，再獨立量測 App launch。
+
+同次上傳與下載期間 console 出現 `nw_connection_copy_protocol_metadata_internal ... unconnected nw_connection`、`Connection has no local endpoint` 與 socket handler 訊息；但該次照片上傳、跨裝置下載、token、方向、比例及重啟恢復全數成功，沒有對應 API error 或資料缺失，因此只記為本輪非阻斷的 Network.framework 診斷輸出，不加入猜測性 retry 或 suppress hack。若未來同時發生實際 request failure，需以發生時間對照 device console 與 Supabase error 再判斷。
 
 ### Supabase 文字訊息契約與 FIFO outbox spike
 

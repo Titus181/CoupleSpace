@@ -6,7 +6,9 @@
 //
 
 import Foundation
+import ImageIO
 import Testing
+import UIKit
 @testable import CoupleSpace
 
 @MainActor
@@ -396,6 +398,28 @@ struct CoupleSpaceTests {
         ) == PhotoDimensions(width: 300, height: 200))
     }
 
+    @Test func photoAssetProcessorNormalizesLargeRotatedPhotoAndRemovesGPS() throws {
+        let sourceData = try makeJPEGFixture(
+            width: 2_400,
+            height: 1_200,
+            orientation: 6,
+            includesGPS: true
+        )
+
+        let prepared = try PhotoAssetProcessor.prepare(sourceData)
+        let fullProperties = try imageProperties(prepared.fullData)
+        let thumbnailProperties = try imageProperties(prepared.thumbnailData)
+
+        #expect(fullProperties.width == 800)
+        #expect(fullProperties.height == 1_600)
+        #expect(fullProperties.orientation == nil || fullProperties.orientation == 1)
+        #expect(!fullProperties.hasGPS)
+        #expect(thumbnailProperties.width == 160)
+        #expect(thumbnailProperties.height == 320)
+        #expect(thumbnailProperties.orientation == nil || thumbnailProperties.orientation == 1)
+        #expect(!thumbnailProperties.hasGPS)
+    }
+
     @Test func unpairingRequiresBothIndependentArchives() {
         let first = UUID()
         let second = UUID()
@@ -409,6 +433,67 @@ struct CoupleSpaceTests {
             expectedParticipants: expected,
             archivedParticipants: expected
         ))
+    }
+
+    private func makeJPEGFixture(
+        width: Int,
+        height: Int,
+        orientation: Int,
+        includesGPS: Bool
+    ) throws -> Data {
+        let format = UIGraphicsImageRendererFormat()
+        format.opaque = true
+        format.scale = 1
+        let image = UIGraphicsImageRenderer(
+            size: CGSize(width: width, height: height),
+            format: format
+        ).image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+            UIColor.systemYellow.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: width / 3, height: height))
+        }
+        let cgImage = try #require(image.cgImage)
+        let mutableData = NSMutableData()
+        let destination = try #require(CGImageDestinationCreateWithData(
+            mutableData,
+            "public.jpeg" as CFString,
+            1,
+            nil
+        ))
+        var properties: [CFString: Any] = [
+            kCGImagePropertyOrientation: orientation,
+            kCGImageDestinationLossyCompressionQuality: 0.9,
+        ]
+        if includesGPS {
+            properties[kCGImagePropertyGPSDictionary] = [
+                kCGImagePropertyGPSLatitude: 25.0,
+                kCGImagePropertyGPSLatitudeRef: "N",
+                kCGImagePropertyGPSLongitude: 121.0,
+                kCGImagePropertyGPSLongitudeRef: "E",
+            ]
+        }
+        CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
+        try #require(CGImageDestinationFinalize(destination))
+        return mutableData as Data
+    }
+
+    private func imageProperties(_ data: Data) throws -> (
+        width: Int,
+        height: Int,
+        orientation: Int?,
+        hasGPS: Bool
+    ) {
+        let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+        let properties = try #require(
+            CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+        )
+        return (
+            width: try #require(properties[kCGImagePropertyPixelWidth] as? Int),
+            height: try #require(properties[kCGImagePropertyPixelHeight] as? Int),
+            orientation: properties[kCGImagePropertyOrientation] as? Int,
+            hasGPS: properties[kCGImagePropertyGPSDictionary] != nil
+        )
     }
 
     @Test func closingRelationshipBlocksNewSharedContent() {
