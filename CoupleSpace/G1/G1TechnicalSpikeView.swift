@@ -52,6 +52,7 @@ struct G1TechnicalSpikeView: View {
                         Text(pairingModel.status)
                         LabeledContent("關係代碼", value: pairingModel.relationshipToken)
                         LabeledContent("成員", value: "\(pairingModel.memberCount)/2")
+                        LabeledContent("關係資料", value: pairingModel.relationshipSnapshotStatus)
                         LabeledContent("最新標記", value: pairingModel.latestMarkerToken)
                         VStack(alignment: .leading, spacing: 4) {
                             Text("最近 3 個標記（舊 → 新）")
@@ -137,6 +138,7 @@ struct G1TechnicalSpikeView: View {
 
                     Section("Supabase Storage 私有照片") {
                         Text(pairingModel.storageStatus)
+                        LabeledContent("最近 3 張（舊 → 新）", value: pairingModel.recentPhotoTokens)
                         LabeledContent("Photo Outbox", value: pairingModel.photoOutboxStatus)
 
                         if let data = pairingModel.storagePhotoData,
@@ -151,10 +153,7 @@ struct G1TechnicalSpikeView: View {
                         PhotosPicker(selection: $supabaseSelectedPhoto, matching: .images) {
                             Label("選擇並上傳私有測試照片", systemImage: "lock.photo")
                         }
-                        .disabled(
-                            pairingModel.isPhotoOutboxSending
-                                || pairingModel.hasPendingPhoto
-                        )
+                        .disabled(pairingModel.isPhotoOutboxSending)
                         if pairingModel.hasPendingPhoto {
                             Button("重試待送照片") {
                                 Task { await pairingModel.retryPendingPhoto() }

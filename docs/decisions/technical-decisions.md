@@ -37,13 +37,15 @@ last_updated: 2026-08-06
 - 同一 relationship 的 pairing、`2/2` membership、雙向 RLS 寫入及雙向 Realtime 變更提示已通過真機 A＋Simulator B 實測。
 - 私有 Storage 照片已通過雙向上傳、讀取與前景重啟恢復。
 - 單筆及三筆 FIFO marker metadata outbox 已通過斷網、強制結束 App、恢復網路、明確重試、順序一致與資料庫冪等驗證。
+- 三筆 FIFO photo outbox 已通過斷網 enqueue、強制結束 App、恢復網路、單次 drain、順序一致與跨裝置可見性驗證。
+- 最近一次伺服器確認的 relationship 識別、狀態與成員數可依使用者保存為唯讀顯示快照；快照不得取代 session、RPC 或 RLS 授權。
 - relationship closing、禁止新增、雙份 owner-isolated archive、獨立刪除及最後引用 Storage GC 已通過雲端實測。
 - CloudKit Sharing 的 owner／participant 權限無法單獨保證 PD-011 要求的對等封存權，因此不符合正式共同資料來源的硬性條件。
 
 #### 本決策不會一併定案
 
 - 正式訊息、Moment、共同約定及其討論的完整資料模型。
-- 照片容量、壓縮品質、保存期限、正式多筆 upload queue、自動重試與清理政策；W1 單張持久 outbox 只作風險驗證。
+- 照片容量、壓縮品質、保存期限、正式 upload queue、自動重試與清理政策；W1 多張持久 FIFO outbox 只作風險驗證。
 - APNs device token、推播 worker、背景喚醒及鎖定畫面實測細節。
 - 個人封存的匯出格式、交付方式與大型資料處理。
 - outbox 的自動排程、退避、網路監聽與正式訊息的長佇列上限。

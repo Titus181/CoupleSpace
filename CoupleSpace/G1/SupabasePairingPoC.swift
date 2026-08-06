@@ -131,6 +131,7 @@ private struct PersonalArchiveItemRow: Decodable {
 final class SupabasePairingPoC: ObservableObject {
     @Published private(set) var status = "登入後可開始雙身分 RLS 驗證"
     @Published private(set) var relationshipToken = "尚無關係"
+    @Published private(set) var relationshipSnapshotStatus = "尚無本機關係快照"
     @Published private(set) var memberCount = 0
     @Published private(set) var latestMarkerToken = "尚無標記"
     @Published private(set) var recentMarkerTokens = "尚無標記"
@@ -139,6 +140,7 @@ final class SupabasePairingPoC: ObservableObject {
     @Published private(set) var isRealtimeActive = false
     @Published private(set) var storageStatus = "尚無 Supabase Storage 照片"
     @Published private(set) var storagePhotoData: Data?
+    @Published private(set) var recentPhotoTokens = "尚無照片"
     @Published private(set) var relationshipStatus: String?
     @Published private(set) var lifecycleStatus = "尚未開始資料生命週期驗證"
     @Published private(set) var personalArchiveItemCount = 0
@@ -158,6 +160,7 @@ final class SupabasePairingPoC: ObservableObject {
     private let markerOutboxStore: MarkerOutboxStore
     private let photoOutboxStore: PhotoOutboxStore
     private let messageOutboxStore: MessageOutboxStore
+    private let relationshipSnapshotStore: RelationshipSnapshotStore
     private var relationshipID: UUID?
     private var personalArchiveID: UUID?
     private var realtimeChannel: RealtimeChannelV2?
@@ -167,12 +170,14 @@ final class SupabasePairingPoC: ObservableObject {
         client: SupabaseClient,
         markerOutboxStore: MarkerOutboxStore? = nil,
         photoOutboxStore: PhotoOutboxStore? = nil,
-        messageOutboxStore: MessageOutboxStore? = nil
+        messageOutboxStore: MessageOutboxStore? = nil,
+        relationshipSnapshotStore: RelationshipSnapshotStore? = nil
     ) {
         self.client = client
         self.markerOutboxStore = markerOutboxStore ?? MarkerOutboxStore()
         self.photoOutboxStore = photoOutboxStore ?? PhotoOutboxStore()
         self.messageOutboxStore = messageOutboxStore ?? MessageOutboxStore()
+        self.relationshipSnapshotStore = relationshipSnapshotStore ?? RelationshipSnapshotStore()
     }
 
     func createInvitation() async {
@@ -512,10 +517,7 @@ final class SupabasePairingPoC: ObservableObject {
             )
             hasPendingPhoto = true
             photoOutboxStatus = "照片已保存，等待上傳"
-            await sendPendingPhoto(userID: session.user.id)
-        } catch PhotoOutboxStoreError.pendingPhotoExists {
-            hasPendingPhoto = true
-            photoOutboxStatus = "已有一張待送照片；請先重試"
+            await sendPendingPhotos(userID: session.user.id)
         } catch {
             photoOutboxStatus = "無法保存待送照片：\(error.localizedDescription)"
         }
@@ -531,7 +533,8 @@ final class SupabasePairingPoC: ObservableObject {
 
         do {
             let session = try await client.auth.session
-            guard let entry = try photoOutboxStore.load(userID: session.user.id) else {
+            let queue = try photoOutboxStore.load(userID: session.user.id)
+            guard let entry = queue.first else {
                 hasPendingPhoto = false
                 photoOutboxStatus = "尚無待送照片"
                 return
@@ -540,7 +543,7 @@ final class SupabasePairingPoC: ObservableObject {
                 photoOutboxStatus = "待送照片不屬於目前關係"
                 return
             }
-            await sendPendingPhoto(userID: session.user.id)
+            await sendPendingPhotos(userID: session.user.id)
         } catch {
             photoOutboxStatus = "無法讀取待送照片：\(error.localizedDescription)"
         }
@@ -561,15 +564,21 @@ final class SupabasePairingPoC: ObservableObject {
                 .eq("relationship_id", value: relationshipID)
                 .eq("item_kind", value: "photo")
                 .order("created_at", ascending: false)
-                .limit(1)
+                .order("client_id", ascending: false)
+                .limit(3)
                 .execute()
                 .value
 
             guard let photo = photos.first else {
                 storagePhotoData = nil
+                recentPhotoTokens = "尚無照片"
                 storageStatus = "此關係尚無 Supabase Storage 照片"
                 return
             }
+
+            recentPhotoTokens = photos.reversed()
+                .map { shortToken($0.clientID) }
+                .joined(separator: " → ")
 
             storagePhotoData = try await client.storage
                 .from("couplespace-w1-photos")
@@ -594,6 +603,7 @@ final class SupabasePairingPoC: ObservableObject {
     func refresh() async {
         do {
             let session = try await client.auth.session
+            try restoreRelationshipSnapshot(userID: session.user.id)
             try refreshMarkerOutbox(userID: session.user.id)
             try refreshPhotoOutbox(userID: session.user.id)
             try refreshMessageOutbox(userID: session.user.id)
@@ -615,9 +625,11 @@ final class SupabasePairingPoC: ObservableObject {
                     .value
 
                 if let archive = archives.first {
+                    relationshipSnapshotStore.clear(userID: session.user.id)
                     relationshipID = nil
                     relationshipStatus = "archived"
                     relationshipToken = shortToken(archive.relationshipID)
+                    relationshipSnapshotStatus = "Supabase 已確認關係已封存"
                     memberCount = 0
                     latestMarkerToken = "共同資料已封存"
                     recentMarkerTokens = "共同資料已封存"
@@ -626,7 +638,9 @@ final class SupabasePairingPoC: ObservableObject {
                     try await refreshPersonalArchive(archive)
                     status = "關係已封存；目前只能讀取自己的個人封存"
                 } else {
+                    relationshipSnapshotStore.clear(userID: session.user.id)
                     reset(message: "尚未建立 Supabase 測試關係")
+                    relationshipSnapshotStatus = "Supabase 已確認目前無關係"
                 }
                 return
             }
@@ -642,6 +656,15 @@ final class SupabasePairingPoC: ObservableObject {
                 .execute()
                 .value
             memberCount = memberships.count
+            try relationshipSnapshotStore.save(
+                RelationshipSnapshot(
+                    relationshipID: relationship.id,
+                    status: relationship.status,
+                    memberCount: memberCount
+                ),
+                userID: session.user.id
+            )
+            relationshipSnapshotStatus = "Supabase 已更新"
 
             let markers: [SharedMarkerRow] = try await client
                 .from("shared_items")
@@ -708,12 +731,14 @@ final class SupabasePairingPoC: ObservableObject {
         relationshipID = nil
         relationshipStatus = nil
         relationshipToken = "尚無關係"
+        relationshipSnapshotStatus = "尚無本機關係快照"
         memberCount = 0
         latestMarkerToken = "尚無標記"
         recentMarkerTokens = "尚無標記"
         invitationToken = nil
         storagePhotoData = nil
         storageStatus = "尚無 Supabase Storage 照片"
+        recentPhotoTokens = "尚無照片"
         lifecycleStatus = "尚未開始資料生命週期驗證"
         personalArchiveItemCount = 0
         hasPersonalArchive = false
@@ -726,6 +751,18 @@ final class SupabasePairingPoC: ObservableObject {
         recentTestMessages = "尚無測試訊息"
         personalArchiveID = nil
         status = message
+    }
+
+    private func restoreRelationshipSnapshot(userID: UUID) throws {
+        guard let snapshot = try relationshipSnapshotStore.load(userID: userID) else {
+            relationshipSnapshotStatus = "尚無本機關係快照"
+            return
+        }
+        relationshipID = snapshot.relationshipID
+        relationshipStatus = snapshot.status
+        relationshipToken = shortToken(snapshot.relationshipID)
+        memberCount = snapshot.memberCount
+        relationshipSnapshotStatus = "顯示上次已同步資料"
     }
 
     private func sendPendingMarkers(userID: UUID) async {
@@ -844,75 +881,83 @@ final class SupabasePairingPoC: ObservableObject {
         messageOutboxStatus = "有 \(queue.count) 則待送訊息（第一則已嘗試 \(first.attemptCount) 次）"
     }
 
-    private func sendPendingPhoto(userID: UUID) async {
+    private func sendPendingPhotos(userID: UUID) async {
         do {
-            guard let entry = try photoOutboxStore.beginAttempt(userID: userID) else {
-                hasPendingPhoto = false
-                photoOutboxStatus = "尚無待送照片"
-                return
-            }
-            guard entry.relationshipID == relationshipID else {
-                photoOutboxStatus = "待送照片不屬於目前關係"
-                return
-            }
+            let originalCount = try photoOutboxStore.load(userID: userID).count
+            var deliveredCount = 0
 
-            let jpegData = try photoOutboxStore.data(for: entry)
-            let path = storagePath(
-                relationshipID: entry.relationshipID,
-                clientID: entry.clientID
-            )
-            let bucket = client.storage.from("couplespace-w1-photos")
-            hasPendingPhoto = true
-            photoOutboxStatus = "正在傳送照片（第 \(entry.attemptCount) 次）"
-            storageStatus = "正在上傳私有照片…"
-
-            var objectAlreadyExists = false
-            if entry.attemptCount > 1,
-               (try? await bucket.download(path: path)) != nil {
-                objectAlreadyExists = true
-            }
-            if !objectAlreadyExists {
-                try await bucket.upload(
-                    path,
-                    data: jpegData,
-                    options: FileOptions(contentType: "image/jpeg", upsert: false)
-                )
-            }
-
-            let existingItems: [SharedPhotoRow] = try await client
-                .from("shared_items")
-                .select("client_id,creator_user_id,item_kind")
-                .eq("relationship_id", value: entry.relationshipID)
-                .eq("client_id", value: entry.clientID)
-                .limit(1)
-                .execute()
-                .value
-            if let existingItem = existingItems.first {
-                guard existingItem.creatorUserID == userID,
-                      existingItem.itemKind == "photo" else {
-                    throw SupabasePhotoOutboxError.remoteIdentityMismatch
+            while let entry = try photoOutboxStore.beginAttempt(userID: userID) {
+                guard entry.relationshipID == relationshipID else {
+                    photoOutboxStatus = "待送照片不屬於目前關係"
+                    return
                 }
-            } else {
-                try await client
+
+                let jpegData = try photoOutboxStore.data(for: entry)
+                let path = storagePath(
+                    relationshipID: entry.relationshipID,
+                    clientID: entry.clientID
+                )
+                let bucket = client.storage.from("couplespace-w1-photos")
+                hasPendingPhoto = true
+                photoOutboxStatus = "正在傳送第 \(deliveredCount + 1)/\(originalCount) 張照片（第 \(entry.attemptCount) 次）"
+                storageStatus = "正在上傳私有照片…"
+
+                var objectAlreadyExists = false
+                if entry.attemptCount > 1,
+                   (try? await bucket.download(path: path)) != nil {
+                    objectAlreadyExists = true
+                }
+                if !objectAlreadyExists {
+                    try await bucket.upload(
+                        path,
+                        data: jpegData,
+                        options: FileOptions(contentType: "image/jpeg", upsert: false)
+                    )
+                }
+
+                let existingItems: [SharedPhotoRow] = try await client
                     .from("shared_items")
-                    .insert(SharedItemInsert(
-                        relationshipID: entry.relationshipID,
-                        clientID: entry.clientID,
-                        creatorUserID: userID,
-                        itemKind: "photo"
-                    ))
+                    .select("client_id,creator_user_id,item_kind")
+                    .eq("relationship_id", value: entry.relationshipID)
+                    .eq("client_id", value: entry.clientID)
+                    .limit(1)
                     .execute()
+                    .value
+                if let existingItem = existingItems.first {
+                    guard existingItem.creatorUserID == userID,
+                          existingItem.itemKind == "photo" else {
+                        throw SupabasePhotoOutboxError.remoteIdentityMismatch
+                    }
+                } else {
+                    try await client
+                        .from("shared_items")
+                        .insert(SharedItemInsert(
+                            relationshipID: entry.relationshipID,
+                            clientID: entry.clientID,
+                            creatorUserID: userID,
+                            itemKind: "photo"
+                        ))
+                        .execute()
+                }
+
+                guard try photoOutboxStore.acknowledgeFirst(
+                    clientID: entry.clientID,
+                    userID: userID
+                ) else {
+                    photoOutboxStatus = "照片 Outbox 順序不一致，已停止重送"
+                    return
+                }
+                deliveredCount += 1
             }
 
-            try photoOutboxStore.clear(entry, userID: userID)
             hasPendingPhoto = false
-            storagePhotoData = jpegData
-            photoOutboxStatus = "照片已送達：\(shortToken(entry.clientID))"
-            storageStatus = "私有照片已上傳；請在另一個裝置重新整理"
+            await refreshStoragePhoto()
+            photoOutboxStatus = "已依序送達 \(deliveredCount) 張照片"
         } catch {
             hasPendingPhoto = true
-            if let entry = try? photoOutboxStore.load(userID: userID) {
-                photoOutboxStatus = "照片待重試（已嘗試 \(entry.attemptCount) 次）"
+            if let queue = try? photoOutboxStore.load(userID: userID),
+               let first = queue.first {
+                photoOutboxStatus = "尚有 \(queue.count) 張待送照片；第一張已嘗試 \(first.attemptCount) 次"
             } else {
                 photoOutboxStatus = "照片 Outbox 讀取失敗"
             }
@@ -921,13 +966,14 @@ final class SupabasePairingPoC: ObservableObject {
     }
 
     private func refreshPhotoOutbox(userID: UUID) throws {
-        guard let entry = try photoOutboxStore.load(userID: userID) else {
+        let queue = try photoOutboxStore.load(userID: userID)
+        guard let first = queue.first else {
             hasPendingPhoto = false
             photoOutboxStatus = "尚無待送照片"
             return
         }
         hasPendingPhoto = true
-        photoOutboxStatus = "有一張待送照片（已嘗試 \(entry.attemptCount) 次）"
+        photoOutboxStatus = "有 \(queue.count) 張待送照片（第一張已嘗試 \(first.attemptCount) 次）"
     }
 
     private func refreshPersonalArchive(_ archive: PersonalArchiveRow) async throws {

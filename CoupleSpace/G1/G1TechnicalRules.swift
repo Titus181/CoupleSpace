@@ -1,5 +1,37 @@
 import Foundation
 
+struct RelationshipSnapshot: Codable, Equatable {
+    let relationshipID: UUID
+    let status: String
+    let memberCount: Int
+}
+
+struct RelationshipSnapshotStore {
+    private let defaults: UserDefaults
+    private let keyPrefix = "couplespace.w1.relationship-snapshot."
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func load(userID: UUID) throws -> RelationshipSnapshot? {
+        guard let data = defaults.data(forKey: key(userID)) else { return nil }
+        return try JSONDecoder().decode(RelationshipSnapshot.self, from: data)
+    }
+
+    func save(_ snapshot: RelationshipSnapshot, userID: UUID) throws {
+        defaults.set(try JSONEncoder().encode(snapshot), forKey: key(userID))
+    }
+
+    func clear(userID: UUID) {
+        defaults.removeObject(forKey: key(userID))
+    }
+
+    private func key(_ userID: UUID) -> String {
+        keyPrefix + userID.uuidString.lowercased()
+    }
+}
+
 enum MessageDeliveryState: Equatable {
     case queued
     case sending(attempt: Int)
@@ -185,15 +217,35 @@ struct PhotoOutboxEntry: Codable, Equatable {
     let localFileName: String
 }
 
+struct PhotoOutboxQueue: Codable, Equatable {
+    private(set) var entries: [PhotoOutboxEntry] = []
+
+    var isEmpty: Bool { entries.isEmpty }
+    var count: Int { entries.count }
+    var first: PhotoOutboxEntry? { entries.first }
+
+    mutating func enqueue(_ entry: PhotoOutboxEntry) {
+        entries.append(entry)
+    }
+
+    mutating func beginFirstAttempt() -> PhotoOutboxEntry? {
+        guard !entries.isEmpty else { return nil }
+        entries[0].attemptCount += 1
+        return entries[0]
+    }
+
+    mutating func acknowledgeFirst(clientID: UUID) -> PhotoOutboxEntry? {
+        guard entries.first?.clientID == clientID else { return nil }
+        return entries.removeFirst()
+    }
+}
+
 enum PhotoOutboxStoreError: LocalizedError, Equatable {
-    case pendingPhotoExists
     case invalidLocalFileName
     case missingLocalFile
 
     var errorDescription: String? {
         switch self {
-        case .pendingPhotoExists:
-            "已有一張待送照片"
         case .invalidLocalFileName:
             "待送照片的本機檔名無效"
         case .missingLocalFile:
@@ -229,10 +281,7 @@ struct PhotoOutboxStore {
         clientID: UUID,
         userID: UUID
     ) throws -> PhotoOutboxEntry {
-        guard try load(userID: userID) == nil else {
-            throw PhotoOutboxStoreError.pendingPhotoExists
-        }
-
+        var queue = try load(userID: userID)
         try fileManager.createDirectory(
             at: directoryURL,
             withIntermediateDirectories: true
@@ -250,7 +299,8 @@ struct PhotoOutboxStore {
         )
 
         do {
-            defaults.set(try JSONEncoder().encode(entry), forKey: key(userID))
+            queue.enqueue(entry)
+            try save(queue, userID: userID)
         } catch {
             try? fileManager.removeItem(at: fileURL)
             throw error
@@ -258,17 +308,38 @@ struct PhotoOutboxStore {
         return entry
     }
 
-    func load(userID: UUID) throws -> PhotoOutboxEntry? {
-        guard let data = defaults.data(forKey: key(userID)) else { return nil }
-        let entry = try JSONDecoder().decode(PhotoOutboxEntry.self, from: data)
-        _ = try validatedFileURL(for: entry)
-        return entry
+    func load(userID: UUID) throws -> PhotoOutboxQueue {
+        guard let data = defaults.data(forKey: key(userID)) else {
+            return PhotoOutboxQueue()
+        }
+
+        let queue: PhotoOutboxQueue
+        do {
+            queue = try JSONDecoder().decode(PhotoOutboxQueue.self, from: data)
+        } catch let queueError {
+            guard let legacyEntry = try? JSONDecoder().decode(PhotoOutboxEntry.self, from: data) else {
+                throw queueError
+            }
+            queue = PhotoOutboxQueue(entries: [legacyEntry])
+        }
+        for entry in queue.entries {
+            _ = try validatedFileURL(for: entry)
+        }
+        return queue
+    }
+
+    func save(_ queue: PhotoOutboxQueue, userID: UUID) throws {
+        guard !queue.isEmpty else {
+            defaults.removeObject(forKey: key(userID))
+            return
+        }
+        defaults.set(try JSONEncoder().encode(queue), forKey: key(userID))
     }
 
     func beginAttempt(userID: UUID) throws -> PhotoOutboxEntry? {
-        guard var entry = try load(userID: userID) else { return nil }
-        entry.attemptCount += 1
-        defaults.set(try JSONEncoder().encode(entry), forKey: key(userID))
+        var queue = try load(userID: userID)
+        guard let entry = queue.beginFirstAttempt() else { return nil }
+        try save(queue, userID: userID)
         return entry
     }
 
@@ -280,12 +351,17 @@ struct PhotoOutboxStore {
         return try Data(contentsOf: fileURL)
     }
 
-    func clear(_ entry: PhotoOutboxEntry, userID: UUID) throws {
-        let fileURL = try validatedFileURL(for: entry)
+    func acknowledgeFirst(clientID: UUID, userID: UUID) throws -> Bool {
+        var queue = try load(userID: userID)
+        guard let acknowledgedEntry = queue.acknowledgeFirst(clientID: clientID) else {
+            return false
+        }
+        let fileURL = try validatedFileURL(for: acknowledgedEntry)
         if fileManager.fileExists(atPath: fileURL.path) {
             try fileManager.removeItem(at: fileURL)
         }
-        defaults.removeObject(forKey: key(userID))
+        try save(queue, userID: userID)
+        return true
     }
 
     private func key(_ userID: UUID) -> String {

@@ -46,6 +46,29 @@ struct CoupleSpaceTests {
         ) == .signedIn)
     }
 
+    @Test func relationshipSnapshotPersistsPerSupabaseUserAndCanBeCleared() throws {
+        let suiteName = "RelationshipSnapshotStoreTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let firstUserID = UUID(uuidString: "00000000-0000-0000-0000-000000000091")!
+        let secondUserID = UUID(uuidString: "00000000-0000-0000-0000-000000000092")!
+        let snapshot = RelationshipSnapshot(
+            relationshipID: UUID(uuidString: "90000000-0000-0000-0000-000000000001")!,
+            status: "active",
+            memberCount: 2
+        )
+        let store = RelationshipSnapshotStore(defaults: defaults)
+
+        try store.save(snapshot, userID: firstUserID)
+
+        #expect(try RelationshipSnapshotStore(defaults: defaults).load(userID: firstUserID) == snapshot)
+        #expect(try store.load(userID: secondUserID) == nil)
+
+        store.clear(userID: firstUserID)
+        #expect(try store.load(userID: firstUserID) == nil)
+    }
+
     @Test func appleSignInNonceHashIsDeterministic() {
         #expect(AppleSignInNonce.hash("CoupleSpace-W1") ==
                 "3639d0045c9968cfb5182d7a7591aa078f00a411a40ca34943d9b3339358bf15")
@@ -217,12 +240,12 @@ struct CoupleSpaceTests {
         #expect(sending.attemptCount == 1)
         #expect(try restoredStore.data(for: sending) == jpegData)
 
-        try restoredStore.clear(sending, userID: userID)
-        #expect(try restoredStore.load(userID: userID) == nil)
+        #expect(try restoredStore.acknowledgeFirst(clientID: sending.clientID, userID: userID))
+        #expect(try restoredStore.load(userID: userID).isEmpty)
     }
 
-    @Test func photoOutboxDoesNotReplaceAnExistingPendingPhoto() throws {
-        let suiteName = "PhotoOutboxDuplicateTests.\(UUID().uuidString)"
+    @Test func photoOutboxPreservesFIFOAndRejectsOutOfOrderAcknowledgement() throws {
+        let suiteName = "PhotoOutboxFIFOTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
         let directoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(suiteName, isDirectory: true)
@@ -234,21 +257,30 @@ struct CoupleSpaceTests {
         let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000072")!
         let relationshipID = UUID(uuidString: "90000000-0000-0000-0000-000000000001")!
         let store = PhotoOutboxStore(defaults: defaults, directoryURL: directoryURL)
+        let firstClientID = UUID(uuidString: "92000000-0000-0000-0000-000000000002")!
+        let secondClientID = UUID(uuidString: "92000000-0000-0000-0000-000000000003")!
         _ = try store.create(
             jpegData: Data([1]),
             relationshipID: relationshipID,
-            clientID: UUID(uuidString: "92000000-0000-0000-0000-000000000002")!,
+            clientID: firstClientID,
+            userID: userID
+        )
+        _ = try store.create(
+            jpegData: Data([2]),
+            relationshipID: relationshipID,
+            clientID: secondClientID,
             userID: userID
         )
 
-        #expect(throws: PhotoOutboxStoreError.pendingPhotoExists) {
-            try store.create(
-                jpegData: Data([2]),
-                relationshipID: relationshipID,
-                clientID: UUID(uuidString: "92000000-0000-0000-0000-000000000003")!,
-                userID: userID
-            )
-        }
+        #expect(try store.load(userID: userID).entries.map(\.clientID) == [firstClientID, secondClientID])
+        #expect(try store.beginAttempt(userID: userID)?.clientID == firstClientID)
+        #expect(!(try store.acknowledgeFirst(clientID: secondClientID, userID: userID)))
+        #expect(try store.load(userID: userID).entries.map(\.clientID) == [firstClientID, secondClientID])
+        #expect(try store.acknowledgeFirst(clientID: firstClientID, userID: userID))
+        let remaining = try store.load(userID: userID)
+        #expect(remaining.entries.map(\.clientID) == [secondClientID])
+        #expect(remaining.first?.attemptCount == 0)
+        #expect(try store.data(for: try #require(remaining.first)) == Data([2]))
     }
 
     @Test func photoOutboxReportsMissingLocalDataWithoutDiscardingMetadata() throws {
@@ -270,6 +302,12 @@ struct CoupleSpaceTests {
             clientID: clientID,
             userID: userID
         )
+        let secondEntry = try store.create(
+            jpegData: Data([2]),
+            relationshipID: entry.relationshipID,
+            clientID: UUID(uuidString: "92000000-0000-0000-0000-000000000006")!,
+            userID: userID
+        )
         try FileManager.default.removeItem(
             at: directoryURL.appendingPathComponent(entry.localFileName)
         )
@@ -277,7 +315,39 @@ struct CoupleSpaceTests {
         #expect(throws: PhotoOutboxStoreError.missingLocalFile) {
             try store.data(for: entry)
         }
-        #expect(try store.load(userID: userID) == entry)
+        #expect(try store.load(userID: userID).entries == [entry, secondEntry])
+        #expect(try store.data(for: secondEntry) == Data([2]))
+    }
+
+    @Test func photoOutboxLoadsLegacySingleEntryWithoutLosingItsFile() throws {
+        let suiteName = "PhotoOutboxLegacyTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(suiteName, isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+
+        let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000074")!
+        let clientID = UUID(uuidString: "92000000-0000-0000-0000-000000000005")!
+        let legacyEntry = PhotoOutboxEntry(
+            relationshipID: UUID(uuidString: "90000000-0000-0000-0000-000000000001")!,
+            clientID: clientID,
+            attemptCount: 2,
+            localFileName: "\(clientID.uuidString.lowercased()).jpg"
+        )
+        try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        let jpegData = Data([1, 2, 3])
+        try jpegData.write(to: directoryURL.appendingPathComponent(legacyEntry.localFileName))
+        defaults.set(
+            try JSONEncoder().encode(legacyEntry),
+            forKey: "couplespace.w1.photo-outbox.\(userID.uuidString.lowercased())"
+        )
+
+        let store = PhotoOutboxStore(defaults: defaults, directoryURL: directoryURL)
+        #expect(try store.load(userID: userID).entries == [legacyEntry])
+        #expect(try store.data(for: legacyEntry) == jpegData)
     }
 
     @Test func pendingOrSendingPhotoBlocksUnpairing() {

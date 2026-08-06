@@ -18,7 +18,7 @@ W1 不先完成正式產品功能。先以最小真機 spike 驗證最大未知�
 | --- | --- | --- | --- |
 | 身分與配對 | Sign in with Apple credential 交由 Supabase Auth；Postgres constraint、RLS 與 RPC 管理一對一 relationship | 真機 A＋Simulator B、兩個 Apple ID 的登入、配對、session 恢復與雙向 RLS 初步通過 | 第三身分雲端拒絕與兩支真實 iPhone 待驗證 |
 | 同步與聊天 | Realtime 只作變更提示並重新經 RLS 讀取；client UUID、server timestamp 與持久 outbox 提供冪等和穩定順序 | 單筆及三筆 FIFO marker metadata outbox 的斷網、重啟、重連、順序與雙裝置一致性通過 | 正式訊息內容、較長佇列、自動排程與弱網仍待驗證 |
-| 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；單張持久 upload outbox 已完成本機實作與編譯 | outbox 真機斷網重啟、大圖、方向、容量與保存期限待驗證 |
+| 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；三張持久 FIFO upload outbox 的斷網、跨啟動、重送與順序通過 | 大圖、方向、容量與保存期限待驗證 |
 | 推播 | 伺服器驗證 relationship／recipient 後才送出泛化 APNs 文案；App 收到提示後重新讀取 | 資料最小化規則測試已建立；真機未驗證 | 錯發、鎖定畫面洩漏內容、背景或終止狀態送達不足 |
 | 所有權與解除配對 | Supabase 伺服器建立雙份 owner-isolated 唯讀封存，兩人可獨立刪除 | closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過 | 匯出格式、交付與大型封存待驗證 |
 | 有意義雙向互動 | 同一 relationship、同一 interaction object 內，兩個目前伴侶各至少有一次符合資格的 contribution；只記 ID、種類與時間，不記內容 | 純規則測試已建立 | 事件無法區分單方重複操作與真正雙方參與，或需要記錄私密內容 |
@@ -259,9 +259,11 @@ Swift W1 client 沿用既有最長邊 1,600 px、JPEG quality 0.8 的裝置端�
 
 此結果通過同一 active relationship 內兩位 member 的私有照片雙向上傳、metadata RLS 查詢與 private bucket 下載。自動即時更新、第三身分的雲端拒絕、closing／archive、弱網與刪除一致性仍未由本次成功推論為通過。
 
-### Supabase 單張照片持久 outbox 本機 spike
+### Supabase 照片持久 FIFO outbox spike
 
 為驗證照片在斷網及 App 重啟後仍可明確重試，而不先建立正式相簿或多照片佇列，W1 client 新增單張 `PhotoOutboxEntry`：依 Supabase user UUID 保存 relationship UUID、client UUID、attempt count 與受控本機檔名；重新編碼後的 JPEG 以完整檔案保護寫入 Application Support。已有待送照片時不允許選取另一張覆寫，待送照片完成前也不允許由本裝置開始解除配對。
+
+2026-08-06 在單張實測通過後，以相同 entry 與檔案格式最小升級為 `PhotoOutboxQueue`。新照片只附加在尾端；processor 每次只處理 queue head，伺服器確認 object 與 metadata 後才移除該筆本機檔案與 metadata，錯序 acknowledgement 一律拒絕。既有單張 UserDefaults payload 可解碼成只有一筆的 queue，不要求使用者清除 App 資料。W1 畫面只顯示最近三張 client token（舊到新）與最新縮圖，不記錄原始檔名或照片內容。
 
 每次重試沿用同一 client UUID 及 deterministic Storage path。第二次以後會先確認同一路徑是否已存在，處理 App 在 object upload 後中止的情境；寫入 metadata 前亦查核既有 row 必須屬於同一 creator 且種類為 `photo`。只有 Storage object 與 RLS metadata 都確認成功後才刪除本機 JPEG 與 outbox metadata。損壞 metadata、非法檔名或遺失檔案不會被靜默視為空 outbox。
 
@@ -269,7 +271,9 @@ Swift W1 client 沿用既有最長邊 1,600 px、JPEG quality 0.8 的裝置端�
 - 一次性 macOS smoke 直接編譯同一份 `G1TechnicalRules.swift`，實際寫入、重新載入、增加 attempt、拒絕覆寫與清除，輸出 `photo-outbox-smoke-ok`。
 - iPhone Simulator generic `build-for-testing` 通過，且 actor-isolation warning 已清除。
 - 後續由 Xcode crash report 定位，runner 無事件並非單純 infrastructure stall：測試 host 啟動 W1 畫面時提前建立 `CloudKitSharingPoC.shared`，`CKContainer.default()` 在測試簽署環境觸發 `SIGABRT`。TD-001 已將 CloudKit PoC 退居實驗紀錄，因此已從目前 Supabase W1 畫面移除該 singleton 與 CloudKit 操作區，不刪除歷史 PoC 原始碼。同一 Simulator 指令重跑後，`CoupleSpaceTests` 21 個案例全數通過，包含照片 outbox 跨 store 恢復、拒絕覆寫、遺失檔案保留 metadata 與 pending photo 阻擋解除配對。
-- 本切片沒有新增 migration。它不包含多張照片、背景自動重送、退避、網路監聽、容量／保存期限政策，亦未宣稱永久拒絕或解除配對競態下的 orphan cleanup 已完整處理。
+- 原始單張切片沒有新增 migration。當時不包含多張照片、背景自動重送、退避、網路監聽、容量／保存期限政策，亦未宣稱永久拒絕或解除配對競態下的 orphan cleanup 已完整處理。
+
+多張 FIFO 升級後，iPhone generic Simulator build 與 `build-for-testing` 通過；加入 relationship 顯示快照 regression 後，`CoupleSpaceTests` 25 個 runtime cases 全數通過。新增／更新案例涵蓋兩張照片的 FIFO、只允許 acknowledgement queue head、attempt 只增加在 head、舊單張 payload 與檔案無損載入、第一張檔案遺失時仍保留後續 metadata 與檔案，以及 relationship 快照依 Supabase user 隔離與清除。原本「單張拒絕覆寫」限制已由 append-only queue 取代；尚未加入自動背景重送、退避、網路監聽、容量上限、保存期限或正式相簿。
 
 真機 A＋Simulator B 驗證步驟：
 
@@ -281,6 +285,18 @@ Swift W1 client 沿用既有最長邊 1,600 px、JPEG quality 0.8 的裝置端�
 6. A 再次強制結束並重開；不得重新出現已送達的待送照片。
 
 2026-08-06 真機 A＋Simulator B 已完成上述全流程：A 斷網選照後 Outbox 顯示待送，強制關閉並重啟後仍恢復同一張待送照片；恢復網路並只重試一次後，B 重新整理即看見同一張照片，A 再次重啟也未復活已送達項目。因此單張照片的離線持久化、人工重送、跨裝置可見性與成功後清除已通過。這不代表多照片 FIFO、背景自動重送、網路頻繁切換、大圖與方向組合已通過。
+
+同日再完成三張流程：A 斷網依序加入三張測試照片，強制結束並保持離線重開後 queue 與順序均保留；恢復網路只啟動一次重送，B 依原順序看到三張且 A 再次重啟沒有復活已送達項目。因此三張 FIFO 的離線 enqueue、跨啟動保存、單一 processor drain、跨裝置順序與成功清除通過。仍未涵蓋頻繁斷線、大圖、方向組合、自動退避與容量上限。
+
+### 斷網冷啟動 relationship 顯示快照
+
+實測發現已登入使用者在完全斷網下強制結束並重開 App 時，遠端 `refresh` 尚未成功前，關係代碼與成員數會回到空狀態。W1 client 因此加入最小唯讀快照：每次 Supabase 成功回傳 relationship 與 membership 後，依 Supabase user UUID 保存 relationship UUID、status 與 member count；冷啟動先恢復這三個顯示欄位，再嘗試遠端更新。伺服器成功確認目前無關係或關係已封存時清除 active snapshot；登出只清空畫面，不把另一使用者的資料載入目前 session。
+
+此快照只改善離線顯示，不授權 marker、message、photo、Realtime 或解除配對操作；所有寫入仍必須有有效 session 並通過 RPC／RLS。UI 以「顯示上次已同步資料」和「Supabase 已更新」區分來源。`build-for-testing`、25 個 Simulator runtime tests、Harness 與 diff hygiene 已通過。
+
+2026-08-06 真機完成「在線整理 → 斷網 → 強制結束 → 重開 → 恢復網路再整理」回歸：離線重開後關係代碼與 `2/2` 立即由快照恢復，重新連線後亦能回到 Supabase 最新狀態。因此原本的斷網冷啟動空白問題已關閉。
+
+同次真機操作曾觀察到 Xcode development build／launch 過慢並出現跳窗，但當時沒有保留跳窗文字；macOS DiagnosticReports 與此專案 DerivedData logs 也沒有 CoupleSpace crash、watchdog `0x8badf00d`、launch timeout 或 debugger attach timeout 證據。此項目前標記為未能定位；若再次出現，需保留跳窗截圖、發生時間及 Xcode Report navigator 對應紀錄後再判斷，不先做猜測性效能修改。
 
 ### Supabase 文字訊息契約與 FIFO outbox spike
 
@@ -338,7 +354,7 @@ W1 Swift client 已接上既有 `begin_unpairing` 與 `seal_personal_archive` RP
 
 - Supabase 路徑的兩支真實 iPhone、兩個 Apple ID 登入、配對、雙向資料與重啟證據。
 - 以雲端 Supabase 測試專案驗證第三身分拒絕；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件、Storage 私有照片雙向讀寫、單筆及三筆 FIFO marker 離線持久 outbox／冪等重送、三筆文字訊息 FIFO、closing／雙份 personal archive／archived photo，以及 owner-only archive delete／最後引用 object GC 已通過。
-- 照片弱網、離線重試、大圖與方向組合、保存期限及刪除一致性實測。
+- 照片頻繁弱網、大圖與方向組合、保存期限及刪除一致性實測。
 - 推播接收者、背景同步與鎖定畫面隱私真機實測。
 - 個人封存匯出格式、交付方式與大型資料處理實測。
 - 正式訊息、照片政策、推播與背景重試的剩餘子決策；受管後端與共同資料系統紀錄已由 TD-001 關閉。
