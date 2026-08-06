@@ -4,7 +4,7 @@
 
 CoupleSpace 是以 iPhone 為首要平台的一對一伴侶私人空間。首版核心循環是：
 
-`配對 → Moment → 雙向互動 → 對話 → 收藏 → 共同時間線`
+`配對 → Moment／共同約定 → 雙向互動／約定討論 → 對話 → 收藏 → 共同時間線`
 
 目前產品範圍與完成條件以 `docs/product/04-iphone-mvp-scope.md` 及
 `docs/operations/01-v1-development-roadmap.md` 為準。尚未完成 G1 技術驗證的方案，不得寫成既定架構。

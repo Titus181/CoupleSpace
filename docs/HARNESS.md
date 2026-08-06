@@ -1,7 +1,7 @@
 ---
 title: CoupleSpace Project Harness
 status: active
-last_updated: 2026-08-04
+last_updated: 2026-08-06
 ---
 
 # CoupleSpace Project Harness
@@ -94,7 +94,7 @@ CI 建立後，將較慢的完整 integration/UI matrix、離線重試、資料 
 至少記錄以下人工或自動證據：
 
 1. 兩個新 Apple ID 在兩支真實 iPhone 完成登入與一對一配對。
-2. `Moment → 回應 → 對話 → 收藏 → 共同時間線` 全流程成立。
+2. `Moment／共同約定 → 回應／約定討論 → 對話 → 收藏 → 共同時間線` 全流程成立。
 3. 弱網、離線與重連後，訊息不遺失、不重複且順序可預期。
 4. 推播到達正確使用者，鎖定畫面預設不顯示私密內容。
 5. App Lock、背景切換與重新啟動行為正確。

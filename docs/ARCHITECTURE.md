@@ -1,14 +1,14 @@
 ---
 title: CoupleSpace Architecture
 status: provisional
-last_updated: 2026-08-04
+last_updated: 2026-08-06
 ---
 
 # CoupleSpace Architecture
 
 ## 系統目的
 
-CoupleSpace 提供一對一伴侶私密互動空間。iPhone MVP 聚焦配對、Moment、聊天、收藏、共同時間線、通知隱私與資料生命週期。
+CoupleSpace 提供一對一伴侶私密互動空間。iPhone MVP 聚焦配對、Moment、基本共同約定與其專屬討論、聊天、收藏、共同時間線、通知隱私與資料生命週期。
 
 Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不是目前核心。詳細範圍以 `product/04-iphone-mvp-scope.md` 為準。
 
@@ -27,7 +27,7 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 | --- | --- |
 | App composition | 啟動、dependency wiring、環境與平台入口 |
 | Presentation | SwiftUI 畫面、navigation、顯示狀態與使用者意圖 |
-| Application | 配對、Moment、聊天、收藏、時間線與資料生命週期 use cases |
+| Application | 配對、Moment、共同約定、約定討論、聊天、收藏、時間線與資料生命週期 use cases |
 | Domain | 不依賴 UI／儲存框架的規則、狀態轉換與 value types |
 | Data／Services | 儲存、同步、帳號、通知、照片、分析與其 adapter |
 | Platform | Face ID、background、push、Apple framework integration |
@@ -75,7 +75,7 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 
 1. 一位使用者最多只有一個有效伴侶關係。
 2. 任何共同資料讀寫都必須驗證正確的伴侶範圍。
-3. 訊息與 Moment 的重試不能造成重複資料；排序規則必須可預期。
+3. 訊息、共同約定與 Moment 的重試不能造成重複資料；排序規則必須可預期。
 4. 通知與分析預設採資料最小化，不洩漏私密內容。
 5. 刪除、匯出與解除配對依同一份明確規則執行。
 6. iPhone 核心流程不依賴 Watch 或非 MVP 平台。
