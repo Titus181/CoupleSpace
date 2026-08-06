@@ -38,6 +38,18 @@ private struct SharedMarkerWriteParameters: Encodable {
     }
 }
 
+private struct SharedMessageWriteParameters: Encodable {
+    let targetRelationshipID: UUID
+    let targetClientID: UUID
+    let targetBody: String
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+        case targetClientID = "target_client_id"
+        case targetBody = "target_body"
+    }
+}
+
 private struct RelationshipRow: Decodable {
     let id: UUID
     let status: String
@@ -56,6 +68,16 @@ private struct SharedMarkerRow: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case clientID = "client_id"
+    }
+}
+
+private struct SharedMessageRow: Decodable {
+    let clientID: UUID
+    let textContent: String
+
+    enum CodingKeys: String, CodingKey {
+        case clientID = "client_id"
+        case textContent = "text_content"
     }
 }
 
@@ -127,10 +149,15 @@ final class SupabasePairingPoC: ObservableObject {
     @Published private(set) var photoOutboxStatus = "尚無待送照片"
     @Published private(set) var hasPendingPhoto = false
     @Published private(set) var isPhotoOutboxSending = false
+    @Published private(set) var messageOutboxStatus = "尚無待送訊息"
+    @Published private(set) var hasPendingMessage = false
+    @Published private(set) var isMessageOutboxSending = false
+    @Published private(set) var recentTestMessages = "尚無測試訊息"
 
     private let client: SupabaseClient
     private let markerOutboxStore: MarkerOutboxStore
     private let photoOutboxStore: PhotoOutboxStore
+    private let messageOutboxStore: MessageOutboxStore
     private var relationshipID: UUID?
     private var personalArchiveID: UUID?
     private var realtimeChannel: RealtimeChannelV2?
@@ -139,11 +166,13 @@ final class SupabasePairingPoC: ObservableObject {
     init(
         client: SupabaseClient,
         markerOutboxStore: MarkerOutboxStore? = nil,
-        photoOutboxStore: PhotoOutboxStore? = nil
+        photoOutboxStore: PhotoOutboxStore? = nil,
+        messageOutboxStore: MessageOutboxStore? = nil
     ) {
         self.client = client
         self.markerOutboxStore = markerOutboxStore ?? MarkerOutboxStore()
         self.photoOutboxStore = photoOutboxStore ?? PhotoOutboxStore()
+        self.messageOutboxStore = messageOutboxStore ?? MessageOutboxStore()
     }
 
     func createInvitation() async {
@@ -253,6 +282,68 @@ final class SupabasePairingPoC: ObservableObject {
             await sendPendingMarkers(userID: session.user.id)
         } catch {
             markerOutboxStatus = "無法讀取待送標記：\(error.localizedDescription)"
+        }
+    }
+
+    func writeTestMessage() async {
+        guard let relationshipID else {
+            status = "請先建立或加入測試關係"
+            return
+        }
+        guard !isMessageOutboxSending else {
+            messageOutboxStatus = "正在依序傳送訊息，請稍候"
+            return
+        }
+        isMessageOutboxSending = true
+        defer { isMessageOutboxSending = false }
+
+        do {
+            let session = try await client.auth.session
+            var queue = try messageOutboxStore.load(userID: session.user.id)
+            guard queue.entries.allSatisfy({ $0.relationshipID == relationshipID }) else {
+                messageOutboxStatus = "另一段關係仍有待送訊息，未建立新項目"
+                return
+            }
+            let clientID = UUID()
+            let body = "W1 test \(shortToken(clientID))"
+            queue.enqueue(MessageOutboxEntry(
+                relationshipID: relationshipID,
+                clientID: clientID,
+                body: body,
+                attemptCount: 0
+            ))
+            try messageOutboxStore.save(queue, userID: session.user.id)
+            hasPendingMessage = true
+            messageOutboxStatus = "有 \(queue.count) 則待送訊息"
+            await sendPendingMessages(userID: session.user.id)
+        } catch {
+            messageOutboxStatus = "無法建立待送訊息：\(error.localizedDescription)"
+        }
+    }
+
+    func retryPendingMessages() async {
+        guard !isMessageOutboxSending else {
+            messageOutboxStatus = "正在依序傳送訊息，請稍候"
+            return
+        }
+        isMessageOutboxSending = true
+        defer { isMessageOutboxSending = false }
+
+        do {
+            let session = try await client.auth.session
+            let queue = try messageOutboxStore.load(userID: session.user.id)
+            guard !queue.isEmpty else {
+                hasPendingMessage = false
+                messageOutboxStatus = "尚無待送訊息"
+                return
+            }
+            guard queue.entries.allSatisfy({ $0.relationshipID == relationshipID }) else {
+                messageOutboxStatus = "待送訊息不屬於目前關係"
+                return
+            }
+            await sendPendingMessages(userID: session.user.id)
+        } catch {
+            messageOutboxStatus = "無法讀取待送訊息：\(error.localizedDescription)"
         }
     }
 
@@ -375,7 +466,7 @@ final class SupabasePairingPoC: ObservableObject {
         do {
             try await channel.subscribeWithError()
             isRealtimeActive = true
-            realtimeStatus = "Realtime 已連線，等待對方寫入標記"
+            realtimeStatus = "Realtime 已連線，等待對方寫入共同資料"
         } catch {
             realtimeTask?.cancel()
             realtimeTask = nil
@@ -505,6 +596,7 @@ final class SupabasePairingPoC: ObservableObject {
             let session = try await client.auth.session
             try refreshMarkerOutbox(userID: session.user.id)
             try refreshPhotoOutbox(userID: session.user.id)
+            try refreshMessageOutbox(userID: session.user.id)
             let relationships: [RelationshipRow] = try await client
                 .from("relationships")
                 .select("id,status")
@@ -567,6 +659,22 @@ final class SupabasePairingPoC: ObservableObject {
             if recentMarkerTokens.isEmpty {
                 recentMarkerTokens = "尚無標記"
             }
+            let messages: [SharedMessageRow] = try await client
+                .from("shared_items")
+                .select("client_id,text_content")
+                .eq("relationship_id", value: relationship.id)
+                .eq("item_kind", value: "message")
+                .order("created_at", ascending: false)
+                .order("client_id", ascending: false)
+                .limit(3)
+                .execute()
+                .value
+            recentTestMessages = messages.reversed()
+                .map(\.textContent)
+                .joined(separator: " → ")
+            if recentTestMessages.isEmpty {
+                recentTestMessages = "尚無測試訊息"
+            }
             let archives: [PersonalArchiveRow] = try await client
                 .from("personal_archives")
                 .select("id,relationship_id")
@@ -613,6 +721,9 @@ final class SupabasePairingPoC: ObservableObject {
         markerOutboxStatus = "尚無待送標記"
         hasPendingPhoto = false
         photoOutboxStatus = "尚無待送照片"
+        hasPendingMessage = false
+        messageOutboxStatus = "尚無待送訊息"
+        recentTestMessages = "尚無測試訊息"
         personalArchiveID = nil
         status = message
     }
@@ -676,6 +787,61 @@ final class SupabasePairingPoC: ObservableObject {
 
         hasPendingMarker = true
         markerOutboxStatus = "有 \(queue.count) 個待送標記（第一個已嘗試 \(first.attemptCount) 次）"
+    }
+
+    private func sendPendingMessages(userID: UUID) async {
+        do {
+            var queue = try messageOutboxStore.load(userID: userID)
+            let originalCount = queue.count
+            var deliveredCount = 0
+
+            while let sendingEntry = queue.beginFirstAttempt() {
+                try messageOutboxStore.save(queue, userID: userID)
+                hasPendingMessage = true
+                messageOutboxStatus = "正在傳送第 \(deliveredCount + 1)/\(originalCount) 則訊息（第 \(sendingEntry.attemptCount) 次）"
+
+                try await client
+                    .rpc(
+                        "write_shared_message",
+                        params: SharedMessageWriteParameters(
+                            targetRelationshipID: sendingEntry.relationshipID,
+                            targetClientID: sendingEntry.clientID,
+                            targetBody: sendingEntry.body
+                        )
+                    )
+                    .execute()
+
+                guard queue.acknowledgeFirst(clientID: sendingEntry.clientID) else {
+                    messageOutboxStatus = "訊息 Outbox 順序不一致，已停止重送"
+                    return
+                }
+                try messageOutboxStore.save(queue, userID: userID)
+                deliveredCount += 1
+            }
+
+            hasPendingMessage = false
+            await refresh()
+            messageOutboxStatus = "已依序送達 \(deliveredCount) 則測試訊息"
+        } catch {
+            hasPendingMessage = true
+            if let queue = try? messageOutboxStore.load(userID: userID),
+               let first = queue.first {
+                messageOutboxStatus = "尚有 \(queue.count) 則待送訊息；第一則已嘗試 \(first.attemptCount) 次"
+            } else {
+                messageOutboxStatus = "訊息 Outbox 讀取失敗，已停止重送"
+            }
+        }
+    }
+
+    private func refreshMessageOutbox(userID: UUID) throws {
+        let queue = try messageOutboxStore.load(userID: userID)
+        guard let first = queue.first else {
+            hasPendingMessage = false
+            messageOutboxStatus = "尚無待送訊息"
+            return
+        }
+        hasPendingMessage = true
+        messageOutboxStatus = "有 \(queue.count) 則待送訊息（第一則已嘗試 \(first.attemptCount) 次）"
     }
 
     private func sendPendingPhoto(userID: UUID) async {

@@ -18,7 +18,7 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 - `CoupleSpace/` 目前仍是 W1 技術驗證畫面；預設 SwiftData `Item` 型別保留但未接入 App，尚未形成產品領域架構。
 - `CoupleSpaceTests/` 已涵蓋設定、登入 session、nonce、冪等／FIFO outbox、排序、照片政策、解除配對與通知隱私等純規則；`CoupleSpaceUITests/` 仍只有 Xcode 範例測試。
 - `CoupleSpace Watch App Watch App/` 是獨立的初始 Watch 畫面，不是 iPhone MVP 必要流程。
-- Supabase Auth、pairing／RLS、Realtime 變更提示、私有 Storage、marker FIFO outbox、單張照片持久 outbox 及資料生命週期已完成 W1 最小 spike；正式訊息模型、照片政策、匯出與推播細節仍屬 G1 技術閘門。
+- Supabase Auth、pairing／RLS、Realtime 變更提示、私有 Storage、marker FIFO outbox、單張照片持久 outbox 及資料生命週期已完成 W1 最小 spike；純文字訊息契約與 FIFO outbox 已完成 migration 008 雲端部署及真機 A＋Simulator B 雙裝置實測，封存正文則僅有本機 pgTAP 證據。兩支真實 iPhone、照片政策、匯出與推播細節仍屬 G1 技術閘門。
 - CloudKit Sharing PoC 保留為實驗紀錄，不再是 v1 共同資料候選。
 
 ## 目標責任邊界

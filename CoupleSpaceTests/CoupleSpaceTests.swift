@@ -65,6 +65,51 @@ struct CoupleSpaceTests {
         #expect(state == .sending(attempt: 2))
     }
 
+    @Test func textMessagePolicyRejectsBlankAndOversizedContent() {
+        #expect(TextMessagePolicy.normalized("  W1 test message  ") == "W1 test message")
+        #expect(TextMessagePolicy.normalized(" \n ") == nil)
+        #expect(TextMessagePolicy.normalized(
+            String(repeating: "a", count: TextMessagePolicy.maximumLength + 1)
+        ) == nil)
+    }
+
+    @Test func messageOutboxPersistsFIFOAndAcknowledgesOnlyHead() throws {
+        let suiteName = "MessageOutboxStoreTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000081")!
+        let relationshipID = UUID(uuidString: "90000000-0000-0000-0000-000000000001")!
+        let first = MessageOutboxEntry(
+            relationshipID: relationshipID,
+            clientID: UUID(uuidString: "93000000-0000-0000-0000-000000000001")!,
+            body: "W1 test message 1",
+            attemptCount: 0
+        )
+        let second = MessageOutboxEntry(
+            relationshipID: relationshipID,
+            clientID: UUID(uuidString: "93000000-0000-0000-0000-000000000002")!,
+            body: "W1 test message 2",
+            attemptCount: 0
+        )
+        let store = MessageOutboxStore(defaults: defaults)
+        var queue = MessageOutboxQueue()
+        queue.enqueue(first)
+        queue.enqueue(second)
+        try store.save(queue, userID: userID)
+
+        var restored = try store.load(userID: userID)
+        #expect(restored.entries == [first, second])
+        #expect(restored.beginFirstAttempt()?.attemptCount == 1)
+        #expect(restored.entries[1].attemptCount == 0)
+        let didAcknowledgeTail = restored.acknowledgeFirst(clientID: second.clientID)
+        #expect(!didAcknowledgeTail)
+        let didAcknowledgeHead = restored.acknowledgeFirst(clientID: first.clientID)
+        #expect(didAcknowledgeHead)
+        try store.save(restored, userID: userID)
+        #expect(try store.load(userID: userID).entries == [second])
+    }
+
     @Test func markerOutboxPersistsFIFOAndRemovesOnlyAcknowledgedHead() throws {
         let suiteName = "MarkerOutboxStoreTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

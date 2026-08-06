@@ -111,6 +111,30 @@ struct G1TechnicalSpikeView: View {
                         }
                     }
 
+                    Section("Supabase 文字訊息 Outbox") {
+                        Text("只產生不含私人內容的 W1 測試訊息")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        LabeledContent("最近 3 則（舊 → 新）", value: pairingModel.recentTestMessages)
+                        LabeledContent("Message Outbox", value: pairingModel.messageOutboxStatus)
+
+                        Button("寫入新的 W1 測試訊息") {
+                            Task { await pairingModel.writeTestMessage() }
+                        }
+                        .disabled(pairingModel.isMessageOutboxSending)
+
+                        if pairingModel.hasPendingMessage {
+                            Button("重試待送訊息") {
+                                Task { await pairingModel.retryPendingMessages() }
+                            }
+                            .disabled(pairingModel.isMessageOutboxSending)
+                        }
+
+                        Button("重新整理測試訊息") {
+                            Task { await pairingModel.refresh() }
+                        }
+                    }
+
                     Section("Supabase Storage 私有照片") {
                         Text(pairingModel.storageStatus)
                         LabeledContent("Photo Outbox", value: pairingModel.photoOutboxStatus)
@@ -158,6 +182,8 @@ struct G1TechnicalSpikeView: View {
                                     hasPendingPhoto: pairingModel.hasPendingPhoto,
                                     isSendingPhoto: pairingModel.isPhotoOutboxSending
                                 )
+                                || pairingModel.hasPendingMessage
+                                || pairingModel.isMessageOutboxSending
                         )
 
                         Button("2. 建立個人唯讀封存") {

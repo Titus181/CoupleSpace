@@ -282,6 +282,21 @@ Swift W1 client 沿用既有最長邊 1,600 px、JPEG quality 0.8 的裝置端�
 
 2026-08-06 真機 A＋Simulator B 已完成上述全流程：A 斷網選照後 Outbox 顯示待送，強制關閉並重啟後仍恢復同一張待送照片；恢復網路並只重試一次後，B 重新整理即看見同一張照片，A 再次重啟也未復活已送達項目。因此單張照片的離線持久化、人工重送、跨裝置可見性與成功後清除已通過。這不代表多照片 FIFO、背景自動重送、網路頻繁切換、大圖與方向組合已通過。
 
+### Supabase 文字訊息契約與 FIFO outbox spike
+
+新增 migration `202608060008_w1_text_message_contract.sql`，在既有 `shared_items` 上建立最小純文字訊息契約：正文去除首尾空白後必須為 1～4,000 個字元，由 `write_shared_message` RPC 從 Supabase session 派生 creator，並以 `(relationship_id, client_id)` 實行冪等。相同識別只有在 creator、kind 與正文全數相同時能視為安全重送；第三身分、不同正文碰撞與 closing relationship 均由伺服器拒絕。
+
+為避免解除配對後只封存 metadata，同一 migration 擴充 `personal_archive_items.text_content`，並讓 `seal_personal_archive` 連同訊息正文複製至各自 owner-isolated archive。這沒有新建第二套封存或訊息系統。
+
+Swift W1 client 新增只產生 `W1 test <token>` 的非私人測試訊息，以 UserDefaults 持久 FIFO queue；失敗保留穩定 client UUID、正文、順序與 attempt count，成功只移除已確認的 head。待送訊息尚未清空時，本裝置不允許開始解除配對。此 W1 畫面不接受真實私人輸入，也未實作已讀、回覆、編輯、刪除、推播或正式聊天 UI。
+
+- 本機從空資料庫成功套用 migration `001`～`008`。
+- 8 份 pgTAP 共 81 個案例全數通過；新案例包含正規化、一般空白、換行／tab、超長拒絕、冪等重送、正文碰撞、第三人、closing 與封存正文保留。
+- iPhone `build-for-testing` 通過，`CoupleSpaceTests` 23 個 Simulator runtime 案例全數通過。
+- migration 008 已於 2026-08-06 部署至雲端測試專案；遠端 migration history 顯示 local／remote `202608060008` 對齊，第二次 dry-run 回報 `Remote database is up to date`，linked schema lint 回報 `No schema errors found`。
+- 2026-08-06 真機 A＋Simulator B 已完成三則文字訊息 FIFO 全流程：A 在線寫入後 B 可見相同 `W1 test <token>`；A 斷網連續建立三筆後 Outbox 顯示三筆待送，保持離線強制結束並重開 App 仍保留原順序；恢復網路只觸發一次重送後，B 依原順序看到三則且沒有重複，A 再次重啟時 Outbox 已清空。
+- 此結果通過單一真機與 Simulator 的跨 Apple 身分文字同步、離線持久化、跨啟動 FIFO、恢復網路人工重送及冪等清除；尚未完成兩支真實 iPhone、較長佇列、頻繁斷線、自動退避、背景重送與雲端封存正文實測。
+
 ### Supabase closing／personal archive client spike
 
 W1 Swift client 已接上既有 `begin_unpairing` 與 `seal_personal_archive` RPC，並加入明確的不可逆確認：第一步將測試關係轉為 `closing`，第二步由每位成員各自建立 owner-isolated personal archive。client 可顯示自己的封存項目數；雙方完成後，active relationship RLS 不再回傳共同關係，畫面只保留本人可讀的封存狀態。
@@ -322,7 +337,7 @@ W1 Swift client 已接上既有 `begin_unpairing` 與 `seal_personal_archive` RP
 ## W1 尚未關閉
 
 - Supabase 路徑的兩支真實 iPhone、兩個 Apple ID 登入、配對、雙向資料與重啟證據。
-- 以雲端 Supabase 測試專案驗證第三身分拒絕；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件、Storage 私有照片雙向讀寫、單筆及三筆 FIFO marker 離線持久 outbox／冪等重送、closing／雙份 personal archive／archived photo，以及 owner-only archive delete／最後引用 object GC 已通過。
+- 以雲端 Supabase 測試專案驗證第三身分拒絕；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件、Storage 私有照片雙向讀寫、單筆及三筆 FIFO marker 離線持久 outbox／冪等重送、三筆文字訊息 FIFO、closing／雙份 personal archive／archived photo，以及 owner-only archive delete／最後引用 object GC 已通過。
 - 照片弱網、離線重試、大圖與方向組合、保存期限及刪除一致性實測。
 - 推播接收者、背景同步與鎖定畫面隱私真機實測。
 - 個人封存匯出格式、交付方式與大型資料處理實測。

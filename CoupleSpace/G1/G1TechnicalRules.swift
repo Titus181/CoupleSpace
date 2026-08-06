@@ -39,6 +39,75 @@ struct MessageIdentity {
     }
 }
 
+enum TextMessagePolicy {
+    static let maximumLength = 4_000
+
+    static func normalized(_ value: String) -> String? {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, normalized.count <= maximumLength else { return nil }
+        return normalized
+    }
+}
+
+struct MessageOutboxEntry: Codable, Equatable {
+    let relationshipID: UUID
+    let clientID: UUID
+    let body: String
+    var attemptCount: Int
+}
+
+struct MessageOutboxQueue: Codable, Equatable {
+    private(set) var entries: [MessageOutboxEntry] = []
+
+    var isEmpty: Bool { entries.isEmpty }
+    var count: Int { entries.count }
+    var first: MessageOutboxEntry? { entries.first }
+
+    mutating func enqueue(_ entry: MessageOutboxEntry) {
+        entries.append(entry)
+    }
+
+    mutating func beginFirstAttempt() -> MessageOutboxEntry? {
+        guard !entries.isEmpty else { return nil }
+        entries[0].attemptCount += 1
+        return entries[0]
+    }
+
+    mutating func acknowledgeFirst(clientID: UUID) -> Bool {
+        guard entries.first?.clientID == clientID else { return false }
+        entries.removeFirst()
+        return true
+    }
+}
+
+struct MessageOutboxStore {
+    private let defaults: UserDefaults
+    private let keyPrefix = "couplespace.w1.message-outbox."
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func load(userID: UUID) throws -> MessageOutboxQueue {
+        guard let data = defaults.data(forKey: key(userID)) else {
+            return MessageOutboxQueue()
+        }
+        return try JSONDecoder().decode(MessageOutboxQueue.self, from: data)
+    }
+
+    func save(_ queue: MessageOutboxQueue, userID: UUID) throws {
+        guard !queue.isEmpty else {
+            defaults.removeObject(forKey: key(userID))
+            return
+        }
+        defaults.set(try JSONEncoder().encode(queue), forKey: key(userID))
+    }
+
+    private func key(_ userID: UUID) -> String {
+        keyPrefix + userID.uuidString.lowercased()
+    }
+}
+
 struct MarkerOutboxEntry: Codable, Equatable {
     let relationshipID: UUID
     let clientID: UUID
