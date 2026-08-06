@@ -65,6 +65,41 @@ struct CoupleSpaceTests {
         #expect(state == .sending(attempt: 2))
     }
 
+    @Test func markerOutboxPersistsStableIdentityAndAttemptCount() throws {
+        let suiteName = "MarkerOutboxStoreTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000061")!
+        let entry = MarkerOutboxEntry(
+            relationshipID: UUID(uuidString: "90000000-0000-0000-0000-000000000001")!,
+            clientID: UUID(uuidString: "91000000-0000-0000-0000-000000000001")!,
+            attemptCount: 2
+        )
+
+        try MarkerOutboxStore(defaults: defaults).save(entry, userID: userID)
+        #expect(try MarkerOutboxStore(defaults: defaults).load(userID: userID) == entry)
+
+        MarkerOutboxStore(defaults: defaults).clear(userID: userID)
+        #expect(try MarkerOutboxStore(defaults: defaults).load(userID: userID) == nil)
+    }
+
+    @Test func corruptedMarkerOutboxIsNotSilentlyDiscarded() throws {
+        let suiteName = "MarkerOutboxCorruptionTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let userID = UUID(uuidString: "00000000-0000-0000-0000-000000000062")!
+        defaults.set(
+            Data("not-json".utf8),
+            forKey: "couplespace.w1.marker-outbox.\(userID.uuidString.lowercased())"
+        )
+
+        #expect(throws: DecodingError.self) {
+            try MarkerOutboxStore(defaults: defaults).load(userID: userID)
+        }
+    }
+
     @Test func serverTimestampAndIDProduceDeterministicOrder() {
         let sameServerDate = Date(timeIntervalSince1970: 100)
         let earlierID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!

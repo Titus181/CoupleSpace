@@ -39,6 +39,38 @@ struct MessageIdentity {
     }
 }
 
+struct MarkerOutboxEntry: Codable, Equatable {
+    let relationshipID: UUID
+    let clientID: UUID
+    var attemptCount: Int
+}
+
+struct MarkerOutboxStore {
+    private let defaults: UserDefaults
+    private let keyPrefix = "couplespace.w1.marker-outbox."
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func load(userID: UUID) throws -> MarkerOutboxEntry? {
+        guard let data = defaults.data(forKey: key(userID)) else { return nil }
+        return try JSONDecoder().decode(MarkerOutboxEntry.self, from: data)
+    }
+
+    func save(_ entry: MarkerOutboxEntry, userID: UUID) throws {
+        defaults.set(try JSONEncoder().encode(entry), forKey: key(userID))
+    }
+
+    func clear(userID: UUID) {
+        defaults.removeObject(forKey: key(userID))
+    }
+
+    private func key(_ userID: UUID) -> String {
+        keyPrefix + userID.uuidString.lowercased()
+    }
+}
+
 struct PhotoDimensions: Equatable {
     let width: Int
     let height: Int

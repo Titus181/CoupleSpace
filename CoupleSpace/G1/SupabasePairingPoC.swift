@@ -28,6 +28,16 @@ private struct RelationshipLifecycleParameters: Encodable {
     }
 }
 
+private struct SharedMarkerWriteParameters: Encodable {
+    let targetRelationshipID: UUID
+    let targetClientID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+        case targetClientID = "target_client_id"
+    }
+}
+
 private struct RelationshipRow: Decodable {
     let id: UUID
     let status: String
@@ -106,15 +116,22 @@ final class SupabasePairingPoC: ObservableObject {
     @Published private(set) var lifecycleStatus = "尚未開始資料生命週期驗證"
     @Published private(set) var personalArchiveItemCount = 0
     @Published private(set) var hasPersonalArchive = false
+    @Published private(set) var markerOutboxStatus = "尚無待送標記"
+    @Published private(set) var hasPendingMarker = false
 
     private let client: SupabaseClient
+    private let markerOutboxStore: MarkerOutboxStore
     private var relationshipID: UUID?
     private var personalArchiveID: UUID?
     private var realtimeChannel: RealtimeChannelV2?
     private var realtimeTask: Task<Void, Never>?
 
-    init(client: SupabaseClient) {
+    init(
+        client: SupabaseClient,
+        markerOutboxStore: MarkerOutboxStore = MarkerOutboxStore()
+    ) {
         self.client = client
+        self.markerOutboxStore = markerOutboxStore
     }
 
     func createInvitation() async {
@@ -174,20 +191,45 @@ final class SupabasePairingPoC: ObservableObject {
 
         do {
             let session = try await client.auth.session
-            let markerID = UUID()
-            try await client
-                .from("shared_items")
-                .insert(SharedItemInsert(
+            let pendingEntry = try markerOutboxStore.load(userID: session.user.id)
+            let entry: MarkerOutboxEntry
+
+            if let pendingEntry {
+                guard pendingEntry.relationshipID == relationshipID else {
+                    markerOutboxStatus = "另一段關係仍有待送標記，未建立新項目"
+                    return
+                }
+                entry = pendingEntry
+            } else {
+                entry = MarkerOutboxEntry(
                     relationshipID: relationshipID,
-                    clientID: markerID,
-                    creatorUserID: session.user.id,
-                    itemKind: "marker"
-                ))
-                .execute()
-            status = "已寫入 RLS 驗證標記"
-            await refresh()
+                    clientID: UUID(),
+                    attemptCount: 0
+                )
+            }
+
+            await sendMarker(entry, userID: session.user.id)
         } catch {
-            reportFailure("寫入標記", error: error)
+            markerOutboxStatus = "無法建立待送標記：\(error.localizedDescription)"
+        }
+    }
+
+    func retryPendingMarker() async {
+        do {
+            let session = try await client.auth.session
+            guard let entry = try markerOutboxStore.load(userID: session.user.id) else {
+                hasPendingMarker = false
+                markerOutboxStatus = "尚無待送標記"
+                return
+            }
+            guard entry.relationshipID == relationshipID else {
+                markerOutboxStatus = "待送標記不屬於目前關係"
+                return
+            }
+
+            await sendMarker(entry, userID: session.user.id)
+        } catch {
+            markerOutboxStatus = "無法讀取待送標記：\(error.localizedDescription)"
         }
     }
 
@@ -422,7 +464,8 @@ final class SupabasePairingPoC: ObservableObject {
 
     func refresh() async {
         do {
-            _ = try await client.auth.session
+            let session = try await client.auth.session
+            try refreshMarkerOutbox(userID: session.user.id)
             let relationships: [RelationshipRow] = try await client
                 .from("relationships")
                 .select("id,status")
@@ -519,8 +562,52 @@ final class SupabasePairingPoC: ObservableObject {
         lifecycleStatus = "尚未開始資料生命週期驗證"
         personalArchiveItemCount = 0
         hasPersonalArchive = false
+        hasPendingMarker = false
+        markerOutboxStatus = "尚無待送標記"
         personalArchiveID = nil
         status = message
+    }
+
+    private func sendMarker(_ entry: MarkerOutboxEntry, userID: UUID) async {
+        var sendingEntry = entry
+        sendingEntry.attemptCount += 1
+
+        do {
+            try markerOutboxStore.save(sendingEntry, userID: userID)
+            hasPendingMarker = true
+            markerOutboxStatus = "正在傳送標記（第 \(sendingEntry.attemptCount) 次）"
+
+            try await client
+                .rpc(
+                    "write_shared_marker",
+                    params: SharedMarkerWriteParameters(
+                        targetRelationshipID: sendingEntry.relationshipID,
+                        targetClientID: sendingEntry.clientID
+                    )
+                )
+                .execute()
+
+            markerOutboxStore.clear(userID: userID)
+            hasPendingMarker = false
+            await refresh()
+            markerOutboxStatus = "標記已送達：\(shortToken(sendingEntry.clientID))"
+            status = "已寫入 RLS 驗證標記"
+        } catch {
+            hasPendingMarker = true
+            markerOutboxStatus = "標記待重試（已嘗試 \(sendingEntry.attemptCount) 次）"
+            status = "標記傳送失敗：\(error.localizedDescription)"
+        }
+    }
+
+    private func refreshMarkerOutbox(userID: UUID) throws {
+        guard let entry = try markerOutboxStore.load(userID: userID) else {
+            hasPendingMarker = false
+            markerOutboxStatus = "尚無待送標記"
+            return
+        }
+
+        hasPendingMarker = true
+        markerOutboxStatus = "有 1 個待送標記（已嘗試 \(entry.attemptCount) 次）"
     }
 
     private func refreshPersonalArchive(_ archive: PersonalArchiveRow) async throws {

@@ -17,7 +17,7 @@ W1 不先完成正式產品架構。先以最小真機 spike 驗證最大未知�
 | 閘門 | CloudKit Sharing 假設 | 驗證狀態 | 否決條件 |
 | --- | --- | --- | --- |
 | 身分與配對 | 使用 iCloud 帳號接受私人 `CKShare`，一個 share 對應一段伴侶關係 | 真機 A＋Simulator B、兩個 Apple ID 初步通過；兩支真機待驗證 | 無法穩定接受、恢復或限制為正確兩人 |
-| 同步與聊天 | `CKSyncEngine` 同步 private/shared database；client UUID 形成穩定 record name；server timestamp 加 UUID 決定順序；本機 outbox 顯示傳送狀態 | 純規則測試已建立；共享標記雙向寫入與重啟恢復初步通過，離線與正式同步模型未驗證 | 離線重送造成遺失、重複、不可預期錯序，或 shared database 行為不足以可靠恢復 |
+| 同步與聊天 | client UUID 形成穩定識別；server timestamp 加 UUID 決定順序；本機 outbox 顯示傳送狀態 | Supabase 單筆 marker outbox、持久 metadata 與 idempotent RPC 已部署；真機 A＋Simulator B 的斷網、重啟、重連與雙裝置一致性通過；正式訊息內容、多筆佇列、弱網與排序仍待驗證 | 離線重送造成遺失、重複、不可預期錯序，或同步行為不足以可靠恢復 |
 | 照片 | 顯示圖與縮圖先在裝置端重新編碼，再以 `CKAsset` 儲存；正式尺寸、品質、容量與保存期依實測決定 | 真機 A＋Simulator B、兩個 Apple ID 的雙向讀寫與重啟恢復初步通過；兩支真機、弱網與刪除待驗證 | 成本、速度、弱網恢復或刪除一致性不可接受 |
 | 推播 | database subscription 只作變更提示；抓取並驗證 relationship/recipient 後才更新 App；使用者可見內容固定為泛化文案 | 資料最小化規則測試已建立；真機未驗證 | 錯發、鎖定畫面洩漏內容，或背景同步不足以支撐體驗 |
 | 所有權與解除配對 | 雙方各自保留不可被對方剝奪的唯讀封存 | A1 政策已確認；Supabase closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過；匯出仍待驗證 | 無法提供雙方可理解、可稽核且不依賴單方善意的保留、匯出、刪除結果 |
@@ -207,6 +207,23 @@ W1 Swift client 已加入 relationship-scoped `shared_items` insert 訂閱。訂
 
 此結果通過同一 active relationship 內兩個正確 member 的雙向 Realtime insert 通知，以及事件後重新讀取 RLS 資料的 client 行為。斷線重連、背景喚醒與第三身分無法訂閱仍未由本次成功推論為通過。
 
+### Supabase 持久 outbox／冪等重送 spike
+
+為了驗證離線重送而不先建立正式聊天架構，本輪只處理一筆不含內容的 marker metadata。App 在第一次送出前先以 `UserDefaults` 按 Supabase user UUID 保存 relationship UUID、client UUID 與 attempt count；同一使用者尚有待送 marker 時，再次點擊或明確重試都沿用相同 client UUID，不建立第二筆。成功後才清除本機 outbox；失敗或 App 結束時保留。metadata 解碼失敗會明確報錯並阻止新寫入，不把損壞資料靜默視為空 outbox。
+
+新增 migration `202608050007_w1_idempotent_marker_rpc.sql`，由 authenticated session 推導 creator，且只在 active relationship 接受 marker。相同 relationship／client UUID 由同一 creator 重送時回傳既有 server timestamp；另一 creator 嘗試冒領同一 UUID、第三人寫入或 closing 後重送均被拒絕。這是 marker spike，不代表正式訊息內容已選擇 `UserDefaults`，也不包含多筆佇列、自動背景排程、退避、網路監聽或照片 upload outbox。
+
+本機 reset 已成功套用 `001`～`007`；七份 pgTAP 共 64 個案例全部通過，新增案例涵蓋首次寫入、相同識別重送不重複、creator／kind 由 session 決定、身分碰撞、第三人與 closing 拒絕。`public` schema lint 無錯誤；iPhone Simulator unsigned build 與 `build-for-testing` 通過。Simulator test runner 再次停在既有測試啟動問題、未進入案例，因此不宣稱 runtime unit suite 通過；另以實際 `G1TechnicalRules.swift` 完成三個獨立程序的 write／read／clear smoke test，確認 metadata 可跨程序恢復。
+
+`007` 已部署至 Supabase 測試專案。2026-08-06 使用真實 iPhone A 與 iPhone 17 Pro Simulator B、兩個不同 Apple 身分建立新的 active relationship，雙方確認關係代碼 `dd36812f` 與成員 `2/2` 一致後完成以下驗證：
+
+- A 斷網後寫入 marker，網路錯誤明確顯示，outbox 保留為待重試且 attempt count 為 1。
+- A 強制結束並重開 App，待送 marker 仍存在。
+- A 恢復網路並重試後，outbox 顯示 marker `52c467a0` 已送達。
+- B 重新整理後看到相同 marker；雙方再次強制結束、重開並重新整理後，仍看到同一識別。
+
+此結果通過單筆 marker metadata 的離線失敗、跨啟動保存、明確重試與跨裝置恢復；資料庫 pgTAP 另證明相同 client UUID 重送只保留一筆。它不代表正式聊天內容、多筆佇列、自動背景重送、退避、弱網錯序或照片 upload outbox 已完成。
+
 ### Supabase Storage 私有照片 spike
 
 新增 migration `202608050004_w1_private_photo_storage.sql`，建立非公開 bucket `couplespace-w1-photos`，單檔限制 5 MiB 且只接受 JPEG。物件路徑固定為 `relationship UUID/client UUID.jpg`，不保存原始檔名；只有 active relationship member 可讀，只有上傳者可刪，第三身分不可讀寫，relationship 進入 `closing` 後禁止新增照片。
@@ -265,7 +282,7 @@ W1 Swift client 已接上既有 `begin_unpairing` 與 `seal_personal_archive` RP
 ## W1 尚未關閉
 
 - CloudKit Sharing 的兩支真實 iPhone、兩個 Apple ID 雙向證據。
-- 以雲端 Supabase 測試專案驗證第三身分拒絕；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件、Storage 私有照片雙向讀寫、closing／雙份 personal archive／archived photo，以及 owner-only archive delete／最後引用 object GC 已通過。
+- 以雲端 Supabase 測試專案驗證第三身分拒絕；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件、Storage 私有照片雙向讀寫、單筆 marker 離線持久 outbox／冪等重送、closing／雙份 personal archive／archived photo，以及 owner-only archive delete／最後引用 object GC 已通過。
 - 照片弱網、離線重試、大圖與方向組合、保存期限及刪除一致性實測。
 - 推播接收者、背景同步與鎖定畫面隱私真機實測。
 - 最終登入、同步、聊天、照片、推播與資料生命週期架構決策。

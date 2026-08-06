@@ -81,7 +81,7 @@ last_updated: 2026-08-06
 
 ## W1 必須關閉的技術閘門
 
-目前狀態為 `in_progress`。CloudKit Sharing 已由真機 A＋Simulator B 完成跨 Apple ID 分享、雙向標記、照片與重啟恢復；Supabase 已由同兩個 Apple 身分完成 Auth、pairing、active relationship RLS 雙向寫入、Realtime 雙向事件、私有 Storage 照片雙向讀寫、closing 後拒絕共同寫入、雙份 personal archive、archived photo 讀取、owner-only 獨立刪除與最後引用 Storage GC。兩支真實 iPhone、第三身分雲端拒絕、弱網、匯出與推播證據仍未完成，因此 G1 與 M0 尚未通過。詳細證據記錄於 [W1 技術驗證紀錄](02-w1-technical-validation.md)。
+目前狀態為 `in_progress`。CloudKit Sharing 已由真機 A＋Simulator B 完成跨 Apple ID 分享、雙向標記、照片與重啟恢復；Supabase 已由同兩個 Apple 身分完成 Auth、pairing、active relationship RLS 雙向寫入、Realtime 雙向事件、私有 Storage 照片雙向讀寫、closing 後拒絕共同寫入、雙份 personal archive、archived photo 讀取、owner-only 獨立刪除與最後引用 Storage GC。單筆 marker 的持久 outbox 與 idempotent RPC 已部署並完成斷網、App 重啟、恢復網路重送及雙裝置一致性實測。兩支真實 iPhone、第三身分雲端拒絕、完整弱網／多筆離線佇列、匯出與推播證據仍未完成，因此 G1 與 M0 尚未通過。詳細證據記錄於 [W1 技術驗證紀錄](02-w1-technical-validation.md)。
 
 以下項目尚未決定，不得在規劃中默認某一實作方式：
 
