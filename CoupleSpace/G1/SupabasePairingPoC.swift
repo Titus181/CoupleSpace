@@ -166,6 +166,8 @@ final class SupabasePairingPoC: ObservableObject {
     private var realtimeChannel: RealtimeChannelV2?
     private var realtimeTask: Task<Void, Never>?
 
+    var currentRelationshipID: UUID? { relationshipID }
+
     init(
         client: SupabaseClient,
         markerOutboxStore: MarkerOutboxStore? = nil,

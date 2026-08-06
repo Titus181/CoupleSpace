@@ -449,6 +449,26 @@ final class CloudKitShareSceneDelegate: UIResponder, UIWindowSceneDelegate {
 final class CloudKitShareAppDelegate: UIResponder, UIApplicationDelegate {
     func application(
         _ application: UIApplication,
+        didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
+    ) {
+        NotificationCenter.default.post(
+            name: .coupleSpaceDidRegisterForRemoteNotifications,
+            object: deviceToken
+        )
+    }
+
+    func application(
+        _ application: UIApplication,
+        didFailToRegisterForRemoteNotificationsWithError error: Error
+    ) {
+        NotificationCenter.default.post(
+            name: .coupleSpaceDidFailToRegisterForRemoteNotifications,
+            object: error
+        )
+    }
+
+    func application(
+        _ application: UIApplication,
         configurationForConnecting connectingSceneSession: UISceneSession,
         options: UIScene.ConnectionOptions
     ) -> UISceneConfiguration {

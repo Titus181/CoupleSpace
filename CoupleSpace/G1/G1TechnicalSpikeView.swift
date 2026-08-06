@@ -6,6 +6,9 @@ import SwiftUI
 struct G1TechnicalSpikeView: View {
     @StateObject private var authModel: SupabaseAppleAuthPoC
     @StateObject private var pairingModel: SupabasePairingPoC
+#if os(iOS)
+    @StateObject private var pushModel: SupabasePushPoC
+#endif
 
 #if os(iOS)
     @State private var supabaseSelectedPhoto: PhotosPickerItem?
@@ -22,6 +25,11 @@ struct G1TechnicalSpikeView: View {
         _pairingModel = StateObject(
             wrappedValue: SupabasePairingPoC(client: supabaseClient)
         )
+#if os(iOS)
+        _pushModel = StateObject(
+            wrappedValue: SupabasePushPoC(client: supabaseClient)
+        )
+#endif
     }
 
     var body: some View {
@@ -48,6 +56,32 @@ struct G1TechnicalSpikeView: View {
                 }
 
                 if authModel.isSignedIn {
+                    Section("Supabase 私人推播邊界") {
+                        Text(pushModel.status)
+                        LabeledContent("Token 指紋", value: pushModel.tokenFingerprint)
+                        Text("只顯示 token 雜湊前八碼；伺服器自行推導另一位 active 成員，通知不含私人內容。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button("1. 允許通知並登記此裝置") {
+                            Task { await pushModel.requestAuthorizationAndRegister() }
+                        }
+                        .disabled(pushModel.isWorking)
+
+                        Button(
+                            pushModel.hasPendingPush
+                                ? "2. 重試泛化 W1 測試推播"
+                                : "2. 傳送泛化 W1 測試推播"
+                        ) {
+                            Task {
+                                await pushModel.sendOrRetryGenericTestPush(
+                                    relationshipID: pairingModel.currentRelationshipID
+                                )
+                            }
+                        }
+                        .disabled(pushModel.isWorking)
+                    }
+
                     Section("Supabase 雙身分 RLS") {
                         Text(pairingModel.status)
                         LabeledContent("關係代碼", value: pairingModel.relationshipToken)
@@ -225,8 +259,27 @@ struct G1TechnicalSpikeView: View {
                 if isSignedIn {
                     Task { await pairingModel.refresh() }
                 } else {
-                    Task { await pairingModel.clearSession() }
+                    Task {
+                        await pairingModel.clearSession()
+                        pushModel.clearSession()
+                    }
                 }
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(
+                    for: .coupleSpaceDidRegisterForRemoteNotifications
+                )
+            ) { notification in
+                guard let data = notification.object as? Data else { return }
+                Task { await pushModel.register(deviceToken: data) }
+            }
+            .onReceive(
+                NotificationCenter.default.publisher(
+                    for: .coupleSpaceDidFailToRegisterForRemoteNotifications
+                )
+            ) { notification in
+                guard let error = notification.object as? Error else { return }
+                pushModel.reportRegistrationFailure(error)
             }
             .onChange(of: supabaseSelectedPhoto) { _, item in
                 guard let item else { return }

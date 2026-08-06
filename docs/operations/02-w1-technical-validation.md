@@ -19,7 +19,7 @@ W1 不先完成正式產品功能。先以最小真機 spike 驗證最大未知�
 | 身分與配對 | Sign in with Apple credential 交由 Supabase Auth；Postgres constraint、RLS 與 RPC 管理一對一 relationship | 真機 A＋Simulator B、兩個 Apple ID 的登入、配對、session 恢復與雙向 RLS 初步通過 | 第三身分雲端拒絕與兩支真實 iPhone 待驗證 |
 | 同步與聊天 | Realtime 只作變更提示並重新經 RLS 讀取；client UUID、server timestamp 與持久 outbox 提供冪等和穩定順序 | 單筆及三筆 FIFO marker metadata outbox 的斷網、重啟、重連、順序與雙裝置一致性通過 | 正式訊息內容、較長佇列、自動排程與弱網仍待驗證 |
 | 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；三張持久 FIFO upload outbox 的斷網、跨啟動、重送與順序通過；實際 JPEG regression 證明大圖縮放、方向正規化與 GPS 移除，真機高解析直向照片跨裝置方向／比例亦通過 | 頻繁弱網、容量與保存期限待驗證 |
-| 推播 | 伺服器驗證 relationship／recipient 後才送出泛化 APNs 文案；App 收到提示後重新讀取 | 資料最小化規則測試已建立；真機未驗證 | 錯發、鎖定畫面洩漏內容、背景或終止狀態送達不足 |
+| 推播 | 伺服器驗證 relationship／recipient 後才送出泛化 APNs 文案；App 收到提示後重新讀取 | migrations 009／010、APNs secrets 與 Edge sender 已部署；Simulator B→真機 A 的背景、終止、鎖定與 Watch 鏡像通知皆成功 | 仍需兩支真實 iPhone 與 production／TestFlight 證據 |
 | 所有權與解除配對 | Supabase 伺服器建立雙份 owner-isolated 唯讀封存，兩人可獨立刪除 | closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過 | 匯出格式、交付與大型封存待驗證 |
 | 有意義雙向互動 | 同一 relationship、同一 interaction object 內，兩個目前伴侶各至少有一次符合資格的 contribution；只記 ID、種類與時間，不記內容 | 純規則測試已建立 | 事件無法區分單方重複操作與真正雙方參與，或需要記錄私密內容 |
 
@@ -353,6 +353,33 @@ W1 Swift client 已接上既有 `begin_unpairing` 與 `seal_personal_archive` RP
 第一階段雲端刪除實測已通過：真機 A 永久刪除自己的 personal archive 後，封存項目數歸零、封存照片消失，且 App 明確提示另一方不受影響；Simulator B 隨後重新整理仍顯示 `8` 個封存項目並可讀取原私人照片。此結果證明 owner-only archive delete 與「尚有另一份封存時不排入照片 GC」的允許路徑。最後一份封存刪除及實際 object／queue 清理仍待驗證。
 
 第二階段雲端刪除實測亦通過：Simulator B 永久刪除最後一份 personal archive 後，封存項目數歸零、照片消失，App 顯示最後一份照片已完成清理。隨後以 Management API 執行只讀聚合查詢，確認 `storage_gc_queue = 0`、`personal_archives = 0`，且私有 bucket `couplespace-w1-photos` 的 `storage.objects = 0`。因此本次測試同時證明 queue 已完成、兩份個人封存都已刪除，以及實際 Storage object 已移除，不只是在 App 端失去讀取權限。
+
+### 私人推播伺服器邊界 spike
+
+新增 migration `202608060009_w1_private_push_boundary.sql`。`push_devices` 只允許登入使用者透過 security-definer RPC 登記正規化 APNs token，`authenticated` 不具有直接讀取 token 表的權限；token 綁定固定 bundle ID 與 sandbox／production 環境。`enqueue_w1_test_push` 不接受 recipient、標題、正文、訊息或照片參數，只接受 relationship 與穩定 event UUID；伺服器確認 relationship 為 active 且恰有兩名 active member 後，自行選擇另一位成員，並以唯一鍵提供冪等排程。`push_delivery_jobs` 只保存 routing metadata 與通用 `w1_generic` 種類，不具有私人內容欄位。
+
+iOS W1 畫面加入系統通知授權與 `registerForRemoteNotifications` 接點。AppDelegate 每次收到 APNs token 都交給 Supabase 登記，不把 token 寫入本機持久儲存、畫面或 log；畫面只顯示 SHA-256 前八碼供雙裝置辨識。泛化 payload 固定顯示「CoupleSpace 有新動態／打開 App 查看」，只帶 event kind 與 event UUID，不帶 relationship、sender、訊息或照片內容。
+
+本機 reset 已成功套用 `001`～`009`；九份 pgTAP 共 99 個案例全數通過，包含 token 表／工作表不可由登入 client 直接讀取、受信 sender 的最小讀寫權限、token 正規化、錯誤 token／環境拒絕、伺服器推導正確收件者、第三身分／單人成員／closing 拒絕及 event 重送去重。`public` schema lint 無錯誤。iPhone Simulator `build-for-testing` 通過；指定 iPhone 17 Pro Simulator 的 `CoupleSpaceTests` 28 個案例全數通過，包含 payload 資料最小化與 token hex／指紋 regression。完整 scheme 首次跑進既有 UI runner 後長時間沒有案例輸出而中止，不宣稱 UI suite 通過。
+
+取得明確授權後，migration 009 已推送至 Supabase 測試專案。遠端 migration history 顯示 local／remote `001`～`009` 一致，後續 dry-run 回報已是最新狀態，linked `public` schema lint 無錯誤。push 收尾曾出現 migration catalog cache 的 2.5 秒連線逾時警告，但 history、dry-run 與 lint 均分別串行成功，因此沒有重複套用。
+
+2026-08-06 真機已允許通知並成功把 sandbox APNs token 登記至 Supabase；W1 畫面只顯示不可逆的 SHA-256 前八碼指紋，未顯示或記錄完整 token。這關閉了真機 entitlement、通知授權、device token 取得與登記接縫，但尚未證明送達。
+
+下一個最小切片新增 migration `202608060010_w1_push_delivery_claim.sql` 與 `send-w1-push` Edge Function。受信 sender 必須先以呼叫者 access token 取得已驗證 user ID，再原子 claim 該使用者建立的工作；client 不能 claim／complete 或直接更新工作。失敗會釋放 claim 供明確重試，成功後不可重送。Edge Function 只查詢另一位 active member 已登記的同環境裝置，固定送出「CoupleSpace 有新動態／打開 App 查看」與 event UUID／kind，不回傳或記錄完整 token、relationship、sender、訊息或照片內容。iOS 測試按鈕會保留本次執行記憶體中的 job ID 供失敗重試；這不是正式背景 delivery queue，也不宣稱跨 App 重啟保留 sender 工作。
+
+- 本機 reset 已成功套用 `001`～`010`；十份 pgTAP 共 110 個案例全數通過，其中 010 覆蓋 client 不可 claim、service role 不能繞過直接 UPDATE、原子 claim、錯誤 sender 拒絕、失敗釋放重試、attempt 遞增、錯誤長度限制及成功後禁止再次 claim。
+- `public` schema lint 與 Project Harness v0.2.1 通過；`send-w1-push` 已由本機 Supabase Edge Runtime 1.74.2 成功 bundle／serve。
+- iPhone Simulator `build-for-testing` 通過；指定 iPhone 17 Pro Simulator 的 `CoupleSpaceTests` 28 個案例全數通過。
+- Edge helper 的五個 Deno 測試已建立，但嘗試透過 npm 取得 Deno 2.1.4 時發生 registry `ETIMEDOUT`，因此本輪不宣稱該五項已執行通過。
+
+取得明確授權後，migration 010 已推送至 Supabase 測試專案，`send-w1-push` version 1 亦已部署。遠端 migration history 顯示 local／remote `001`～`010` 一致，第二次 dry-run 回報 `Remote database is up to date`，linked `public` schema lint 無錯誤。Function 清單顯示 `ACTIVE` 且 `verify_jwt = true`；不含 authorization header 的 POST 回傳 HTTP 401。Apple APNs token-based key 已由使用者建立並將四個必要值保存於 Supabase Secrets；文件與 repository 不保存 `.p8` 內容。
+
+2026-08-06 以 active 2/2 relationship 的 Simulator B 觸發泛化測試工作，背景中的真機 A 成功收到「CoupleSpace 有新動態／打開 App 查看」。這證明已部署 sender 能依 relationship 選擇另一位 active member、使用 sandbox APNs token 送達正確裝置，且通知不含私人訊息、照片、sender 或 relationship 內容。
+
+後續以同一組 active 2/2 relationship 重複觸發兩筆新工作：真機 A 完全終止 App 後仍收到通知，點擊通知可開啟 CoupleSpace；真機 A 鎖定後亦於鎖定畫面收到相同泛化文案，沒有使用者名稱、關係代碼、訊息或照片內容，配對的 Apple Watch 同時正常鏡像該通知。這些結果關閉本輪 development sandbox 的背景、終止與鎖定畫面隱私驗證；Apple Watch 僅記錄系統鏡像行為，不代表已實作獨立 watchOS 推播。
+
+推播 W1 切片在一支真實 iPhone＋Simulator 的 development sandbox 範圍已通過；兩支真實 iPhone 與 production／TestFlight 送達仍是未關閉風險。
 
 ## W1 尚未關閉
 

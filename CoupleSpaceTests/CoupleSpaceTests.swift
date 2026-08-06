@@ -530,6 +530,37 @@ struct CoupleSpaceTests {
         #expect(envelope.userVisibleBody == "打開 App 查看")
     }
 
+    @Test func notificationPayloadOmitsRelationshipAndPrivateContent() throws {
+        let relationshipID = UUID()
+        let eventID = UUID()
+        let envelope = PrivateNotificationEnvelope(
+            relationshipID: relationshipID,
+            eventID: eventID,
+            kind: "w1_generic"
+        )
+
+        let payload = PrivateNotificationPayload(envelope: envelope)
+        let data = try JSONEncoder().encode(payload)
+        let json = try #require(String(data: data, encoding: .utf8))
+
+        #expect(payload.aps.alert.title == "CoupleSpace 有新動態")
+        #expect(payload.aps.alert.body == "打開 App 查看")
+        #expect(payload.eventID == eventID)
+        #expect(!json.lowercased().contains(relationshipID.uuidString.lowercased()))
+        #expect(!json.contains("message"))
+        #expect(!json.contains("photo"))
+    }
+
+#if os(iOS)
+    @Test func apnsTokenPresentationUsesHexAndOnlyExposesFingerprint() {
+        let token = APNsDeviceTokenValue(Data([0x00, 0xab, 0xff, 0x10]))
+
+        #expect(token.hex == "00abff10")
+        #expect(token.fingerprint.count == 8)
+        #expect(token.fingerprint != token.hex)
+    }
+#endif
+
     @Test func meaningfulInteractionRequiresBothExpectedParticipants() {
         let relationshipID = UUID()
         let interactionID = UUID()

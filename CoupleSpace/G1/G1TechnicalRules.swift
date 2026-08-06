@@ -479,6 +479,40 @@ struct PrivateNotificationEnvelope: Equatable {
     var userVisibleBody: String { "打開 App 查看" }
 }
 
+struct PrivateNotificationPayload: Codable, Equatable {
+    struct APS: Codable, Equatable {
+        struct Alert: Codable, Equatable {
+            let title: String
+            let body: String
+        }
+
+        let alert: Alert
+        let sound: String
+    }
+
+    let aps: APS
+    let eventKind: String
+    let eventID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case aps
+        case eventKind = "event_kind"
+        case eventID = "event_id"
+    }
+
+    init(envelope: PrivateNotificationEnvelope) {
+        aps = APS(
+            alert: APS.Alert(
+                title: envelope.userVisibleTitle,
+                body: envelope.userVisibleBody
+            ),
+            sound: "default"
+        )
+        eventKind = envelope.kind
+        eventID = envelope.eventID
+    }
+}
+
 struct InteractionContribution: Equatable {
     let relationshipID: UUID
     let interactionID: UUID
