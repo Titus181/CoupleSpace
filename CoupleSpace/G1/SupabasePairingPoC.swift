@@ -182,6 +182,7 @@ final class SupabasePairingPoC: ObservableObject {
     private var archiveExportStagingURL: URL?
     private var realtimeChannel: RealtimeChannelV2?
     private var realtimeTask: Task<Void, Never>?
+    private var isForegroundRecoveryRunning = false
 
     var currentRelationshipID: UUID? { relationshipID }
 
@@ -862,6 +863,42 @@ final class SupabasePairingPoC: ObservableObject {
             status = "關係：\(relationship.status)，成員：\(memberCount)/2"
         } catch {
             reportFailure("重新整理 RLS 狀態", error: error)
+        }
+    }
+
+    func recoverPendingOutboxesOnForeground() async {
+        guard !isForegroundRecoveryRunning else { return }
+        isForegroundRecoveryRunning = true
+        defer { isForegroundRecoveryRunning = false }
+
+        await refresh()
+
+        do {
+            let session = try await client.auth.session
+            let plan = ForegroundOutboxRecoveryPolicy.plan(
+                relationshipStatus: relationshipStatus,
+                currentRelationshipID: relationshipID,
+                markerRelationshipIDs: try markerOutboxStore.load(userID: session.user.id)
+                    .entries.map(\.relationshipID),
+                messageRelationshipIDs: try messageOutboxStore.load(userID: session.user.id)
+                    .entries.map(\.relationshipID),
+                photoRelationshipIDs: try photoOutboxStore.load(userID: session.user.id)
+                    .entries.map(\.relationshipID)
+            )
+
+            for kind in plan {
+                guard relationshipStatus == "active" else { return }
+                switch kind {
+                case .marker:
+                    await retryPendingMarker()
+                case .message:
+                    await retryPendingMessages()
+                case .photo:
+                    await retryPendingPhoto()
+                }
+            }
+        } catch {
+            status = "前景恢復未完成：\(error.localizedDescription)"
         }
     }
 

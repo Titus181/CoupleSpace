@@ -5,6 +5,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct G1TechnicalSpikeView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var authModel: SupabaseAppleAuthPoC
     @StateObject private var pairingModel: SupabasePairingPoC
 #if os(iOS)
@@ -282,13 +283,17 @@ struct G1TechnicalSpikeView: View {
             }
             .onChange(of: authModel.isSignedIn) { _, isSignedIn in
                 if isSignedIn {
-                    Task { await pairingModel.refresh() }
+                    Task { await pairingModel.recoverPendingOutboxesOnForeground() }
                 } else {
                     Task {
                         await pairingModel.clearSession()
                         pushModel.clearSession()
                     }
                 }
+            }
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active, authModel.isSignedIn else { return }
+                Task { await pairingModel.recoverPendingOutboxesOnForeground() }
             }
             .onReceive(
                 NotificationCenter.default.publisher(

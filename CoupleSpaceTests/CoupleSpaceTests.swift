@@ -71,6 +71,35 @@ struct CoupleSpaceTests {
         #expect(try store.load(userID: firstUserID) == nil)
     }
 
+    @Test func foregroundRecoveryPlansOnlyCurrentActiveRelationshipQueues() {
+        let currentRelationshipID = UUID()
+        let otherRelationshipID = UUID()
+
+        #expect(ForegroundOutboxRecoveryPolicy.plan(
+            relationshipStatus: "active",
+            currentRelationshipID: currentRelationshipID,
+            markerRelationshipIDs: [currentRelationshipID],
+            messageRelationshipIDs: [currentRelationshipID, currentRelationshipID],
+            photoRelationshipIDs: [otherRelationshipID]
+        ) == [.marker, .message])
+
+        #expect(ForegroundOutboxRecoveryPolicy.plan(
+            relationshipStatus: "closing",
+            currentRelationshipID: currentRelationshipID,
+            markerRelationshipIDs: [currentRelationshipID],
+            messageRelationshipIDs: [currentRelationshipID],
+            photoRelationshipIDs: [currentRelationshipID]
+        ).isEmpty)
+
+        #expect(ForegroundOutboxRecoveryPolicy.plan(
+            relationshipStatus: "active",
+            currentRelationshipID: nil,
+            markerRelationshipIDs: [currentRelationshipID],
+            messageRelationshipIDs: [],
+            photoRelationshipIDs: []
+        ).isEmpty)
+    }
+
     @Test func appleSignInNonceHashIsDeterministic() {
         #expect(AppleSignInNonce.hash("CoupleSpace-W1") ==
                 "3639d0045c9968cfb5182d7a7591aa078f00a411a40ca34943d9b3339358bf15")

@@ -331,6 +331,14 @@ Swift W1 client 新增只產生 `W1 test <token>` 的非私人測試訊息，以
 - 2026-08-06 真機 A＋Simulator B 已完成三則文字訊息 FIFO 全流程：A 在線寫入後 B 可見相同 `W1 test <token>`；A 斷網連續建立三筆後 Outbox 顯示三筆待送，保持離線強制結束並重開 App 仍保留原順序；恢復網路只觸發一次重送後，B 依原順序看到三則且沒有重複，A 再次重啟時 Outbox 已清空。
 - 此結果通過單一真機與 Simulator 的跨 Apple 身分文字同步、離線持久化、跨啟動 FIFO、恢復網路人工重送及冪等清除；100 筆本機 regression 另通過持久化與完整 FIFO drain。尚未完成兩支真實 iPhone、長佇列真機壓力、頻繁斷線、自動退避、背景重送與雲端封存正文實測。
 
+### 登入／前景 outbox recovery 候選
+
+W1 client 在 Supabase 登入狀態可用或 App 由背景回到前景時，會以單一 coordinator 先執行既有 RLS refresh，再建立本次恢復計畫。計畫只接受 `active` relationship，且每一種 queue 的所有項目都必須屬於目前 relationship；順序固定為 marker、message、photo。`closing`、`archived`、沒有目前 relationship、混入舊 relationship 或另一個 recovery 尚未結束時均不自動送出。每個 processor 仍沿用既有穩定 client UUID、FIFO、伺服器冪等與失敗保留，不建立第二套傳送邏輯。
+
+這個切片只代表「登入或回到前景後立即嘗試一次」，沒有加入任意秒數、網路監聽、循環重試、退避或 iOS background task。iPhone Simulator unsigned build 與完整 `CoupleSpaceTests` 48 個案例通過；新增純規則案例證明 active／current relationship 的允許路徑，以及 closing 與缺少 current relationship 的拒絕路徑。
+
+2026-08-07 真機 A＋Simulator B 已完成兩條自動恢復流程。第一條在 A 斷網排入 marker、message、photo 後讓 App 進入背景，恢復網路再回到 App，全程不按人工重試或重新整理，三種 Outbox 自動送達並清空，B 可見相同內容且沒有重複。第二條在相同三種待送項目存在時保持斷網強制結束 A，先恢復網路再重新啟動 App；Supabase session 恢復後三種 queue 同樣自動 drain，B 核對內容、順序與去重均正常。這關閉 W1 的登入／前景一次性 recovery 證據，但不代表 App 在背景中自行傳送，也不接受為正式退避或網路監聽方案。
+
 ### Supabase closing／personal archive client spike
 
 W1 Swift client 已接上既有 `begin_unpairing` 與 `seal_personal_archive` RPC，並加入明確的不可逆確認：第一步將測試關係轉為 `closing`，第二步由每位成員各自建立 owner-isolated personal archive。client 可顯示自己的封存項目數；雙方完成後，active relationship RLS 不再回傳共同關係，畫面只保留本人可讀的封存狀態。
@@ -425,5 +433,6 @@ W1 純規則使用 opaque content reference，而不是複製內容。完整文�
 - 推播 production／TestFlight 與兩支真實 iPhone 的送達實測；development sandbox 的接收者、背景／終止、鎖定畫面隱私與 Watch 鏡像已通過。
 - 個人封存匯出的正式格式、容量、大型真機壓力、低磁碟空間與中斷後續傳；version 1 資料夾候選的真機交付、小型封存內容核對及磁碟 staging／殘留清理已通過。
 - 正式訊息、照片政策、推播與背景重試的剩餘子決策；受管後端與共同資料系統紀錄已由 TD-001 關閉。
+- 登入／前景一次性 outbox recovery 已通過本機規則、Simulator 測試及真機 A＋Simulator B 的背景返回／強制結束後重啟自動 drain；正式退避、網路監聽與真正背景重試仍未決定。
 
 在上述證據完成前，G1 與 M0 維持未通過，不進入大量功能實作。

@@ -32,6 +32,44 @@ struct RelationshipSnapshotStore {
     }
 }
 
+enum PendingOutboxKind: Equatable {
+    case marker
+    case message
+    case photo
+}
+
+struct ForegroundOutboxRecoveryPolicy {
+    static func plan(
+        relationshipStatus: String?,
+        currentRelationshipID: UUID?,
+        markerRelationshipIDs: [UUID],
+        messageRelationshipIDs: [UUID],
+        photoRelationshipIDs: [UUID]
+    ) -> [PendingOutboxKind] {
+        guard relationshipStatus == "active",
+              let currentRelationshipID else {
+            return []
+        }
+
+        func belongsOnlyToCurrentRelationship(_ relationshipIDs: [UUID]) -> Bool {
+            !relationshipIDs.isEmpty
+                && relationshipIDs.allSatisfy { $0 == currentRelationshipID }
+        }
+
+        var result: [PendingOutboxKind] = []
+        if belongsOnlyToCurrentRelationship(markerRelationshipIDs) {
+            result.append(.marker)
+        }
+        if belongsOnlyToCurrentRelationship(messageRelationshipIDs) {
+            result.append(.message)
+        }
+        if belongsOnlyToCurrentRelationship(photoRelationshipIDs) {
+            result.append(.photo)
+        }
+        return result
+    }
+}
+
 enum MessageDeliveryState: Equatable {
     case queued
     case sending(attempt: Int)
