@@ -21,7 +21,7 @@ W1 不先完成正式產品功能。先以最小真機 spike 驗證最大未知�
 | 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；三張持久 FIFO upload outbox 的斷網、跨啟動、重送與順序通過，另有 32 筆本機檔案持久化／FIFO drain regression；實際 JPEG regression 證明大圖縮放、方向正規化與 GPS 移除，真機高解析直向照片跨裝置方向／比例亦通過；closing orphan reconciliation 通過本機 pgTAP／unit、migration 011 部署及跨裝置離線→closing→恢復網路實測 | 頻繁弱網、容量與保存期限待驗證 |
 | 推播 | 伺服器驗證 relationship／recipient 後才送出泛化 APNs 文案；App 收到提示後重新讀取 | migrations 009／010、APNs secrets 與 Edge sender 已部署；Simulator B→真機 A 的背景、終止、鎖定與 Watch 鏡像通知皆成功 | 仍需兩支真實 iPhone 與 production／TestFlight 證據 |
 | 所有權與解除配對 | Supabase 伺服器建立雙份 owner-isolated 唯讀封存，兩人可獨立刪除或匯出 | closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過；version 1 manifest＋JPEG 資料夾候選通過真機交付核對，64 張／4 MiB 合成照片磁碟 staging 與部分 staging 清理 regression 通過 | 最終格式、容量、大型真機壓力、低磁碟空間與中斷後續傳待驗證 |
-| 有意義雙向互動 | 同一 relationship、同一 interaction object 內，兩個目前伴侶各至少有一次符合資格的 contribution；只記 ID、種類與時間，不記內容 | 純規則測試已建立 | 事件無法區分單方重複操作與真正雙方參與，或需要記錄私密內容 |
+| 核心雙向互動與聊天活躍 | PD-020 將同一 Moment／題目／共同約定內的雙方參與定義為核心雙向互動；同週雙方各至少一則聊天訊息另列聊天活躍。完整內容留在產品資料／私有 Storage，分析事件只保存內容參照與必要 metadata | 純規則涵蓋單方重複、混合物件、重複內容參照、第二位參與完成時間、週期邊界與雙方聊天；編碼 regression 確認沒有私密內容欄位 | 雲端彙整事件尚未實作；產品資料與 Storage 的備份／還原及演練另列 release gate |
 
 ## CloudKit Sharing PoC
 
@@ -410,6 +410,12 @@ W1 client 只在 relationship 已 `archived` 且目前使用者仍持有 persona
 系統選擇器若以左上角逐層返回後按 X，真機不會立即回傳取消結果；下一次點擊匯出時才顯示上一輪「個人封存交付失敗」，再點一次仍可重新進入選擇器並成功儲存。此為 `fileExporter` 取消 callback 的延遲時序，沒有資料錯交或重試阻塞，但即時取消提示維持未通過，不把它記為正常完成路徑。
 
 同次複驗亦發現 Simulator B 保留上一段 relationship 的 marker outbox。原本 fail-closed 規則正確阻止把舊項目混入目前 relationship，但沒有可恢復入口；W1 畫面現加入明確的「清除其他關係的待送測試標記」，只有整份 queue 都不屬於目前 relationship 才能清除，目前關係的待送項目仍必須重試。此規則已由 unit test 覆蓋；更新後 Simulator 冷啟動時 Outbox 已為「尚無待送標記」，因此本次沒有需要執行清除的舊項目。
+
+### 核心雙向互動與雙向聊天活躍定義
+
+2026-08-07 接受 PD-020，避免用自由聊天是否活躍掩蓋 Moment／共同約定的差異化核心：核心雙向互動只在同一 relationship 的兩位目前伴侶，對同一 Moment、同一題「我們的一題」或同一共同約定各有至少一次符合資格的文字、照片、Emoji 或回答參與時完成；同一 interaction object 只完成一次，完成時間取第二位伴侶首次使條件成立的時間。自由聊天則以半開週期 `[週起點, 下週起點)` 獨立判斷，雙方各至少一則訊息即計為一對，訊息數量不增加伴侶對計數。
+
+W1 純規則使用 opaque content reference，而不是複製內容。完整文字、照片、Emoji 與回答仍保存在受 relationship RLS 保護的 Supabase 產品資料與私有 Storage，供跨裝置同步、重新安裝恢復、共同歷史、匯出與個人封存；分析資料只含 relationship、interaction／內容參照、表面、參與種類、participant 與時間。單方重複、不同 interaction object、重複內容參照及週期結束邊界均有 deterministic regression。雲端事件表／彙整尚未建立，也沒有新增 migration；產品資料與 Storage 的備份、還原與演練是獨立 release gate，分析事件不得被當成備份副本。
 
 ## W1 尚未關閉
 

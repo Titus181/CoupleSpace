@@ -62,8 +62,10 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 ## 敏感資料邊界
 
 - 私密訊息、照片、Moment 內容與伴侶關係屬敏感資料。
+- 完整內容由受 relationship RLS 保護的 Supabase 產品資料與私有 Storage 保存，作為跨裝置同步、重新安裝恢復、共同歷史、匯出與個人封存的來源；分析資料不是備份來源。
 - 通知預設只帶最小路由資訊；鎖定畫面不得預設揭露內容。
-- 分析只記錄產品驗證所需事件，不記錄訊息文字或照片內容。
+- 分析只記錄產品驗證所需的 relationship、interaction／內容參照、表面與參與種類、participant 與時間，不複製訊息文字、照片、Emoji 值或回答內容。
+- 產品資料庫與 Storage 的雲端災難復原須有獨立備份、還原與演練 gate，不以分析事件或裝置快取替代。
 - Log、crash report、測試 fixture 與 Eval 不得包含真實私人資料或 secrets。
 - 匯出、刪除與解除配對必須共享同一套已核准的資料生命週期規則。
 

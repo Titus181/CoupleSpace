@@ -568,31 +568,91 @@ struct PrivateNotificationPayload: Codable, Equatable {
     }
 }
 
-struct InteractionContribution: Equatable {
+enum MeaningfulInteractionSurface: String, Codable, Equatable {
+    case moment
+    case question
+    case appointment
+}
+
+enum InteractionContributionKind: String, Codable, Equatable {
+    case text
+    case photo
+    case emoji
+    case answer
+}
+
+struct InteractionContribution: Codable, Equatable {
     let relationshipID: UUID
     let interactionID: UUID
+    let contentReferenceID: UUID
     let participantID: UUID
+    let surface: MeaningfulInteractionSurface
+    let kind: InteractionContributionKind
     let occurredAt: Date
 }
 
 struct MeaningfulInteractionRule {
+    static func completionDate(
+        for contributions: [InteractionContribution],
+        expectedParticipants: Set<UUID>
+    ) -> Date? {
+        guard expectedParticipants.count == 2,
+              let relationshipID = contributions.first?.relationshipID,
+              let interactionID = contributions.first?.interactionID,
+              let surface = contributions.first?.surface,
+              Set(contributions.map(\.contentReferenceID)).count == contributions.count,
+              contributions.allSatisfy({
+                  $0.relationshipID == relationshipID &&
+                  $0.interactionID == interactionID &&
+                  $0.surface == surface &&
+                  expectedParticipants.contains($0.participantID)
+              }),
+              Set(contributions.map(\.participantID)) == expectedParticipants
+        else {
+            return nil
+        }
+
+        return contributions.map(\.occurredAt).max()
+    }
+
     static func isSatisfied(
         by contributions: [InteractionContribution],
         expectedParticipants: Set<UUID>
     ) -> Bool {
-        guard expectedParticipants.count == 2,
-              let relationshipID = contributions.first?.relationshipID,
-              let interactionID = contributions.first?.interactionID,
-              contributions.allSatisfy({
-                  $0.relationshipID == relationshipID &&
-                  $0.interactionID == interactionID &&
-                  expectedParticipants.contains($0.participantID)
-              })
-        else {
-            return false
-        }
+        completionDate(
+            for: contributions,
+            expectedParticipants: expectedParticipants
+        ) != nil
+    }
+}
 
-        return Set(contributions.map(\.participantID)) == expectedParticipants
+struct ChatMessageActivity: Codable, Equatable {
+    let relationshipID: UUID
+    let contentReferenceID: UUID
+    let participantID: UUID
+    let occurredAt: Date
+}
+
+struct BidirectionalChatActivityRule {
+    static func isSatisfied(
+        by messages: [ChatMessageActivity],
+        relationshipID: UUID,
+        expectedParticipants: Set<UUID>,
+        during interval: DateInterval
+    ) -> Bool {
+        guard expectedParticipants.count == 2 else { return false }
+
+        let participants = messages.reduce(into: Set<UUID>()) { result, message in
+            guard message.relationshipID == relationshipID,
+                  expectedParticipants.contains(message.participantID),
+                  message.occurredAt >= interval.start,
+                  message.occurredAt < interval.end
+            else {
+                return
+            }
+            result.insert(message.participantID)
+        }
+        return participants == expectedParticipants
     }
 }
 

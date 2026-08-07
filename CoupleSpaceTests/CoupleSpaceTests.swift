@@ -1045,7 +1045,7 @@ struct CoupleSpaceTests {
     }
 #endif
 
-    @Test func meaningfulInteractionRequiresBothExpectedParticipants() {
+    @Test func meaningfulInteractionRequiresBothExpectedParticipantsOnOneObject() {
         let relationshipID = UUID()
         let interactionID = UUID()
         let first = UUID()
@@ -1054,14 +1054,20 @@ struct CoupleSpaceTests {
         let firstContribution = InteractionContribution(
             relationshipID: relationshipID,
             interactionID: interactionID,
+            contentReferenceID: UUID(),
             participantID: first,
-            occurredAt: .now
+            surface: .moment,
+            kind: .photo,
+            occurredAt: Date(timeIntervalSince1970: 100)
         )
         let secondContribution = InteractionContribution(
             relationshipID: relationshipID,
             interactionID: interactionID,
+            contentReferenceID: UUID(),
             participantID: second,
-            occurredAt: .now
+            surface: .moment,
+            kind: .emoji,
+            occurredAt: Date(timeIntervalSince1970: 200)
         )
 
         #expect(!MeaningfulInteractionRule.isSatisfied(
@@ -1071,6 +1077,131 @@ struct CoupleSpaceTests {
         #expect(MeaningfulInteractionRule.isSatisfied(
             by: [firstContribution, secondContribution],
             expectedParticipants: expected
+        ))
+        #expect(MeaningfulInteractionRule.completionDate(
+            for: [secondContribution, firstContribution],
+            expectedParticipants: expected
+        ) == Date(timeIntervalSince1970: 200))
+    }
+
+    @Test func meaningfulInteractionRejectsMixedObjectsAndDuplicateContentReferences() {
+        let relationshipID = UUID()
+        let first = UUID()
+        let second = UUID()
+        let sharedContentReferenceID = UUID()
+        let firstContribution = InteractionContribution(
+            relationshipID: relationshipID,
+            interactionID: UUID(),
+            contentReferenceID: sharedContentReferenceID,
+            participantID: first,
+            surface: .question,
+            kind: .answer,
+            occurredAt: Date(timeIntervalSince1970: 100)
+        )
+        let mixedObjectContribution = InteractionContribution(
+            relationshipID: relationshipID,
+            interactionID: UUID(),
+            contentReferenceID: UUID(),
+            participantID: second,
+            surface: .question,
+            kind: .answer,
+            occurredAt: Date(timeIntervalSince1970: 200)
+        )
+        let duplicateReferenceContribution = InteractionContribution(
+            relationshipID: relationshipID,
+            interactionID: firstContribution.interactionID,
+            contentReferenceID: sharedContentReferenceID,
+            participantID: second,
+            surface: .question,
+            kind: .answer,
+            occurredAt: Date(timeIntervalSince1970: 200)
+        )
+
+        #expect(!MeaningfulInteractionRule.isSatisfied(
+            by: [firstContribution, mixedObjectContribution],
+            expectedParticipants: [first, second]
+        ))
+        #expect(!MeaningfulInteractionRule.isSatisfied(
+            by: [firstContribution, duplicateReferenceContribution],
+            expectedParticipants: [first, second]
+        ))
+    }
+
+    @Test func interactionContributionEncodingContainsReferencesButNoPrivateContent() throws {
+        let contribution = InteractionContribution(
+            relationshipID: UUID(),
+            interactionID: UUID(),
+            contentReferenceID: UUID(),
+            participantID: UUID(),
+            surface: .appointment,
+            kind: .text,
+            occurredAt: Date(timeIntervalSince1970: 100)
+        )
+
+        let encoded = try JSONEncoder().encode(contribution)
+        let json = try #require(String(data: encoded, encoding: .utf8))
+        #expect(json.contains("contentReferenceID"))
+        #expect(json.contains("\"kind\":\"text\""))
+        #expect(!json.contains("textContent"))
+        #expect(!json.contains("photoURL"))
+        #expect(!json.contains("emojiValue"))
+        #expect(!json.contains("answerContent"))
+    }
+
+    @Test func bidirectionalChatActivityCountsOnePairWithinHalfOpenWeek() {
+        let relationshipID = UUID()
+        let otherRelationshipID = UUID()
+        let first = UUID()
+        let second = UUID()
+        let week = DateInterval(
+            start: Date(timeIntervalSince1970: 1_000),
+            end: Date(timeIntervalSince1970: 2_000)
+        )
+        let messages = [
+            ChatMessageActivity(
+                relationshipID: relationshipID,
+                contentReferenceID: UUID(),
+                participantID: first,
+                occurredAt: Date(timeIntervalSince1970: 1_100)
+            ),
+            ChatMessageActivity(
+                relationshipID: relationshipID,
+                contentReferenceID: UUID(),
+                participantID: first,
+                occurredAt: Date(timeIntervalSince1970: 1_200)
+            ),
+            ChatMessageActivity(
+                relationshipID: otherRelationshipID,
+                contentReferenceID: UUID(),
+                participantID: second,
+                occurredAt: Date(timeIntervalSince1970: 1_300)
+            ),
+            ChatMessageActivity(
+                relationshipID: relationshipID,
+                contentReferenceID: UUID(),
+                participantID: second,
+                occurredAt: week.end
+            ),
+        ]
+
+        #expect(!BidirectionalChatActivityRule.isSatisfied(
+            by: messages,
+            relationshipID: relationshipID,
+            expectedParticipants: [first, second],
+            during: week
+        ))
+
+        let completedMessages = messages + [ChatMessageActivity(
+            relationshipID: relationshipID,
+            contentReferenceID: UUID(),
+            participantID: second,
+            occurredAt: Date(timeIntervalSince1970: 1_900)
+        )]
+        #expect(BidirectionalChatActivityRule.isSatisfied(
+            by: completedMessages,
+            relationshipID: relationshipID,
+            expectedParticipants: [first, second],
+            during: week
         ))
     }
 
