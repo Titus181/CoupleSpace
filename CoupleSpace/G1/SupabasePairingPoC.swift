@@ -125,12 +125,14 @@ private struct PersonalArchiveItemRow: Decodable {
     let itemKind: String
     let createdAt: Date
     let textContent: String?
+    let mediaByteSize: Int64?
 
     enum CodingKeys: String, CodingKey {
         case clientID = "client_id"
         case itemKind = "item_kind"
         case createdAt = "created_at"
         case textContent = "text_content"
+        case mediaByteSize = "media_byte_size"
     }
 }
 
@@ -499,7 +501,7 @@ final class SupabasePairingPoC: ObservableObject {
             _ = try await client.auth.session
             let rows: [PersonalArchiveItemRow] = try await client
                 .from("personal_archive_items")
-                .select("client_id,item_kind,created_at,text_content")
+                .select("client_id,item_kind,created_at,text_content,media_byte_size")
                 .eq("archive_id", value: personalArchiveID)
                 .order("created_at", ascending: true)
                 .order("client_id", ascending: true)
@@ -526,6 +528,22 @@ final class SupabasePairingPoC: ObservableObject {
                 exportedAt: .now,
                 items: items
             )
+            let requiredBytes = PersonalArchiveExportCapacityPolicy.requiredBytes(
+                manifestByteCount: try package.manifestData().count,
+                photoByteSizes: rows
+                    .filter { $0.itemKind == "photo" }
+                    .map(\.mediaByteSize)
+            )
+            let stagingDirectory = FileManager.default.temporaryDirectory
+            let availableBytes = PersonalArchiveExportCapacityPolicy.availableBytes(
+                at: stagingDirectory
+            )
+            guard PersonalArchiveExportCapacityPolicy.permitsStaging(
+                requiredBytes: requiredBytes,
+                availableBytes: availableBytes
+            ) else {
+                throw PersonalArchiveExportError.insufficientStagingCapacity
+            }
             var staging = try PersonalArchiveExportStaging(package: package)
             do {
                 for row in rows where row.itemKind == "photo" {

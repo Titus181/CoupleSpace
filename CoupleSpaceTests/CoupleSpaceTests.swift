@@ -939,6 +939,36 @@ struct CoupleSpaceTests {
         }
     }
 
+    @Test func personalArchiveExportChecksKnownStagingCapacityBeforeDownload() {
+        let requiredBytes = PersonalArchiveExportCapacityPolicy.requiredBytes(
+            manifestByteCount: 512,
+            photoByteSizes: [1_024, 2_048]
+        )
+
+        #expect(requiredBytes == 3_584)
+        #expect(PersonalArchiveExportCapacityPolicy.permitsStaging(
+            requiredBytes: requiredBytes,
+            availableBytes: 3_584
+        ))
+        #expect(!PersonalArchiveExportCapacityPolicy.permitsStaging(
+            requiredBytes: requiredBytes,
+            availableBytes: 3_583
+        ))
+    }
+
+    @Test func personalArchiveExportPreservesLegacyUnknownSizeCompatibility() {
+        let requiredBytes = PersonalArchiveExportCapacityPolicy.requiredBytes(
+            manifestByteCount: 512,
+            photoByteSizes: [1_024, nil]
+        )
+
+        #expect(requiredBytes == nil)
+        #expect(PersonalArchiveExportCapacityPolicy.permitsStaging(
+            requiredBytes: requiredBytes,
+            availableBytes: 0
+        ))
+    }
+
     @Test func personalArchiveExportStagesManyPhotosWithoutChangingTheirBytes() throws {
         let baseDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
             UUID().uuidString,

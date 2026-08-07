@@ -37,7 +37,56 @@ enum PersonalArchiveExportError: Error, Equatable {
     case invalidItemContent
     case photoSetMismatch
     case duplicatePhoto
+    case insufficientStagingCapacity
     case importUnsupported
+}
+
+extension PersonalArchiveExportError: LocalizedError {
+    var errorDescription: String? {
+        switch self {
+        case .insufficientStagingCapacity:
+            return "裝置可用空間不足，未開始下載個人封存照片"
+        default:
+            return nil
+        }
+    }
+}
+
+enum PersonalArchiveExportCapacityPolicy {
+    static func requiredBytes(
+        manifestByteCount: Int,
+        photoByteSizes: [Int64?]
+    ) -> Int64? {
+        guard manifestByteCount >= 0,
+              photoByteSizes.allSatisfy({ ($0 ?? 0) > 0 }) else {
+            return nil
+        }
+
+        var total = Int64(manifestByteCount)
+        for byteSize in photoByteSizes.compactMap({ $0 }) {
+            let addition = total.addingReportingOverflow(byteSize)
+            guard !addition.overflow else { return nil }
+            total = addition.partialValue
+        }
+        return total
+    }
+
+    static func permitsStaging(requiredBytes: Int64?, availableBytes: Int64?) -> Bool {
+        guard let requiredBytes, let availableBytes else { return true }
+        return requiredBytes <= availableBytes
+    }
+
+    static func availableBytes(
+        at directoryURL: URL,
+        fileManager: FileManager = .default
+    ) -> Int64? {
+        guard let number = try? fileManager.attributesOfFileSystem(
+            forPath: directoryURL.path
+        )[.systemFreeSize] as? NSNumber else {
+            return nil
+        }
+        return number.int64Value
+    }
 }
 
 struct PersonalArchiveExportPackage: Sendable {

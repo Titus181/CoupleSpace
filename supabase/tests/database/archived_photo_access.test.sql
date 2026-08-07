@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(7);
+select plan(8);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password)
 values
@@ -28,12 +28,19 @@ values (
 );
 
 reset role;
-insert into public.shared_items (relationship_id, client_id, creator_user_id, item_kind)
+insert into public.shared_items (
+    relationship_id,
+    client_id,
+    creator_user_id,
+    item_kind,
+    media_byte_size
+)
 values (
     '50000000-0000-0000-0000-000000000001',
     '60000000-0000-0000-0000-000000000001',
     '00000000-0000-0000-0000-000000000031',
-    'photo'
+    'photo',
+    1024
 );
 
 set local role authenticated;
@@ -54,6 +61,12 @@ select results_eq(
     $$ select count(*)::integer from storage.objects where bucket_id = 'couplespace-w1-photos' $$,
     array[1],
     'first archive owner can read the archived photo'
+);
+
+select results_eq(
+    $$ select media_byte_size from public.personal_archive_items $$,
+    array[1024::bigint],
+    'the personal archive preserves the verified photo byte size'
 );
 
 reset role;
