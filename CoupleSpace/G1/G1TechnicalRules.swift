@@ -381,11 +381,52 @@ struct PhotoOutboxStore {
 }
 
 struct PhotoOutboxLifecyclePolicy {
+    enum ClosedRelationshipAction: Equatable {
+        case acknowledgeDelivered
+        case deleteOrphan
+    }
+
+    enum ReconciliationError: LocalizedError, Equatable {
+        case remoteIdentityMismatch
+
+        var errorDescription: String? {
+            switch self {
+            case .remoteIdentityMismatch:
+                "遠端照片識別與待送項目不一致"
+            }
+        }
+    }
+
     static func canBeginUnpairing(
         hasPendingPhoto: Bool,
         isSendingPhoto: Bool
     ) -> Bool {
         !hasPendingPhoto && !isSendingPhoto
+    }
+
+    static func actionForClosingRelationship(
+        remoteCreatorID: UUID?,
+        remoteItemKind: String?,
+        currentUserID: UUID
+    ) throws -> ClosedRelationshipAction {
+        guard remoteCreatorID != nil || remoteItemKind != nil else {
+            return .deleteOrphan
+        }
+        guard remoteCreatorID == currentUserID,
+              remoteItemKind == "photo" else {
+            throw ReconciliationError.remoteIdentityMismatch
+        }
+        return .acknowledgeDelivered
+    }
+
+    static func actionForArchivedRelationship(
+        archivedItemKind: String?
+    ) throws -> ClosedRelationshipAction {
+        guard let archivedItemKind else { return .deleteOrphan }
+        guard archivedItemKind == "photo" else {
+            throw ReconciliationError.remoteIdentityMismatch
+        }
+        return .acknowledgeDelivered
     }
 }
 

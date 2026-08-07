@@ -131,6 +131,14 @@ private struct PersonalArchiveItemRow: Decodable {
     }
 }
 
+private struct ArchivedPhotoIdentityRow: Decodable {
+    let itemKind: String
+
+    enum CodingKeys: String, CodingKey {
+        case itemKind = "item_kind"
+    }
+}
+
 @MainActor
 final class SupabasePairingPoC: ObservableObject {
     @Published private(set) var status = "登入後可開始雙身分 RLS 驗證"
@@ -722,6 +730,11 @@ final class SupabasePairingPoC: ObservableObject {
                     recentMarkerTokens = "共同資料已封存"
                     storagePhotoData = nil
                     storageStatus = "關係封存後不再讀取共同 Storage"
+                    await reconcilePhotoOutboxAfterRelationshipClosed(
+                        userID: session.user.id,
+                        relationshipID: archive.relationshipID,
+                        archiveID: archive.id
+                    )
                     try await refreshPersonalArchive(archive)
                     status = "關係已封存；目前只能讀取自己的個人封存"
                 } else {
@@ -803,6 +816,13 @@ final class SupabasePairingPoC: ObservableObject {
                 lifecycleStatus = relationship.status == "closing"
                     ? "關係 closing；請建立自己的個人封存"
                     : "關係 active；尚未開始解除配對"
+            }
+            if relationship.status == "closing" {
+                await reconcilePhotoOutboxAfterRelationshipClosed(
+                    userID: session.user.id,
+                    relationshipID: relationship.id,
+                    archiveID: nil
+                )
             }
             status = "關係：\(relationship.status)，成員：\(memberCount)/2"
         } catch {
@@ -1066,6 +1086,79 @@ final class SupabasePairingPoC: ObservableObject {
         }
         hasPendingPhoto = true
         photoOutboxStatus = "有 \(queue.count) 張待送照片（第一張已嘗試 \(first.attemptCount) 次）"
+    }
+
+    private func reconcilePhotoOutboxAfterRelationshipClosed(
+        userID: UUID,
+        relationshipID: UUID,
+        archiveID: UUID?
+    ) async {
+        guard !isPhotoOutboxSending else { return }
+        isPhotoOutboxSending = true
+        defer { isPhotoOutboxSending = false }
+
+        do {
+            var deliveredCount = 0
+            var deletedOrphanCount = 0
+            while let entry = try photoOutboxStore.load(userID: userID).first,
+                  entry.relationshipID == relationshipID {
+                let action: PhotoOutboxLifecyclePolicy.ClosedRelationshipAction
+                if let archiveID {
+                    let archivedItems: [ArchivedPhotoIdentityRow] = try await client
+                        .from("personal_archive_items")
+                        .select("item_kind")
+                        .eq("archive_id", value: archiveID)
+                        .eq("client_id", value: entry.clientID)
+                        .limit(1)
+                        .execute()
+                        .value
+                    action = try PhotoOutboxLifecyclePolicy.actionForArchivedRelationship(
+                        archivedItemKind: archivedItems.first?.itemKind
+                    )
+                } else {
+                    let sharedItems: [SharedPhotoRow] = try await client
+                        .from("shared_items")
+                        .select("client_id,creator_user_id,item_kind")
+                        .eq("relationship_id", value: relationshipID)
+                        .eq("client_id", value: entry.clientID)
+                        .limit(1)
+                        .execute()
+                        .value
+                    action = try PhotoOutboxLifecyclePolicy.actionForClosingRelationship(
+                        remoteCreatorID: sharedItems.first?.creatorUserID,
+                        remoteItemKind: sharedItems.first?.itemKind,
+                        currentUserID: userID
+                    )
+                }
+
+                switch action {
+                case .acknowledgeDelivered:
+                    deliveredCount += 1
+                case .deleteOrphan:
+                    try await client.storage
+                        .from("couplespace-w1-photos")
+                        .remove(paths: [storagePath(
+                            relationshipID: relationshipID,
+                            clientID: entry.clientID
+                        )])
+                    deletedOrphanCount += 1
+                }
+
+                guard try photoOutboxStore.acknowledgeFirst(
+                    clientID: entry.clientID,
+                    userID: userID
+                ) else {
+                    throw SupabasePhotoOutboxError.remoteIdentityMismatch
+                }
+            }
+
+            try refreshPhotoOutbox(userID: userID)
+            guard deliveredCount > 0 || deletedOrphanCount > 0 else { return }
+            photoOutboxStatus = "關係關閉後已整理照片 Outbox：\(deliveredCount) 張已送達，\(deletedOrphanCount) 張 orphan 已移除"
+        } catch {
+            hasPendingPhoto = true
+            photoOutboxStatus = "關係關閉後照片 Outbox 整理失敗，已保留待重試：\(error.localizedDescription)"
+        }
     }
 
     private func refreshPersonalArchive(_ archive: PersonalArchiveRow) async throws {

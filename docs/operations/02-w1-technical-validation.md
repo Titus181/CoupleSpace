@@ -18,7 +18,7 @@ W1 不先完成正式產品功能。先以最小真機 spike 驗證最大未知�
 | --- | --- | --- | --- |
 | 身分與配對 | Sign in with Apple credential 交由 Supabase Auth；Postgres constraint、RLS 與 RPC 管理一對一 relationship | 真機 A＋Simulator B、兩個 Apple ID 的登入、配對、session 恢復與雙向 RLS 初步通過 | 第三身分雲端拒絕與兩支真實 iPhone 待驗證 |
 | 同步與聊天 | Realtime 只作變更提示並重新經 RLS 讀取；client UUID、server timestamp 與持久 outbox 提供冪等和穩定順序 | 單筆及三筆 FIFO marker metadata outbox 的斷網、重啟、重連、順序與雙裝置一致性通過 | 正式訊息內容、較長佇列、自動排程與弱網仍待驗證 |
-| 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；三張持久 FIFO upload outbox 的斷網、跨啟動、重送與順序通過；實際 JPEG regression 證明大圖縮放、方向正規化與 GPS 移除，真機高解析直向照片跨裝置方向／比例亦通過 | 頻繁弱網、容量與保存期限待驗證 |
+| 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；三張持久 FIFO upload outbox 的斷網、跨啟動、重送與順序通過；實際 JPEG regression 證明大圖縮放、方向正規化與 GPS 移除，真機高解析直向照片跨裝置方向／比例亦通過；closing orphan reconciliation 通過本機 pgTAP／unit、migration 011 部署及跨裝置離線→closing→恢復網路實測 | 頻繁弱網、容量與保存期限待驗證 |
 | 推播 | 伺服器驗證 relationship／recipient 後才送出泛化 APNs 文案；App 收到提示後重新讀取 | migrations 009／010、APNs secrets 與 Edge sender 已部署；Simulator B→真機 A 的背景、終止、鎖定與 Watch 鏡像通知皆成功 | 仍需兩支真實 iPhone 與 production／TestFlight 證據 |
 | 所有權與解除配對 | Supabase 伺服器建立雙份 owner-isolated 唯讀封存，兩人可獨立刪除或匯出 | closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過；version 1 manifest＋JPEG 資料夾候選通過 unit tests 與真機交付核對 | 最終格式與大型封存待驗證 |
 | 有意義雙向互動 | 同一 relationship、同一 interaction object 內，兩個目前伴侶各至少有一次符合資格的 contribution；只記 ID、種類與時間，不記內容 | 純規則測試已建立 | 事件無法區分單方重複操作與真正雙方參與，或需要記錄私密內容 |
@@ -290,6 +290,16 @@ Swift W1 client 沿用既有最長邊 1,600 px、JPEG quality 0.8 的裝置端�
 
 高解析方向回歸亦於 2026-08-06 通過：真機上傳未編輯的直向高解析測試照片後，Simulator 重新整理可看到相同 client token；照片方向正確，沒有拉伸、裁切或比例錯誤。Simulator 強制結束、重開並再次整理後結果不變。這與 26 個 runtime cases 中的 EXIF orientation／GPS fixture 一起關閉本輪大圖方向風險；頻繁弱網、容量上限與保存期限仍未定案。
 
+### 照片 upload／closing orphan reconciliation
+
+盤點發現 photo outbox 原本仍有一個解除配對競態：Storage upload 已成功，但另一裝置在 metadata insert 前把 relationship 轉為 `closing`，會使 metadata 被拒絕，留下沒有 `shared_items` 引用的 Storage object 與永久待送的本機 outbox。這不是容量政策問題，而是刪除一致性與解除配對阻斷風險，因此優先於設定任意的商業容量數字處理。
+
+新增 migration `202608070011_w1_photo_orphan_cleanup.sql`，只讓原上傳者在仍是 active member，或仍持有該 relationship personal archive 且伺服器確認沒有 matching photo metadata 時，經 Storage API 刪除自己擁有的 W1 orphan object；正常封存照片即使同為上傳者所有也不可刪除。partner 仍受 `owner_id` 限制，第三身分也沒有 member／archive 權限。Client 在伺服器已確認 `closing`／`archived` 後逐筆整理 photo outbox：若 matching photo metadata 已存在，就只確認本機項目已送達；若 metadata 明確不存在，才刪除 deterministic path 的 orphan object，且 Storage API 成功後才移除本機 JPEG／queue。網路錯誤、查詢失敗或 identity collision 都保留 queue，不推測成功。
+
+本機從空資料庫套用 migrations `001`～`011`，11 份 pgTAP 共 125 個案例全數通過，新增案例證明 archived orphan 只能由原上傳者刪除，partner／第三身分均被拒絕、已有 sealed metadata 引用的正常照片仍受保護，且不建立重複 GC job；`public` schema lint 無錯誤。Swift 新增五個 reconciliation cases，iPhone 17 Simulator `CoupleSpaceTests` 36／36 通過，`build-for-testing` 亦成功。migration 011 已推送 Supabase 測試專案，遠端 migration 清單與最終 dry-run 均確認資料庫為最新。
+
+跨裝置時序亦已通過：真機 A 斷網後把照片排入 Outbox，Simulator B 保持連網並開始解除配對，B 先顯示 `closing`；A 因離線顯示「重新整理 RLS 狀態失敗」是預期行為，並不代表 closing 未生效。A 恢復網路後重新整理，才取得遠端 `closing`、清除待送照片且重啟後不復活；其餘 closing 寫入拒絕條件均符合。這關閉 migration 011 的 deployment／cross-device gate。
+
 ### 斷網冷啟動 relationship 顯示快照
 
 實測發現已登入使用者在完全斷網下強制結束並重開 App 時，遠端 `refresh` 尚未成功前，關係代碼與成員數會回到空狀態。W1 client 因此加入最小唯讀快照：每次 Supabase 成功回傳 relationship 與 membership 後，依 Supabase user UUID 保存 relationship UUID、status 與 member count；冷啟動先恢復這三個顯示欄位，再嘗試遠端更新。伺服器成功確認目前無關係或關係已封存時清除 active snapshot；登出只清空畫面，不把另一使用者的資料載入目前 session。
@@ -397,7 +407,7 @@ W1 client 只在 relationship 已 `archived` 且目前使用者仍持有 persona
 
 - Supabase 路徑的兩支真實 iPhone、兩個 Apple ID 登入、配對、雙向資料與重啟證據。
 - 以雲端 Supabase 測試專案驗證第三身分拒絕；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件、Storage 私有照片雙向讀寫、單筆及三筆 FIFO marker 離線持久 outbox／冪等重送、三筆文字訊息 FIFO、closing／雙份 personal archive／archived photo，以及 owner-only archive delete／最後引用 object GC 已通過。
-- 照片頻繁弱網、大圖與方向組合、保存期限及刪除一致性實測。
+- 照片 upload／closing orphan reconciliation 已通過；migration 011 已部署，頻繁弱網、容量與保存期限仍待驗證，大圖／方向與最後引用 GC 已通過。
 - 推播 production／TestFlight 與兩支真實 iPhone 的送達實測；development sandbox 的接收者、背景／終止、鎖定畫面隱私與 Watch 鏡像已通過。
 - 個人封存匯出的正式格式、容量、串流／分批處理與中斷恢復；version 1 資料夾候選的真機交付與小型封存內容核對已通過。
 - 正式訊息、照片政策、推播與背景重試的剩餘子決策；受管後端與共同資料系統紀錄已由 TD-001 關閉。

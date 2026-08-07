@@ -367,6 +367,50 @@ struct CoupleSpaceTests {
         ))
     }
 
+    @Test func closingPhotoReconciliationAcknowledgesMatchingMetadata() throws {
+        let userID = UUID()
+        #expect(try PhotoOutboxLifecyclePolicy.actionForClosingRelationship(
+            remoteCreatorID: userID,
+            remoteItemKind: "photo",
+            currentUserID: userID
+        ) == .acknowledgeDelivered)
+    }
+
+    @Test func closingPhotoReconciliationDeletesOnlyMissingMetadata() throws {
+        #expect(try PhotoOutboxLifecyclePolicy.actionForClosingRelationship(
+            remoteCreatorID: nil,
+            remoteItemKind: nil,
+            currentUserID: UUID()
+        ) == .deleteOrphan)
+    }
+
+    @Test func closingPhotoReconciliationRejectsIdentityCollision() {
+        #expect(throws: PhotoOutboxLifecyclePolicy.ReconciliationError.remoteIdentityMismatch) {
+            try PhotoOutboxLifecyclePolicy.actionForClosingRelationship(
+                remoteCreatorID: UUID(),
+                remoteItemKind: "photo",
+                currentUserID: UUID()
+            )
+        }
+    }
+
+    @Test func archivedPhotoReconciliationUsesSealedMetadata() throws {
+        #expect(try PhotoOutboxLifecyclePolicy.actionForArchivedRelationship(
+            archivedItemKind: "photo"
+        ) == .acknowledgeDelivered)
+        #expect(try PhotoOutboxLifecyclePolicy.actionForArchivedRelationship(
+            archivedItemKind: nil
+        ) == .deleteOrphan)
+    }
+
+    @Test func archivedPhotoReconciliationRejectsWrongItemKind() {
+        #expect(throws: PhotoOutboxLifecyclePolicy.ReconciliationError.remoteIdentityMismatch) {
+            try PhotoOutboxLifecyclePolicy.actionForArchivedRelationship(
+                archivedItemKind: "message"
+            )
+        }
+    }
+
     @Test func serverTimestampAndIDProduceDeterministicOrder() {
         let sameServerDate = Date(timeIntervalSince1970: 100)
         let earlierID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
