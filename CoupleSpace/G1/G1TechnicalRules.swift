@@ -70,6 +70,21 @@ struct ForegroundOutboxRecoveryPolicy {
     }
 }
 
+struct ForegroundRecoveryRetryPolicy {
+    static let maximumAttempts = 3
+
+    static func delayNanoseconds(afterAttempt attempt: Int) -> UInt64? {
+        switch attempt {
+        case 1:
+            return 1_000_000_000
+        case 2:
+            return 4_000_000_000
+        default:
+            return nil
+        }
+    }
+}
+
 enum MessageDeliveryState: Equatable {
     case queued
     case sending(attempt: Int)

@@ -100,6 +100,15 @@ struct CoupleSpaceTests {
         ).isEmpty)
     }
 
+    @Test func foregroundRecoveryRetryIsBoundedWithShortBackoff() {
+        #expect(ForegroundRecoveryRetryPolicy.maximumAttempts == 3)
+        #expect(ForegroundRecoveryRetryPolicy.delayNanoseconds(afterAttempt: 0) == nil)
+        #expect(ForegroundRecoveryRetryPolicy.delayNanoseconds(afterAttempt: 1) == 1_000_000_000)
+        #expect(ForegroundRecoveryRetryPolicy.delayNanoseconds(afterAttempt: 2) == 4_000_000_000)
+        #expect(ForegroundRecoveryRetryPolicy.delayNanoseconds(afterAttempt: 3) == nil)
+        #expect(ForegroundRecoveryRetryPolicy.delayNanoseconds(afterAttempt: 4) == nil)
+    }
+
     @Test func appleSignInNonceHashIsDeterministic() {
         #expect(AppleSignInNonce.hash("CoupleSpace-W1") ==
                 "3639d0045c9968cfb5182d7a7591aa078f00a411a40ca34943d9b3339358bf15")

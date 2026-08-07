@@ -10,15 +10,15 @@ last_updated: 2026-08-07
 
 W1 不先完成正式產品功能。先以最小真機 spike 驗證最大未知數，再依結果接受或否決候選方案。
 
-2026-08-06 已接受 TD-001：Supabase 是 iPhone v1 使用者身分、伴侶關係、共同資料與資料生命週期的唯一遠端系統紀錄；CloudKit Sharing 保留為實驗證據，不進行雙寫。個人封存匯出候選已通過真機交付與內容核對，但照片政策、匯出大型資料、production 推播與必要真機證據仍未完成，因此 G1 與 M0 尚未通過。
+2026-08-06 已接受 TD-001：Supabase 是 iPhone v1 使用者身分、伴侶關係、共同資料與資料生命週期的唯一遠端系統紀錄；CloudKit Sharing 保留為實驗證據，不進行雙寫。PD-022 已接受照片不按時間自動到期，並沿用 active relationship、owner-only 個人封存、明確刪除與最後引用 GC 的既有生命週期。個人封存匯出候選已通過真機交付與內容核對，但匯出大型資料、production 推播與必要真機證據仍未完成，因此 G1 與 M0 尚未通過。
 
 ## 候選方案狀態
 
 | 閘門 | TD-001 已接受方向 | 驗證狀態 | 尚未關閉的風險 |
 | --- | --- | --- | --- |
-| 身分與配對 | Sign in with Apple credential 交由 Supabase Auth；Postgres constraint、RLS 與 RPC 管理一對一 relationship | 真機 A＋Simulator B、兩個 Apple ID 的登入、配對、session 恢復與雙向 RLS 初步通過 | 第三身分雲端拒絕與兩支真實 iPhone 待驗證 |
+| 身分與配對 | Sign in with Apple credential 交由 Supabase Auth；Postgres constraint、RLS 與 RPC 管理一對一 relationship | 真機 A＋Simulator B、兩個 Apple ID 的登入、配對、session 恢復與雙向 RLS 初步通過；遠端測試專案的第三 authenticated UUID 對 relationship、memberships、shared items、personal archives 與 Storage 均不可見，四種敏感 RPC 亦拒絕 | 兩支真實 iPhone 待驗證 |
 | 同步與聊天 | Realtime 只作變更提示並重新經 RLS 讀取；client UUID、server timestamp 與持久 outbox 提供冪等和穩定順序 | 單筆及三筆 FIFO marker metadata outbox 的斷網、重啟、重連、順序與雙裝置一致性通過；message／marker 各 100 筆本機持久化與完整 FIFO drain regression 通過 | 正式訊息內容、長佇列真機壓力、自動排程與弱網仍待驗證 |
-| 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；三張持久 FIFO upload outbox 的斷網、跨啟動、重送與順序通過，另有 32 筆本機檔案持久化／FIFO drain regression；實際 JPEG regression 證明大圖縮放、方向正規化與 GPS 移除，真機高解析直向照片跨裝置方向／比例亦通過；closing orphan reconciliation 通過本機 pgTAP／unit、migration 011 部署及跨裝置離線→closing→恢復網路實測 | 頻繁弱網、容量與保存期限待驗證 |
+| 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理；不按時間自動到期 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；三張持久 FIFO upload outbox 的斷網、跨啟動、重送與順序通過，另有 32 筆本機檔案持久化／FIFO drain regression；實際 JPEG regression 證明大圖縮放、方向正規化與 GPS 移除，真機高解析直向照片跨裝置方向／比例亦通過；closing orphan reconciliation、月 30 張／累積 1 GB 配額與拒絕後 orphan 清理均通過遠端實測；PD-022 的保存政策與既有 lifecycle 一致，不需 migration | 頻繁弱網與真機容量壓力待驗證 |
 | 推播 | 伺服器驗證 relationship／recipient 後才送出泛化 APNs 文案；App 收到提示後重新讀取 | migrations 009／010、APNs secrets 與 Edge sender 已部署；Simulator B→真機 A 的背景、終止、鎖定與 Watch 鏡像通知皆成功 | 仍需兩支真實 iPhone 與 production／TestFlight 證據 |
 | 所有權與解除配對 | Supabase 伺服器建立雙份 owner-isolated 唯讀封存，兩人可獨立刪除或匯出 | closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過；version 1 manifest＋JPEG 資料夾候選通過真機交付核對，64 張／4 MiB 合成照片磁碟 staging 與部分 staging 清理 regression 通過 | 最終格式、容量、大型真機壓力、低磁碟空間與中斷後續傳待驗證 |
 | 核心雙向互動與聊天活躍 | PD-020 將同一 Moment／題目／共同約定內的雙方參與定義為核心雙向互動；同週雙方各至少一則聊天訊息另列聊天活躍。完整內容留在產品資料／私有 Storage，分析事件只保存內容參照與必要 metadata | 純規則涵蓋單方重複、混合物件、重複內容參照、第二位參與完成時間、週期邊界與雙方聊天；編碼 regression 確認沒有私密內容欄位 | 雲端彙整事件尚未實作；產品資料與 Storage 的備份／還原及演練另列 release gate |
@@ -335,9 +335,11 @@ Swift W1 client 新增只產生 `W1 test <token>` 的非私人測試訊息，以
 
 W1 client 在 Supabase 登入狀態可用或 App 由背景回到前景時，會以單一 coordinator 先執行既有 RLS refresh，再建立本次恢復計畫。計畫只接受 `active` relationship，且每一種 queue 的所有項目都必須屬於目前 relationship；順序固定為 marker、message、photo。`closing`、`archived`、沒有目前 relationship、混入舊 relationship 或另一個 recovery 尚未結束時均不自動送出。每個 processor 仍沿用既有穩定 client UUID、FIFO、伺服器冪等與失敗保留，不建立第二套傳送邏輯。
 
-這個切片只代表「登入或回到前景後立即嘗試一次」，沒有加入任意秒數、網路監聽、循環重試、退避或 iOS background task。iPhone Simulator unsigned build 與完整 `CoupleSpaceTests` 48 個案例通過；新增純規則案例證明 active／current relationship 的允許路徑，以及 closing 與缺少 current relationship 的拒絕路徑。
+原始切片只代表「登入或回到前景後立即嘗試一次」。2026-08-07 的下一個最小候選在同一 coordinator 加入有限次短退避：首次失敗且同一 active relationship 仍有待送項目時，等待 1 秒、4 秒再試，合計最多三次；三次後停止並保留既有 Outbox，等待下一次前景事件或人工重試。它不加入網路監聽、無限輪詢或 iOS background task，`closing`、`archived`、舊 relationship 與並行重入拒絕規則不變。iPhone 17 Pro Simulator 的完整 `CoupleSpaceTests` 56／56 通過；新增純規則案例固定最大次數、兩段延遲與越界不重試。
 
-2026-08-07 真機 A＋Simulator B 已完成兩條自動恢復流程。第一條在 A 斷網排入 marker、message、photo 後讓 App 進入背景，恢復網路再回到 App，全程不按人工重試或重新整理，三種 Outbox 自動送達並清空，B 可見相同內容且沒有重複。第二條在相同三種待送項目存在時保持斷網強制結束 A，先恢復網路再重新啟動 App；Supabase session 恢復後三種 queue 同樣自動 drain，B 核對內容、順序與去重均正常。這關閉 W1 的登入／前景一次性 recovery 證據，但不代表 App 在背景中自行傳送，也不接受為正式退避或網路監聽方案。
+2026-08-07 真機 A＋Simulator B 已完成兩條一次性自動恢復流程。第一條在 A 斷網排入 marker、message、photo 後讓 App 進入背景，恢復網路再回到 App，全程不按人工重試或重新整理，三種 Outbox 自動送達並清空，B 可見相同內容且沒有重複。第二條在相同三種待送項目存在時保持斷網強制結束 A，先恢復網路再重新啟動 App；Supabase session 恢復後三種 queue 同樣自動 drain，B 核對內容、順序與去重均正常。
+
+同日另完成三次有限短退避的真機驗證。短暫斷線案例由真機 A 建立待送 marker 並觸發前景 recovery，在不按人工重試的情況下於退避視窗內恢復網路；Outbox 自動清空，Simulator B 只看到一次相同 marker。耗盡案例則讓 A 持續離線至三次嘗試完成，畫面顯示「前景自動重試已暫停；待送項目已保留」，queue 與穩定 identity 均未遺失；恢復網路並再次觸發前景事件後自動送達，B 仍只收到一次。這關閉 W1 的一次性與有限短退避登入／前景 recovery 證據，但不代表 App 在背景中自行傳送，也不接受為正式長時間退避或網路監聽方案。
 
 ### 照片配額原子確認候選
 
@@ -434,11 +436,11 @@ W1 純規則使用 opaque content reference，而不是複製內容。完整文�
 ## W1 尚未關閉
 
 - Supabase 路徑的兩支真實 iPhone、兩個 Apple ID 登入、配對、雙向資料與重啟證據。
-- 以雲端 Supabase 測試專案驗證第三身分拒絕；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件、Storage 私有照片雙向讀寫、單筆及三筆 FIFO marker 離線持久 outbox／冪等重送、三筆文字訊息 FIFO、closing／雙份 personal archive／archived photo，以及 owner-only archive delete／最後引用 object GC 已通過。
-- 照片 upload／closing orphan reconciliation 已通過；migration 011 已部署，頻繁弱網、容量與保存期限仍待驗證，大圖／方向與最後引用 GC 已通過。
+- 第三身分雲端拒絕已通過：遠端連線以不屬於目標 relationship 的 authenticated UUID 執行，relationship、memberships、shared items、personal archives 與 Storage objects 讀取皆為 0；marker、message、photo finalization 與解除配對 RPC 均回傳 `42501 relationship_not_accessible`。測後 relationship 仍為 active、probe rows 為 0，原有 5 筆照片 metadata／5 個 object 不變。這是受控遠端 RLS／RPC 證據，不等同第三個 Apple ID 的完整 UI 登入流程。
+- 照片 upload／closing orphan reconciliation、月 30 張／累積 1 GB 配額拒絕與 orphan 清理已通過；PD-022 已關閉保存生命週期，不做時間型自動刪除，配額或降級只阻止新增。頻繁弱網與真機容量壓力仍待驗證，大圖／方向與最後引用 GC 已通過。
 - 推播 production／TestFlight 與兩支真實 iPhone 的送達實測；development sandbox 的接收者、背景／終止、鎖定畫面隱私與 Watch 鏡像已通過。
 - 個人封存匯出的正式格式、容量、大型真機壓力、低磁碟空間與中斷後續傳；version 1 資料夾候選的真機交付、小型封存內容核對及磁碟 staging／殘留清理已通過。
-- 正式訊息、照片政策、推播與背景重試的剩餘子決策；受管後端與共同資料系統紀錄已由 TD-001 關閉。
-- 登入／前景一次性 outbox recovery 已通過本機規則、Simulator 測試及真機 A＋Simulator B 的背景返回／強制結束後重啟自動 drain；正式退避、網路監聽與真正背景重試仍未決定。
+- 正式訊息、照片畫質／正式額度、推播與背景重試的剩餘子決策；照片保存生命週期已由 PD-022 關閉，受管後端與共同資料系統紀錄已由 TD-001 關閉。
+- 登入／前景一次性 outbox recovery 與三次有限短退避已通過本機規則、56 個 Simulator tests，以及真機 A＋Simulator B 的背景返回、強制結束後重啟、短暫斷線自動送達、耗盡停止保留與下一次前景恢復送達；正式長時間退避、網路監聽與真正背景重試仍未決定。
 
 在上述證據完成前，G1 與 M0 維持未通過，不進入大量功能實作。

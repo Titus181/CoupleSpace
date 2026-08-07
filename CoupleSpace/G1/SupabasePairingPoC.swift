@@ -874,35 +874,58 @@ final class SupabasePairingPoC: ObservableObject {
         isForegroundRecoveryRunning = true
         defer { isForegroundRecoveryRunning = false }
 
-        await refresh()
-
         do {
             let session = try await client.auth.session
-            let plan = ForegroundOutboxRecoveryPolicy.plan(
-                relationshipStatus: relationshipStatus,
-                currentRelationshipID: relationshipID,
-                markerRelationshipIDs: try markerOutboxStore.load(userID: session.user.id)
-                    .entries.map(\.relationshipID),
-                messageRelationshipIDs: try messageOutboxStore.load(userID: session.user.id)
-                    .entries.map(\.relationshipID),
-                photoRelationshipIDs: try photoOutboxStore.load(userID: session.user.id)
-                    .entries.map(\.relationshipID)
-            )
+            for attempt in 1...ForegroundRecoveryRetryPolicy.maximumAttempts {
+                await refresh()
 
-            for kind in plan {
-                guard relationshipStatus == "active" else { return }
-                switch kind {
-                case .marker:
-                    await retryPendingMarker()
-                case .message:
-                    await retryPendingMessages()
-                case .photo:
-                    await retryPendingPhoto()
+                let plan = try foregroundRecoveryPlan(userID: session.user.id)
+                guard !plan.isEmpty else { return }
+
+                for kind in plan {
+                    guard relationshipStatus == "active" else { return }
+                    switch kind {
+                    case .marker:
+                        await retryPendingMarker()
+                    case .message:
+                        await retryPendingMessages()
+                    case .photo:
+                        await retryPendingPhoto()
+                    }
+                }
+
+                guard !(try foregroundRecoveryPlan(userID: session.user.id)).isEmpty else {
+                    return
+                }
+                guard let delay = ForegroundRecoveryRetryPolicy.delayNanoseconds(
+                    afterAttempt: attempt
+                ) else {
+                    status = "前景自動重試已暫停；待送項目已保留"
+                    return
+                }
+                status = "前景恢復仍有待送項目；稍後進行第 \(attempt + 1) 次嘗試"
+                do {
+                    try await Task.sleep(nanoseconds: delay)
+                } catch {
+                    return
                 }
             }
         } catch {
             status = "前景恢復未完成：\(error.localizedDescription)"
         }
+    }
+
+    private func foregroundRecoveryPlan(userID: UUID) throws -> [PendingOutboxKind] {
+        ForegroundOutboxRecoveryPolicy.plan(
+            relationshipStatus: relationshipStatus,
+            currentRelationshipID: relationshipID,
+            markerRelationshipIDs: try markerOutboxStore.load(userID: userID)
+                .entries.map(\.relationshipID),
+            messageRelationshipIDs: try messageOutboxStore.load(userID: userID)
+                .entries.map(\.relationshipID),
+            photoRelationshipIDs: try photoOutboxStore.load(userID: userID)
+                .entries.map(\.relationshipID)
+        )
     }
 
     func clearSession() async {
