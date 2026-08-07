@@ -31,7 +31,8 @@ last_updated: 2026-08-07
 7. [第一版開發路線圖](operations/01-v1-development-roadmap.md)
 8. [產品決策紀錄](decisions/product-decisions.md)
 9. [技術決策紀錄](decisions/technical-decisions.md)
-10. [上市、客服與版本發布營運](operations/03-launch-support-and-release.md)
+10. [品牌識別與方心吉祥物](design/01-brand-identity.md)
+11. [上市、客服與版本發布營運](operations/03-launch-support-and-release.md)
 
 ## 文件維護原則
 
