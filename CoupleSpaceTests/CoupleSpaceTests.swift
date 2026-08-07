@@ -135,6 +135,40 @@ struct CoupleSpaceTests {
         #expect(try store.load(userID: userID).entries == [second])
     }
 
+    @Test func messageOutboxPreservesLongFIFOAcrossPersistenceAndDrain() throws {
+        let suiteName = "MessageOutboxLongFIFOTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let userID = UUID()
+        let relationshipID = UUID()
+        let entries = (0..<100).map { index in
+            MessageOutboxEntry(
+                relationshipID: relationshipID,
+                clientID: UUID(),
+                body: "W1 FIFO sample \(index)",
+                attemptCount: 0
+            )
+        }
+        let store = MessageOutboxStore(defaults: defaults)
+        var queue = MessageOutboxQueue()
+        entries.forEach { queue.enqueue($0) }
+        try store.save(queue, userID: userID)
+
+        var restored = try store.load(userID: userID)
+        #expect(restored.entries == entries)
+        for expected in entries {
+            let attemptedEntry = restored.beginFirstAttempt()
+            let attempted = try #require(attemptedEntry)
+            #expect(attempted.clientID == expected.clientID)
+            #expect(attempted.attemptCount == 1)
+            let didAcknowledge = restored.acknowledgeFirst(clientID: expected.clientID)
+            #expect(didAcknowledge)
+        }
+        try store.save(restored, userID: userID)
+        #expect(try store.load(userID: userID).isEmpty)
+    }
+
     @Test func markerOutboxPersistsFIFOAndRemovesOnlyAcknowledgedHead() throws {
         let suiteName = "MarkerOutboxStoreTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -174,6 +208,39 @@ struct CoupleSpaceTests {
         let didAcknowledgeLastEntry = queue.acknowledgeFirst(clientID: second.clientID)
         #expect(didAcknowledgeLastEntry)
         try store.save(queue, userID: userID)
+        #expect(try store.load(userID: userID).isEmpty)
+    }
+
+    @Test func markerOutboxPreservesLongFIFOAcrossPersistenceAndDrain() throws {
+        let suiteName = "MarkerOutboxLongFIFOTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let userID = UUID()
+        let relationshipID = UUID()
+        let entries = (0..<100).map { _ in
+            MarkerOutboxEntry(
+                relationshipID: relationshipID,
+                clientID: UUID(),
+                attemptCount: 0
+            )
+        }
+        let store = MarkerOutboxStore(defaults: defaults)
+        var queue = MarkerOutboxQueue()
+        entries.forEach { queue.enqueue($0) }
+        try store.save(queue, userID: userID)
+
+        var restored = try store.load(userID: userID)
+        #expect(restored.entries == entries)
+        for expected in entries {
+            let attemptedEntry = restored.beginFirstAttempt()
+            let attempted = try #require(attemptedEntry)
+            #expect(attempted.clientID == expected.clientID)
+            #expect(attempted.attemptCount == 1)
+            let didAcknowledge = restored.acknowledgeFirst(clientID: expected.clientID)
+            #expect(didAcknowledge)
+        }
+        try store.save(restored, userID: userID)
         #expect(try store.load(userID: userID).isEmpty)
     }
 
@@ -319,6 +386,46 @@ struct CoupleSpaceTests {
         #expect(remaining.entries.map(\.clientID) == [secondClientID])
         #expect(remaining.first?.attemptCount == 0)
         #expect(try store.data(for: try #require(remaining.first)) == Data([2]))
+    }
+
+    @Test func photoOutboxPreservesLongFIFOFilesAcrossPersistenceAndDrain() throws {
+        let suiteName = "PhotoOutboxLongFIFOTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(suiteName, isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+
+        let userID = UUID()
+        let relationshipID = UUID()
+        let store = PhotoOutboxStore(defaults: defaults, directoryURL: directoryURL)
+        var expected: [(clientID: UUID, data: Data)] = []
+        for index in 0..<32 {
+            let clientID = UUID()
+            let data = Data(repeating: UInt8(index), count: 1_024)
+            _ = try store.create(
+                jpegData: data,
+                relationshipID: relationshipID,
+                clientID: clientID,
+                userID: userID
+            )
+            expected.append((clientID, data))
+        }
+
+        #expect(try store.load(userID: userID).entries.map(\.clientID) == expected.map(\.clientID))
+        for item in expected {
+            let attemptedEntry = try store.beginAttempt(userID: userID)
+            let attempted = try #require(attemptedEntry)
+            #expect(attempted.clientID == item.clientID)
+            #expect(attempted.attemptCount == 1)
+            #expect(try store.data(for: attempted) == item.data)
+            #expect(try store.acknowledgeFirst(clientID: item.clientID, userID: userID))
+        }
+        #expect(try store.load(userID: userID).isEmpty)
+        let remainingFiles = try FileManager.default.contentsOfDirectory(atPath: directoryURL.path)
+        #expect(remainingFiles.isEmpty)
     }
 
     @Test func photoOutboxReportsMissingLocalDataWithoutDiscardingMetadata() throws {
@@ -705,6 +812,63 @@ struct CoupleSpaceTests {
         }
     }
 
+    @Test func personalArchiveExportStagesManyPhotosWithoutChangingTheirBytes() throws {
+        let baseDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: baseDirectory,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let photoIDs = (0..<64).map { _ in UUID() }
+        let items = photoIDs.enumerated().map { index, photoID in
+            PersonalArchiveExportItem(
+                clientID: photoID,
+                kind: "photo",
+                createdAt: Date(timeIntervalSince1970: TimeInterval(index)),
+                text: nil,
+                photoFile: PersonalArchiveExportPackage.photoFileName(clientID: photoID)
+            )
+        }
+        let package = try PersonalArchiveExportPackage(
+            relationshipID: UUID(),
+            exportedAt: Date(timeIntervalSince1970: 1_000),
+            items: items
+        )
+        var staging = try PersonalArchiveExportStaging(
+            package: package,
+            baseDirectory: baseDirectory
+        )
+        for (index, photoID) in photoIDs.enumerated() {
+            try staging.writePhoto(
+                clientID: photoID,
+                jpegData: Data(repeating: UInt8(index), count: 64 * 1_024)
+            )
+        }
+
+        let exportedURL = baseDirectory.appendingPathComponent("many-photos", isDirectory: true)
+        try staging.fileWrapper().write(
+            to: exportedURL,
+            options: .atomic,
+            originalContentsURL: nil
+        )
+
+        let photoDirectory = exportedURL.appendingPathComponent("photos", isDirectory: true)
+        let exportedNames = try FileManager.default.contentsOfDirectory(atPath: photoDirectory.path)
+        #expect(exportedNames.count == photoIDs.count)
+        for (index, photoID) in photoIDs.enumerated() {
+            let data = try Data(contentsOf: photoDirectory.appendingPathComponent(
+                PersonalArchiveExportPackage.photoFileName(clientID: photoID)
+            ))
+            #expect(data.count == 64 * 1_024)
+            #expect(data.first == UInt8(index))
+            #expect(data.last == UInt8(index))
+        }
+    }
+
     @Test func personalArchiveExportDocumentSeparatesDeliveryAndStagingNames() throws {
         let baseDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
             UUID().uuidString,
@@ -817,6 +981,14 @@ struct CoupleSpaceTests {
         try FileManager.default.createDirectory(
             at: abandonedURL,
             withIntermediateDirectories: false
+        )
+        let partialPhotosURL = abandonedURL.appendingPathComponent("photos", isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: partialPhotosURL,
+            withIntermediateDirectories: false
+        )
+        try Data(repeating: 7, count: 1_024).write(
+            to: partialPhotosURL.appendingPathComponent("partial.jpg")
         )
         try FileManager.default.createDirectory(
             at: unrelatedURL,
