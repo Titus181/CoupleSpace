@@ -1,7 +1,7 @@
 ---
 title: CoupleSpace 產品文件索引
 status: active
-last_updated: 2026-08-06
+last_updated: 2026-08-07
 ---
 
 # CoupleSpace 產品文件
@@ -17,6 +17,8 @@ last_updated: 2026-08-06
 - **核心功能名稱：** `Moment・此刻`。
 - **產品邊界：** 聊天承接日常，基本共同約定集中規劃與討論，Moment 保存值得留下的此刻，共同時間線累積兩人的生活。
 - **開發基準：** 15 週完成 iPhone TestFlight 候選版，再進行四週種子驗證。
+- **上市語言：** App UI 同時支援繁中、簡中、英文、日文；繁中是文案 SSOT，首輪只主動投放繁中市場。
+- **營運模式：** 產品、工程與客服皆由一人負責；客服不承諾固定回覆時間，成長速度必須服從可持續營運容量。
 
 ## 建議閱讀順序
 
@@ -29,6 +31,7 @@ last_updated: 2026-08-06
 7. [第一版開發路線圖](operations/01-v1-development-roadmap.md)
 8. [產品決策紀錄](decisions/product-decisions.md)
 9. [技術決策紀錄](decisions/technical-decisions.md)
+10. [上市、客服與版本發布營運](operations/03-launch-support-and-release.md)
 
 ## 文件維護原則
 

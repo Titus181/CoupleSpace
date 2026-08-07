@@ -67,6 +67,17 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 - Log、crash report、測試 fixture 與 Eval 不得包含真實私人資料或 secrets。
 - 匯出、刪除與解除配對必須共享同一套已核准的資料生命週期規則。
 
+## 雲端可靠性與成本營運
+
+- Supabase 維持唯一遠端系統紀錄；不為供應商事故或成本焦慮預建 CloudKit／Supabase 雙寫。替代方案必須先有真實瓶頸與遷移證據。
+- 資料庫備份與 Storage object 保護是兩個獨立控制；正式上市前須分別定義復原方式並演練，不能把資料庫備份視為照片備份。
+- Realtime 只提示變更，client 經 RLS 重讀；離線操作留在持久 outbox，避免短暫事故造成資料遺失或重複送出。
+- 照片依 PD-019 在裝置端產生適合共同回顧的版本，不保存相機原檔。確切 display／thumbnail 規格須由畫質、載入、Storage 與 egress 實測決定。
+- 每週監控 p95 latency、錯誤率、DB／連線、Realtime、outbox age、Storage、origin／cached egress，以及每個活躍伴侶對的直接成本。
+- 不對外承諾固定人工事故回覆或復原時間；以自動警報、狀態頁、降級模式、runbook、憑證復原與定期 restore drill 降低單人營運風險。
+
+完整客服、版本公告、成本情境與上市 gate 見[上市、客服與版本發布營運](operations/03-launch-support-and-release.md)。
+
 ## 測試接縫
 
 - Domain／Application 規則應可在不啟動 Simulator 或遠端服務下測試。
