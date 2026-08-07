@@ -1,7 +1,7 @@
 ---
 title: 第一版開發路線圖
 status: active
-last_updated: 2026-08-06
+last_updated: 2026-08-07
 ---
 
 # 第一版開發路線圖
@@ -81,14 +81,14 @@ last_updated: 2026-08-06
 
 ## W1 必須關閉的技術閘門
 
-目前狀態為 `in_progress`。TD-001 已接受 Supabase 作為 iPhone v1 使用者身分、伴侶關係、共同資料與資料生命週期的唯一遠端系統紀錄，CloudKit Sharing 不進入正式共同資料架構。Supabase 已由兩個 Apple 身分完成 Auth、pairing、active relationship RLS 雙向寫入、Realtime 雙向事件、私有 Storage 照片雙向讀寫、closing 後拒絕共同寫入、雙份 personal archive、archived photo 讀取、owner-only 獨立刪除與最後引用 Storage GC。單筆與三筆 FIFO marker metadata outbox 均已完成斷網、App 重啟、恢復網路重送及雙裝置一致性實測；照片持久 outbox 已完成真機 A＋Simulator B 的單張與三張斷網、跨啟動、恢復網路單次 FIFO drain、順序一致及跨裝置可見性實測。斷網冷啟動的 relationship 顯示已加入依使用者隔離的唯讀快照；大圖縮放、EXIF 方向正規化與 GPS metadata 移除亦已加入實際 JPEG regression，合計通過 `build-for-testing`、26 個 Simulator runtime tests、真機離線冷啟動及高解析直向照片跨裝置回歸。文字訊息契約、FIFO outbox 與封存正文保留已完成 migration 008 雲端部署、81 個 pgTAP、23 個 Simulator tests，以及真機 A＋Simulator B 的在線同步、三筆離線跨啟動 FIFO、恢復網路重送與去重實測。私人推播 migrations 009／010 與 `send-w1-push` version 1 已部署 Supabase 測試專案，限制 token 不可直接讀取、由 active 2/2 relationship 推導另一位收件者，並固定使用不含私人內容的工作與 payload；APNs secrets 已設定且真機 sandbox token 已成功登記。本機 110 個 pgTAP、Edge Runtime bundle、`build-for-testing` 與 28 個 Simulator unit tests 通過；遠端 Function 為 ACTIVE、JWT 驗證開啟且未授權請求回傳 401。Simulator B 已把正確泛化通知送達背景、終止及鎖定狀態的真機 A，Apple Watch 亦正常鏡像相同泛化通知。兩支真實 iPhone、第三身分雲端拒絕、照片頻繁弱網／容量／保存期限、正式訊息與匯出仍未完成，因此 G1 與 M0 尚未通過。詳細證據記錄於 [W1 技術驗證紀錄](02-w1-technical-validation.md)，接受脈絡記錄於 [技術決策紀錄](../decisions/technical-decisions.md)。
+目前狀態為 `in_progress`。TD-001 已接受 Supabase 作為 iPhone v1 使用者身分、伴侶關係、共同資料與資料生命週期的唯一遠端系統紀錄，CloudKit Sharing 不進入正式共同資料架構。Supabase 已由兩個 Apple 身分完成 Auth、pairing、active relationship RLS 雙向寫入、Realtime 雙向事件、私有 Storage 照片雙向讀寫、closing 後拒絕共同寫入、雙份 personal archive、archived photo 讀取、owner-only 獨立刪除與最後引用 Storage GC。單筆與三筆 FIFO marker metadata outbox 均已完成斷網、App 重啟、恢復網路重送及雙裝置一致性實測；照片持久 outbox 已完成真機 A＋Simulator B 的單張與三張斷網、跨啟動、恢復網路單次 FIFO drain、順序一致及跨裝置可見性實測。斷網冷啟動的 relationship 顯示已加入依使用者隔離的唯讀快照；大圖縮放、EXIF 方向正規化與 GPS metadata 移除亦已加入實際 JPEG regression，合計通過 `build-for-testing`、26 個 Simulator runtime tests、真機離線冷啟動及高解析直向照片跨裝置回歸。文字訊息契約、FIFO outbox 與封存正文保留已完成 migration 008 雲端部署、81 個 pgTAP、23 個 Simulator tests，以及真機 A＋Simulator B 的在線同步、三筆離線跨啟動 FIFO、恢復網路重送與去重實測。私人推播 migrations 009／010 與 `send-w1-push` version 1 已部署 Supabase 測試專案，限制 token 不可直接讀取、由 active 2/2 relationship 推導另一位收件者，並固定使用不含私人內容的工作與 payload；APNs secrets 已設定且真機 sandbox token 已成功登記。本機 110 個 pgTAP、Edge Runtime bundle 與 `build-for-testing` 通過；遠端 Function 為 ACTIVE、JWT 驗證開啟且未授權請求回傳 401。Simulator B 已把正確泛化通知送達背景、終止及鎖定狀態的真機 A，Apple Watch 亦正常鏡像相同泛化通知。個人封存匯出已建立 version 1 JSON manifest＋UUID JPEG 資料夾候選，31 個 Simulator unit tests 全數通過，且真機「儲存到檔案」、manifest／照片對應及敏感欄位核對皆正常；大型封存仍待驗證。兩支真實 iPhone、第三身分雲端拒絕、照片頻繁弱網／容量／保存期限與正式訊息仍未完成，因此 G1 與 M0 尚未通過。詳細證據記錄於 [W1 技術驗證紀錄](02-w1-technical-validation.md)，接受脈絡記錄於 [技術決策紀錄](../decisions/technical-decisions.md)。
 
 以下實作細節尚未決定，不得在規劃中默認某一實作方式：
 
 1. 正式訊息資料模型、長佇列、自動排程、退避與背景重試。
 2. 照片 upload outbox、縮圖、壓縮、容量、保存期限與刪除一致性。
-3. 個人封存匯出格式、交付方式與大型資料處理。
-4. 推播接收者驗證、背景／終止狀態送達與敏感內容隱藏規則。
+3. 個人封存匯出的正式格式與大型資料串流／分批處理；W1 資料夾候選已通過真機交付，但不代表最終產品格式。
+4. 推播 production／TestFlight 與兩支真實 iPhone 的送達證據；development sandbox 的接收者、背景／終止與敏感內容隱藏已通過。
 5. 「有意義雙向互動」的正式事件定義與資料最小化方式。
 
 技術方案至少需以兩支真實裝置與兩個不同 Apple ID 完成小型驗證，不能只依文件或單機模擬結果判斷可行。

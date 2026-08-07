@@ -120,10 +120,14 @@ private struct PersonalArchiveRow: Decodable {
 private struct PersonalArchiveItemRow: Decodable {
     let clientID: UUID
     let itemKind: String
+    let createdAt: Date
+    let textContent: String?
 
     enum CodingKeys: String, CodingKey {
         case clientID = "client_id"
         case itemKind = "item_kind"
+        case createdAt = "created_at"
+        case textContent = "text_content"
     }
 }
 
@@ -145,6 +149,9 @@ final class SupabasePairingPoC: ObservableObject {
     @Published private(set) var lifecycleStatus = "尚未開始資料生命週期驗證"
     @Published private(set) var personalArchiveItemCount = 0
     @Published private(set) var hasPersonalArchive = false
+    @Published private(set) var archiveExportStatus = "尚未準備個人封存匯出"
+    @Published private(set) var archiveExportDocument: PersonalArchiveExportDocument?
+    @Published private(set) var archiveExportFileName = "CoupleSpace-personal-archive"
     @Published private(set) var markerOutboxStatus = "尚無待送標記"
     @Published private(set) var hasPendingMarker = false
     @Published private(set) var isMarkerOutboxSending = false
@@ -163,6 +170,7 @@ final class SupabasePairingPoC: ObservableObject {
     private let relationshipSnapshotStore: RelationshipSnapshotStore
     private var relationshipID: UUID?
     private var personalArchiveID: UUID?
+    private var personalArchiveRelationshipID: UUID?
     private var realtimeChannel: RealtimeChannelV2?
     private var realtimeTask: Task<Void, Never>?
 
@@ -415,9 +423,12 @@ final class SupabasePairingPoC: ObservableObject {
                 .value
 
             self.personalArchiveID = nil
+            personalArchiveRelationshipID = nil
             hasPersonalArchive = false
             personalArchiveItemCount = 0
             storagePhotoData = nil
+            archiveExportDocument = nil
+            archiveExportStatus = "個人封存已刪除"
 
             if queuedObjectCount > 0 {
                 do {
@@ -431,6 +442,80 @@ final class SupabasePairingPoC: ObservableObject {
             }
         } catch {
             lifecycleStatus = "刪除個人封存失敗：\(error.localizedDescription)"
+        }
+    }
+
+    func preparePersonalArchiveExport() async {
+        guard relationshipStatus == "archived",
+              let personalArchiveID,
+              let relationshipID = personalArchiveRelationshipID else {
+            archiveExportStatus = "只有已完成解除配對的個人封存可以匯出"
+            return
+        }
+
+        archiveExportStatus = "正在準備個人封存匯出…"
+        archiveExportDocument = nil
+
+        do {
+            _ = try await client.auth.session
+            let rows: [PersonalArchiveItemRow] = try await client
+                .from("personal_archive_items")
+                .select("client_id,item_kind,created_at,text_content")
+                .eq("archive_id", value: personalArchiveID)
+                .order("created_at", ascending: true)
+                .order("client_id", ascending: true)
+                .execute()
+                .value
+
+            var items: [PersonalArchiveExportItem] = []
+            var photos: [PersonalArchiveExportPhoto] = []
+            for row in rows {
+                let photoFile = row.itemKind == "photo"
+                    ? PersonalArchiveExportPackage.photoFileName(clientID: row.clientID)
+                    : nil
+                items.append(PersonalArchiveExportItem(
+                    clientID: row.clientID,
+                    kind: row.itemKind,
+                    createdAt: row.createdAt,
+                    text: row.textContent,
+                    photoFile: photoFile
+                ))
+
+                if row.itemKind == "photo" {
+                    let data = try await client.storage
+                        .from("couplespace-w1-photos")
+                        .download(path: storagePath(
+                            relationshipID: relationshipID,
+                            clientID: row.clientID
+                        ))
+                    photos.append(PersonalArchiveExportPhoto(
+                        clientID: row.clientID,
+                        jpegData: data
+                    ))
+                }
+            }
+
+            let package = try PersonalArchiveExportPackage(
+                relationshipID: relationshipID,
+                exportedAt: .now,
+                items: items,
+                photos: photos
+            )
+            archiveExportDocument = PersonalArchiveExportDocument(package: package)
+            archiveExportFileName = "CoupleSpace-personal-archive-\(shortToken(relationshipID))"
+            archiveExportStatus = "匯出已準備：manifest.json 與 \(photos.count) 張照片"
+        } catch {
+            archiveExportStatus = "個人封存匯出準備失敗：\(error.localizedDescription)"
+        }
+    }
+
+    func finishPersonalArchiveExport(_ result: Result<URL, Error>) {
+        switch result {
+        case .success:
+            archiveExportStatus = "個人封存已交付至所選位置"
+            archiveExportDocument = nil
+        case let .failure(error):
+            archiveExportStatus = "個人封存交付失敗：\(error.localizedDescription)"
         }
     }
 
@@ -712,6 +797,7 @@ final class SupabasePairingPoC: ObservableObject {
                 lifecycleStatus = "個人封存已建立；等待另一方完成"
             } else {
                 personalArchiveID = nil
+                personalArchiveRelationshipID = nil
                 hasPersonalArchive = false
                 personalArchiveItemCount = 0
                 lifecycleStatus = relationship.status == "closing"
@@ -744,6 +830,9 @@ final class SupabasePairingPoC: ObservableObject {
         lifecycleStatus = "尚未開始資料生命週期驗證"
         personalArchiveItemCount = 0
         hasPersonalArchive = false
+        archiveExportStatus = "尚未準備個人封存匯出"
+        archiveExportDocument = nil
+        archiveExportFileName = "CoupleSpace-personal-archive"
         hasPendingMarker = false
         markerOutboxStatus = "尚無待送標記"
         hasPendingPhoto = false
@@ -752,6 +841,7 @@ final class SupabasePairingPoC: ObservableObject {
         messageOutboxStatus = "尚無待送訊息"
         recentTestMessages = "尚無測試訊息"
         personalArchiveID = nil
+        personalArchiveRelationshipID = nil
         status = message
     }
 
@@ -981,12 +1071,13 @@ final class SupabasePairingPoC: ObservableObject {
     private func refreshPersonalArchive(_ archive: PersonalArchiveRow) async throws {
         let items: [PersonalArchiveItemRow] = try await client
             .from("personal_archive_items")
-            .select("client_id,item_kind")
+            .select("client_id,item_kind,created_at,text_content")
             .eq("archive_id", value: archive.id)
             .order("created_at", ascending: false)
             .execute()
             .value
         personalArchiveID = archive.id
+        personalArchiveRelationshipID = archive.relationshipID
         hasPersonalArchive = true
         personalArchiveItemCount = items.count
 
@@ -1009,6 +1100,7 @@ final class SupabasePairingPoC: ObservableObject {
             storageStatus = "個人封存照片讀取失敗：\(error.localizedDescription)"
         }
     }
+
 
     private func receiveRealtimeChange() async {
         realtimeStatus = "收到 Realtime 變更，已重新讀取 RLS 資料"

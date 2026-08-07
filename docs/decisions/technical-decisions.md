@@ -1,7 +1,7 @@
 ---
 title: 技術決策紀錄
 status: active
-last_updated: 2026-08-06
+last_updated: 2026-08-07
 ---
 
 # 技術決策紀錄
@@ -47,7 +47,7 @@ last_updated: 2026-08-06
 - 正式訊息、Moment、共同約定及其討論的完整資料模型。
 - 照片容量、壓縮品質、保存期限、正式 upload queue、自動重試與清理政策；W1 多張持久 FIFO outbox 只作風險驗證。
 - APNs device token、推播 worker、背景喚醒及鎖定畫面實測細節。
-- 個人封存的匯出格式、交付方式與大型資料處理。
+- 個人封存的正式匯出格式、交付方式與大型資料處理；W1 已有 version 1 JSON manifest＋UUID JPEG 資料夾候選，但尚未接受為最終產品契約。
 - outbox 的自動排程、退避、網路監聽與正式訊息的長佇列上限。
 - Firebase 作為事故備援或未來替代方案；v1 不為未採用的第二套後端預建 adapter。
 

@@ -2,6 +2,7 @@ import AuthenticationServices
 import PhotosUI
 import Supabase
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct G1TechnicalSpikeView: View {
     @StateObject private var authModel: SupabaseAppleAuthPoC
@@ -16,6 +17,7 @@ struct G1TechnicalSpikeView: View {
     @State private var isConfirmingBeginUnpairing = false
     @State private var isConfirmingPersonalArchive = false
     @State private var isConfirmingArchiveDeletion = false
+    @State private var isExportingPersonalArchive = false
 #endif
 
     init(supabaseClient: SupabaseClient) {
@@ -231,7 +233,23 @@ struct G1TechnicalSpikeView: View {
                             Task { await pairingModel.refresh() }
                         }
 
-                        Button("3. 刪除自己的個人封存", role: .destructive) {
+                        Text(pairingModel.archiveExportStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button("3. 匯出自己的個人封存") {
+                            Task {
+                                await pairingModel.preparePersonalArchiveExport()
+                                isExportingPersonalArchive =
+                                    pairingModel.archiveExportDocument != nil
+                            }
+                        }
+                        .disabled(
+                            pairingModel.relationshipStatus != "archived"
+                                || !pairingModel.hasPersonalArchive
+                        )
+
+                        Button("4. 刪除自己的個人封存", role: .destructive) {
                             isConfirmingArchiveDeletion = true
                         }
                         .disabled(
@@ -297,6 +315,13 @@ struct G1TechnicalSpikeView: View {
                     }
                 }
             }
+            .fileExporter(
+                isPresented: $isExportingPersonalArchive,
+                document: pairingModel.archiveExportDocument,
+                contentType: .folder,
+                defaultFilename: pairingModel.archiveExportFileName,
+                onCompletion: pairingModel.finishPersonalArchiveExport
+            )
             .confirmationDialog(
                 "開始解除配對？",
                 isPresented: $isConfirmingBeginUnpairing,

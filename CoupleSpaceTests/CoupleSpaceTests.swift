@@ -519,6 +519,95 @@ struct CoupleSpaceTests {
         ) == [first])
     }
 
+    @Test func personalArchiveExportBuildsDeterministicFolder() throws {
+        let relationshipID = UUID(uuidString: "a0000000-0000-4000-8000-000000000001")!
+        let messageID = UUID(uuidString: "a0000000-0000-4000-8000-000000000002")!
+        let photoID = UUID(uuidString: "a0000000-0000-4000-8000-000000000003")!
+        let package = try PersonalArchiveExportPackage(
+            relationshipID: relationshipID,
+            exportedAt: Date(timeIntervalSince1970: 300),
+            items: [
+                PersonalArchiveExportItem(
+                    clientID: photoID,
+                    kind: "photo",
+                    createdAt: Date(timeIntervalSince1970: 200),
+                    text: nil,
+                    photoFile: PersonalArchiveExportPackage.photoFileName(clientID: photoID)
+                ),
+                PersonalArchiveExportItem(
+                    clientID: messageID,
+                    kind: "message",
+                    createdAt: Date(timeIntervalSince1970: 100),
+                    text: "W1 test export",
+                    photoFile: nil
+                ),
+            ],
+            photos: [PersonalArchiveExportPhoto(
+                clientID: photoID,
+                jpegData: Data([0xff, 0xd8, 0xff, 0xd9])
+            )]
+        )
+
+        let root = try package.fileWrapper()
+        let rootFiles = try #require(root.fileWrappers)
+        let manifestData = try #require(rootFiles["manifest.json"]?.regularFileContents)
+        let photos = try #require(rootFiles["photos"]?.fileWrappers)
+        let photoFileName = "a0000000-0000-4000-8000-000000000003.jpg"
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let manifest = try decoder.decode(
+            PersonalArchiveExportManifest.self,
+            from: manifestData
+        )
+
+        #expect(manifest.schemaVersion == 1)
+        #expect(manifest.relationshipID == relationshipID)
+        #expect(manifest.items.map(\.clientID) == [messageID, photoID])
+        #expect(manifest.items[0].text == "W1 test export")
+        #expect(manifest.items[1].photoFile == photoFileName)
+        #expect(photos[photoFileName]?.regularFileContents == Data([0xff, 0xd8, 0xff, 0xd9]))
+    }
+
+    @Test func personalArchiveExportRejectsMissingPhoto() {
+        let photoID = UUID()
+        #expect(throws: PersonalArchiveExportError.photoSetMismatch) {
+            try PersonalArchiveExportPackage(
+                relationshipID: UUID(),
+                exportedAt: .now,
+                items: [PersonalArchiveExportItem(
+                    clientID: photoID,
+                    kind: "photo",
+                    createdAt: .now,
+                    text: nil,
+                    photoFile: PersonalArchiveExportPackage.photoFileName(clientID: photoID)
+                )],
+                photos: []
+            )
+        }
+    }
+
+    @Test func personalArchiveExportRejectsPrivateContentInPhotoEntry() {
+        let photoID = UUID()
+        #expect(throws: PersonalArchiveExportError.invalidItemContent) {
+            try PersonalArchiveExportPackage(
+                relationshipID: UUID(),
+                exportedAt: .now,
+                items: [PersonalArchiveExportItem(
+                    clientID: photoID,
+                    kind: "photo",
+                    createdAt: .now,
+                    text: "must not be present",
+                    photoFile: PersonalArchiveExportPackage.photoFileName(clientID: photoID)
+                )],
+                photos: [PersonalArchiveExportPhoto(
+                    clientID: photoID,
+                    jpegData: Data([1])
+                )]
+            )
+        }
+    }
+
     @Test func notificationEnvelopeDoesNotExposePrivateContent() {
         let envelope = PrivateNotificationEnvelope(
             relationshipID: UUID(),
