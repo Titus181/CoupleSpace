@@ -109,6 +109,29 @@ struct CoupleSpaceTests {
         #expect(ForegroundRecoveryRetryPolicy.delayNanoseconds(afterAttempt: 4) == nil)
     }
 
+    @Test func networkRecoveryTriggersOnlyAfterObservedOfflineToOnlineTransition() {
+        #expect(!NetworkRecoveryTriggerPolicy.shouldRecover(
+            previous: .unknown,
+            current: .available
+        ))
+        #expect(NetworkRecoveryTriggerPolicy.shouldRecover(
+            previous: .unavailable,
+            current: .available
+        ))
+        #expect(!NetworkRecoveryTriggerPolicy.shouldRecover(
+            previous: .available,
+            current: .available
+        ))
+        #expect(!NetworkRecoveryTriggerPolicy.shouldRecover(
+            previous: .available,
+            current: .unavailable
+        ))
+        #expect(!NetworkRecoveryTriggerPolicy.shouldRecover(
+            previous: .unavailable,
+            current: .unavailable
+        ))
+    }
+
     @Test func appleSignInNonceHashIsDeterministic() {
         #expect(AppleSignInNonce.hash("CoupleSpace-W1") ==
                 "3639d0045c9968cfb5182d7a7591aa078f00a411a40ca34943d9b3339358bf15")

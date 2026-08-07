@@ -8,6 +8,7 @@ struct G1TechnicalSpikeView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var authModel: SupabaseAppleAuthPoC
     @StateObject private var pairingModel: SupabasePairingPoC
+    @StateObject private var networkRecoveryMonitor = NetworkRecoveryMonitor()
 #if os(iOS)
     @StateObject private var pushModel: SupabasePushPoC
 #endif
@@ -279,6 +280,7 @@ struct G1TechnicalSpikeView: View {
             }
             .navigationTitle("W1 技術驗證")
             .task {
+                networkRecoveryMonitor.start()
                 await authModel.observeAuthState()
             }
             .onChange(of: authModel.isSignedIn) { _, isSignedIn in
@@ -293,6 +295,17 @@ struct G1TechnicalSpikeView: View {
             }
             .onChange(of: scenePhase) { _, newPhase in
                 guard newPhase == .active, authModel.isSignedIn else { return }
+                Task { await pairingModel.recoverPendingOutboxesOnForeground() }
+            }
+            .onChange(of: networkRecoveryMonitor.state) { previous, current in
+                guard scenePhase == .active,
+                      authModel.isSignedIn,
+                      NetworkRecoveryTriggerPolicy.shouldRecover(
+                          previous: previous,
+                          current: current
+                      ) else {
+                    return
+                }
                 Task { await pairingModel.recoverPendingOutboxesOnForeground() }
             }
             .onReceive(

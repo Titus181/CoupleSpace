@@ -341,6 +341,8 @@ W1 client 在 Supabase 登入狀態可用或 App 由背景回到前景時，會�
 
 同日另完成三次有限短退避的真機驗證。短暫斷線案例由真機 A 建立待送 marker 並觸發前景 recovery，在不按人工重試的情況下於退避視窗內恢復網路；Outbox 自動清空，Simulator B 只看到一次相同 marker。耗盡案例則讓 A 持續離線至三次嘗試完成，畫面顯示「前景自動重試已暫停；待送項目已保留」，queue 與穩定 identity 均未遺失；恢復網路並再次觸發前景事件後自動送達，B 仍只收到一次。這關閉 W1 的一次性與有限短退避登入／前景 recovery 證據，但不代表 App 在背景中自行傳送，也不接受為正式長時間退避或網路監聽方案。
 
+下一個最小候選加入 `NWPathMonitor`，但只在 App 位於前景、Supabase 已登入，且已明確觀察到 unavailable→available 轉換時，呼叫同一個 recovery coordinator。初次監測即為 available 不觸發，available→available、available→unavailable 與 unavailable→unavailable 也不觸發；既有單一執行、active relationship、marker→message→photo 順序及三次有限重試規則完全沿用。新增純規則案例後，iPhone 17 Pro Simulator 的完整 `CoupleSpaceTests` 59／59 通過，零失敗與零跳過。這不是 background task、長時間退避或無限輪詢。其後真機 A 保持 App 在前景，完全斷網後建立一筆待送 marker；不切換 App、不按重新整理或人工重試，恢復網路後 Outbox 自動清空，Simulator B 重新整理只看到一次相同 marker，確認網路轉換觸發與既有穩定 identity 正常。
+
 ### 照片配額原子確認候選
 
 PD-021 已接受 Free 每段關係每月 30 張照片及累積 1 GB 作為首輪研究起點，但不能只靠 App 隱藏按鈕或本機計數。migration `202608070012_w1_photo_quota.sql` 因此新增 `finalize_w1_photo_upload`：上傳仍先進入私有 Storage，RPC 再鎖住 relationship row、確認 active membership、核對 deterministic path、object owner 與 Storage metadata bytes，最後才建立 photo shared item。authenticated client 的一般 insert policy 明確排除 photo，雙方同時上傳也會由同一 relationship lock 串行計數。RPC 以 UTC 月曆月計 30 張，累積總量以 1,000,000,000 bytes 計算；這兩個精確語意都是 W1 候選，尚未升格為永久產品規則。
@@ -443,6 +445,6 @@ W1 純規則使用 opaque content reference，而不是複製內容。完整文�
 - 推播 production／TestFlight 與兩支真實 iPhone 的送達實測；development sandbox 的接收者、背景／終止、鎖定畫面隱私與 Watch 鏡像已通過。
 - 個人封存匯出的正式格式、容量、大型真機壓力、實際低磁碟空間與中斷後續傳；version 1 資料夾候選的真機交付、小型封存內容核對、磁碟 staging／殘留清理及容量預檢純規則已通過，migration 013 已部署 Supabase 測試專案。
 - 正式訊息、照片畫質／正式額度、推播與背景重試的剩餘子決策；照片保存生命週期已由 PD-022 關閉，受管後端與共同資料系統紀錄已由 TD-001 關閉。
-- 登入／前景一次性 outbox recovery 與三次有限短退避已通過本機規則、56 個 Simulator tests，以及真機 A＋Simulator B 的背景返回、強制結束後重啟、短暫斷線自動送達、耗盡停止保留與下一次前景恢復送達；正式長時間退避、網路監聽與真正背景重試仍未決定。
+- 登入／前景一次性 outbox recovery 與三次有限短退避已通過本機規則及真機 A＋Simulator B 的背景返回、強制結束後重啟、短暫斷線自動送達、耗盡停止保留與下一次前景恢復送達；前景 unavailable→available 觸發已通過 59 個 Simulator tests，以及真機 A＋Simulator B 的自動清空與只送達一次驗證。正式長時間退避、production 網路監聽與真正背景重試仍未決定。
 
 在上述證據完成前，G1 與 M0 維持未通過，不進入大量功能實作。
