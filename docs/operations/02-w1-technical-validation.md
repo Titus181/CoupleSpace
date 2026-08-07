@@ -339,6 +339,12 @@ W1 client 在 Supabase 登入狀態可用或 App 由背景回到前景時，會�
 
 2026-08-07 真機 A＋Simulator B 已完成兩條自動恢復流程。第一條在 A 斷網排入 marker、message、photo 後讓 App 進入背景，恢復網路再回到 App，全程不按人工重試或重新整理，三種 Outbox 自動送達並清空，B 可見相同內容且沒有重複。第二條在相同三種待送項目存在時保持斷網強制結束 A，先恢復網路再重新啟動 App；Supabase session 恢復後三種 queue 同樣自動 drain，B 核對內容、順序與去重均正常。這關閉 W1 的登入／前景一次性 recovery 證據，但不代表 App 在背景中自行傳送，也不接受為正式退避或網路監聽方案。
 
+### 照片配額原子確認候選
+
+PD-021 已接受 Free 每段關係每月 30 張照片及累積 1 GB 作為首輪研究起點，但不能只靠 App 隱藏按鈕或本機計數。migration `202608070012_w1_photo_quota.sql` 因此新增 `finalize_w1_photo_upload`：上傳仍先進入私有 Storage，RPC 再鎖住 relationship row、確認 active membership、核對 deterministic path、object owner 與 Storage metadata bytes，最後才建立 photo shared item。authenticated client 的一般 insert policy 明確排除 photo，雙方同時上傳也會由同一 relationship lock 串行計數。RPC 以 UTC 月曆月計 30 張，累積總量以 1,000,000,000 bytes 計算；這兩個精確語意都是 W1 候選，尚未升格為永久產品規則。
+
+RPC 對相同 relationship／client identity 的重試保持冪等；不同 owner、kind 或 bytes 的碰撞一律拒絕。若回傳月新增或總容量上限，client 先透過既有 owner-only Storage policy 刪除剛上傳的 orphan，成功後才移除該筆本機 outbox；若網路、RPC 或清理失敗則保留原 JPEG 與 queue 供重試。migration 012、本機 Storage metadata、月界線、總容量、第三身分、closing 與直接 insert bypass 共 14 個新 pgTAP 已連同既有資料庫合約通過 139／139；iPhone `CoupleSpaceTests` 48／48 亦通過。2026-08-07 migration 012 已推送 Supabase 測試專案，遠端版本紀錄與本機一致。真機 A 與 Simulator B 隨後在同一 active relationship 近乎同時各上傳一張照片；雙方重新整理後都顯示同一張最新照片，最近照片列包含兩個不同的新 token，兩邊 Outbox 均清空，且沒有重複項目或錯誤提示，證明遠端 relationship lock 路徑可接受並排序兩筆競爭寫入。月新增／總容量配額拒絕及其 orphan 清理仍待遠端實測。
+
 ### Supabase closing／personal archive client spike
 
 W1 Swift client 已接上既有 `begin_unpairing` 與 `seal_personal_archive` RPC，並加入明確的不可逆確認：第一步將測試關係轉為 `closing`，第二步由每位成員各自建立 owner-isolated personal archive。client 可顯示自己的封存項目數；雙方完成後，active relationship RLS 不再回傳共同關係，畫面只保留本人可讀的封存狀態。

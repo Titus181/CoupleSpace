@@ -50,6 +50,23 @@ private struct SharedMessageWriteParameters: Encodable {
     }
 }
 
+private struct PhotoFinalizeParameters: Encodable {
+    let targetRelationshipID: UUID
+    let targetClientID: UUID
+    let targetByteSize: Int
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+        case targetClientID = "target_client_id"
+        case targetByteSize = "target_byte_size"
+    }
+}
+
+private struct PhotoFinalizeResponse: Decodable {
+    let accepted: Bool
+    let reason: String?
+}
+
 private struct RelationshipRow: Decodable {
     let id: UUID
     let status: String
@@ -87,20 +104,6 @@ private struct SharedPhotoRow: Decodable {
     let itemKind: String?
 
     enum CodingKeys: String, CodingKey {
-        case clientID = "client_id"
-        case creatorUserID = "creator_user_id"
-        case itemKind = "item_kind"
-    }
-}
-
-private struct SharedItemInsert: Encodable {
-    let relationshipID: UUID
-    let clientID: UUID
-    let creatorUserID: UUID
-    let itemKind: String
-
-    enum CodingKeys: String, CodingKey {
-        case relationshipID = "relationship_id"
         case clientID = "client_id"
         case creatorUserID = "creator_user_id"
         case itemKind = "item_kind"
@@ -1106,29 +1109,43 @@ final class SupabasePairingPoC: ObservableObject {
                     )
                 }
 
-                let existingItems: [SharedPhotoRow] = try await client
-                    .from("shared_items")
-                    .select("client_id,creator_user_id,item_kind")
-                    .eq("relationship_id", value: entry.relationshipID)
-                    .eq("client_id", value: entry.clientID)
-                    .limit(1)
+                let finalizeResults: [PhotoFinalizeResponse] = try await client
+                    .rpc(
+                        "finalize_w1_photo_upload",
+                        params: PhotoFinalizeParameters(
+                            targetRelationshipID: entry.relationshipID,
+                            targetClientID: entry.clientID,
+                            targetByteSize: jpegData.count
+                        )
+                    )
                     .execute()
                     .value
-                if let existingItem = existingItems.first {
-                    guard existingItem.creatorUserID == userID,
-                          existingItem.itemKind == "photo" else {
+                guard let finalizeResult = finalizeResults.first else {
+                    throw SupabasePhotoOutboxError.missingFinalizeResponse
+                }
+
+                guard finalizeResult.accepted else {
+                    guard let quotaMessage = SupabasePhotoOutboxError.quotaMessage(
+                        reason: finalizeResult.reason
+                    ) else {
+                        throw SupabasePhotoOutboxError.unknownFinalizeRejection
+                    }
+
+                    try await bucket.remove(paths: [path])
+                    guard try photoOutboxStore.acknowledgeFirst(
+                        clientID: entry.clientID,
+                        userID: userID
+                    ) else {
                         throw SupabasePhotoOutboxError.remoteIdentityMismatch
                     }
-                } else {
-                    try await client
-                        .from("shared_items")
-                        .insert(SharedItemInsert(
-                            relationshipID: entry.relationshipID,
-                            clientID: entry.clientID,
-                            creatorUserID: userID,
-                            itemKind: "photo"
-                        ))
-                        .execute()
+
+                    let remainingCount = try photoOutboxStore.load(userID: userID).count
+                    hasPendingPhoto = remainingCount > 0
+                    photoOutboxStatus = remainingCount > 0
+                        ? "(quotaMessage)；已移除本張，尚有 \(remainingCount) 張待送"
+                        : "(quotaMessage)；未建立共享照片"
+                    storageStatus = quotaMessage
+                    return
                 }
 
                 guard try photoOutboxStore.acknowledgeFirst(
@@ -1294,11 +1311,28 @@ final class SupabasePairingPoC: ObservableObject {
 
 private enum SupabasePhotoOutboxError: LocalizedError {
     case remoteIdentityMismatch
+    case missingFinalizeResponse
+    case unknownFinalizeRejection
+
+    static func quotaMessage(reason: String?) -> String? {
+        switch reason {
+        case "monthly_photo_limit":
+            "本月照片新增已達 W1 暫定上限（30 張／關係）"
+        case "total_storage_limit":
+            "照片總容量已達 W1 暫定上限（1 GB／關係）"
+        default:
+            nil
+        }
+    }
 
     var errorDescription: String? {
         switch self {
         case .remoteIdentityMismatch:
             "遠端照片識別與待送項目不一致"
+        case .missingFinalizeResponse:
+            "伺服器未回傳照片配額確認結果"
+        case .unknownFinalizeRejection:
+            "伺服器拒絕照片，但未提供可辨識的原因"
         }
     }
 }

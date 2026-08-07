@@ -44,6 +44,7 @@ select lives_ok(
     'first member can upload a photo that will keep metadata'
 );
 
+reset role;
 insert into public.shared_items (
     relationship_id,
     client_id,
@@ -56,6 +57,8 @@ insert into public.shared_items (
     'photo'
 );
 
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000091', true);
 select public.begin_unpairing('30000000-0000-0000-0000-000000000009');
 select public.seal_personal_archive('30000000-0000-0000-0000-000000000009');
 

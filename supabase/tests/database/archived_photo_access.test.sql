@@ -27,6 +27,7 @@ values (
     '00000000-0000-0000-0000-000000000031'
 );
 
+reset role;
 insert into public.shared_items (relationship_id, client_id, creator_user_id, item_kind)
 values (
     '50000000-0000-0000-0000-000000000001',
@@ -35,6 +36,8 @@ values (
     'photo'
 );
 
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-000000000031', true);
 select public.begin_unpairing('50000000-0000-0000-0000-000000000001');
 select public.seal_personal_archive('50000000-0000-0000-0000-000000000001');
 
