@@ -482,6 +482,57 @@ struct PhotoOutboxLifecyclePolicy {
     }
 }
 
+struct PhotoFinalizationPolicy {
+    enum Action: Equatable {
+        case acknowledgeDelivered
+        case deleteQuotaRejectedObject(message: String)
+    }
+
+    enum DecisionError: LocalizedError, Equatable {
+        case unknownRejection
+
+        var errorDescription: String? {
+            "伺服器拒絕照片，但未提供可辨識的原因"
+        }
+    }
+
+    static func action(accepted: Bool, reason: String?) throws -> Action {
+        if accepted {
+            return .acknowledgeDelivered
+        }
+
+        switch reason {
+        case "monthly_photo_limit":
+            return .deleteQuotaRejectedObject(
+                message: "本月照片新增已達 W1 暫定上限（30 張／關係）"
+            )
+        case "total_storage_limit":
+            return .deleteQuotaRejectedObject(
+                message: "照片總容量已達 W1 暫定上限（1 GB／關係）"
+            )
+        default:
+            throw DecisionError.unknownRejection
+        }
+    }
+
+    static func rejectedOutboxStatus(message: String, remainingCount: Int) -> String {
+        remainingCount > 0
+            ? "\(message)；已移除本張，尚有 \(remainingCount) 張待送"
+            : "\(message)；未建立共享照片"
+    }
+}
+
+struct PhotoQuotaCleanupCoordinator {
+    @MainActor
+    static func deleteThenAcknowledge(
+        deleteRemoteObject: () async throws -> Void,
+        acknowledgeLocalEntry: () throws -> Bool
+    ) async rethrows -> Bool {
+        try await deleteRemoteObject()
+        return try acknowledgeLocalEntry()
+    }
+}
+
 struct PhotoDimensions: Equatable {
     let width: Int
     let height: Int

@@ -1124,26 +1124,32 @@ final class SupabasePairingPoC: ObservableObject {
                     throw SupabasePhotoOutboxError.missingFinalizeResponse
                 }
 
-                guard finalizeResult.accepted else {
-                    guard let quotaMessage = SupabasePhotoOutboxError.quotaMessage(
-                        reason: finalizeResult.reason
-                    ) else {
-                        throw SupabasePhotoOutboxError.unknownFinalizeRejection
-                    }
-
-                    try await bucket.remove(paths: [path])
-                    guard try photoOutboxStore.acknowledgeFirst(
-                        clientID: entry.clientID,
-                        userID: userID
+                switch try PhotoFinalizationPolicy.action(
+                    accepted: finalizeResult.accepted,
+                    reason: finalizeResult.reason
+                ) {
+                case .acknowledgeDelivered:
+                    break
+                case let .deleteQuotaRejectedObject(quotaMessage):
+                    guard try await PhotoQuotaCleanupCoordinator.deleteThenAcknowledge(
+                        deleteRemoteObject: {
+                            _ = try await bucket.remove(paths: [path])
+                        },
+                        acknowledgeLocalEntry: {
+                            try photoOutboxStore.acknowledgeFirst(
+                                clientID: entry.clientID,
+                                userID: userID
+                            )
+                        }
                     ) else {
                         throw SupabasePhotoOutboxError.remoteIdentityMismatch
                     }
-
                     let remainingCount = try photoOutboxStore.load(userID: userID).count
                     hasPendingPhoto = remainingCount > 0
-                    photoOutboxStatus = remainingCount > 0
-                        ? "(quotaMessage)；已移除本張，尚有 \(remainingCount) 張待送"
-                        : "(quotaMessage)；未建立共享照片"
+                    photoOutboxStatus = PhotoFinalizationPolicy.rejectedOutboxStatus(
+                        message: quotaMessage,
+                        remainingCount: remainingCount
+                    )
                     storageStatus = quotaMessage
                     return
                 }
@@ -1312,18 +1318,6 @@ final class SupabasePairingPoC: ObservableObject {
 private enum SupabasePhotoOutboxError: LocalizedError {
     case remoteIdentityMismatch
     case missingFinalizeResponse
-    case unknownFinalizeRejection
-
-    static func quotaMessage(reason: String?) -> String? {
-        switch reason {
-        case "monthly_photo_limit":
-            "本月照片新增已達 W1 暫定上限（30 張／關係）"
-        case "total_storage_limit":
-            "照片總容量已達 W1 暫定上限（1 GB／關係）"
-        default:
-            nil
-        }
-    }
 
     var errorDescription: String? {
         switch self {
@@ -1331,8 +1325,6 @@ private enum SupabasePhotoOutboxError: LocalizedError {
             "遠端照片識別與待送項目不一致"
         case .missingFinalizeResponse:
             "伺服器未回傳照片配額確認結果"
-        case .unknownFinalizeRejection:
-            "伺服器拒絕照片，但未提供可辨識的原因"
         }
     }
 }

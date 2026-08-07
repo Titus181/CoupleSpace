@@ -583,6 +583,91 @@ struct CoupleSpaceTests {
         }
     }
 
+    @Test func acceptedPhotoFinalizationAcknowledgesDelivery() throws {
+        #expect(try PhotoFinalizationPolicy.action(
+            accepted: true,
+            reason: nil
+        ) == .acknowledgeDelivered)
+    }
+
+    @Test func knownPhotoQuotaRejectionsDeleteBeforeAcknowledgement() throws {
+        #expect(try PhotoFinalizationPolicy.action(
+            accepted: false,
+            reason: "monthly_photo_limit"
+        ) == .deleteQuotaRejectedObject(
+            message: "本月照片新增已達 W1 暫定上限（30 張／關係）"
+        ))
+        #expect(try PhotoFinalizationPolicy.action(
+            accepted: false,
+            reason: "total_storage_limit"
+        ) == .deleteQuotaRejectedObject(
+            message: "照片總容量已達 W1 暫定上限（1 GB／關係）"
+        ))
+    }
+
+    @Test func unknownPhotoFinalizationRejectionRemainsRetryable() {
+        #expect(throws: PhotoFinalizationPolicy.DecisionError.unknownRejection) {
+            try PhotoFinalizationPolicy.action(
+                accepted: false,
+                reason: "unexpected_reason"
+            )
+        }
+    }
+
+    @Test func quotaRejectionStatusIncludesActualMessageWhenOutboxIsEmpty() {
+        #expect(PhotoFinalizationPolicy.rejectedOutboxStatus(
+            message: "本月照片新增已達 W1 暫定上限（30 張／關係）",
+            remainingCount: 0
+        ) == "本月照片新增已達 W1 暫定上限（30 張／關係）；未建立共享照片")
+    }
+
+    @Test func quotaRejectionStatusReportsRemainingOutboxCount() {
+        #expect(PhotoFinalizationPolicy.rejectedOutboxStatus(
+            message: "照片總容量已達 W1 暫定上限（1 GB／關係）",
+            remainingCount: 2
+        ) == "照片總容量已達 W1 暫定上限（1 GB／關係）；已移除本張，尚有 2 張待送")
+    }
+
+    @Test func quotaCleanupDeletesRemoteObjectBeforeAcknowledgingOutbox() async throws {
+        var events: [String] = []
+
+        let didAcknowledge = try await PhotoQuotaCleanupCoordinator.deleteThenAcknowledge(
+            deleteRemoteObject: {
+                events.append("delete")
+            },
+            acknowledgeLocalEntry: {
+                events.append("acknowledge")
+                return true
+            }
+        )
+
+        #expect(didAcknowledge)
+        #expect(events == ["delete", "acknowledge"])
+    }
+
+    @Test func quotaCleanupFailureDoesNotAcknowledgeOutbox() async {
+        var didAcknowledge = false
+
+        do {
+            _ = try await PhotoQuotaCleanupCoordinator.deleteThenAcknowledge(
+                deleteRemoteObject: {
+                    throw PhotoQuotaCleanupProbeError.expected
+                },
+                acknowledgeLocalEntry: {
+                    didAcknowledge = true
+                    return true
+                }
+            )
+            Issue.record("Expected remote cleanup to fail")
+        } catch PhotoQuotaCleanupProbeError.expected {
+            // Expected: the local queue must remain untouched.
+        } catch {
+            Issue.record("Unexpected cleanup error: \(error)")
+        }
+
+        #expect(!didAcknowledge)
+    }
+
     @Test func serverTimestampAndIDProduceDeterministicOrder() {
         let sameServerDate = Date(timeIntervalSince1970: 100)
         let earlierID = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
@@ -692,6 +777,10 @@ struct CoupleSpaceTests {
         CGImageDestinationAddImage(destination, cgImage, properties as CFDictionary)
         try #require(CGImageDestinationFinalize(destination))
         return mutableData as Data
+    }
+
+    private enum PhotoQuotaCleanupProbeError: Error {
+        case expected
     }
 
     private func imageProperties(_ data: Data) throws -> (
