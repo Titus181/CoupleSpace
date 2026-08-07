@@ -20,7 +20,7 @@ W1 不先完成正式產品功能。先以最小真機 spike 驗證最大未知�
 | 同步與聊天 | Realtime 只作變更提示並重新經 RLS 讀取；client UUID、server timestamp 與持久 outbox 提供冪等和穩定順序 | 單筆及三筆 FIFO marker metadata outbox 的斷網、重啟、重連、順序與雙裝置一致性通過 | 正式訊息內容、較長佇列、自動排程與弱網仍待驗證 |
 | 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；三張持久 FIFO upload outbox 的斷網、跨啟動、重送與順序通過；實際 JPEG regression 證明大圖縮放、方向正規化與 GPS 移除，真機高解析直向照片跨裝置方向／比例亦通過；closing orphan reconciliation 通過本機 pgTAP／unit、migration 011 部署及跨裝置離線→closing→恢復網路實測 | 頻繁弱網、容量與保存期限待驗證 |
 | 推播 | 伺服器驗證 relationship／recipient 後才送出泛化 APNs 文案；App 收到提示後重新讀取 | migrations 009／010、APNs secrets 與 Edge sender 已部署；Simulator B→真機 A 的背景、終止、鎖定與 Watch 鏡像通知皆成功 | 仍需兩支真實 iPhone 與 production／TestFlight 證據 |
-| 所有權與解除配對 | Supabase 伺服器建立雙份 owner-isolated 唯讀封存，兩人可獨立刪除或匯出 | closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過；version 1 manifest＋JPEG 資料夾候選通過 unit tests 與真機交付核對 | 最終格式與大型封存待驗證 |
+| 所有權與解除配對 | Supabase 伺服器建立雙份 owner-isolated 唯讀封存，兩人可獨立刪除或匯出 | closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過；version 1 manifest＋JPEG 資料夾候選通過真機交付核對，磁碟 staging／清理通過 unit tests | 最終格式、容量、大型真機壓力與中斷後續傳待驗證 |
 | 有意義雙向互動 | 同一 relationship、同一 interaction object 內，兩個目前伴侶各至少有一次符合資格的 contribution；只記 ID、種類與時間，不記內容 | 純規則測試已建立 | 事件無法區分單方重複操作與真正雙方參與，或需要記錄私密內容 |
 
 ## CloudKit Sharing PoC
@@ -397,11 +397,15 @@ W1 client 只在 relationship 已 `archived` 且目前使用者仍持有 persona
 
 候選交付格式是可直接檢查的資料夾：根目錄包含 `manifest.json`，照片放在 `photos/<client_uuid>.jpg`。manifest 使用 `schema_version = 1`，依 `created_at` 與 client UUID 決定固定順序，保留測試訊息正文並以 `photo_file` 對應照片；不使用原始照片檔名，也不包含 Email、Apple ID、APNs token 或 Supabase access token。系統 `fileExporter` 負責讓使用者選擇「檔案」位置。
 
-三個新增 unit tests 驗證固定排序、manifest／JPEG 對應、缺少照片 fail-closed，以及 photo entry 不得混入文字內容；iPhone 17 Simulator 上 `CoupleSpaceTests` 31／31 通過，`build-for-testing` 亦通過。
+六個匯出 unit tests 驗證固定排序、manifest／JPEG 對應、缺少照片 fail-closed、photo entry 不得混入文字內容、重複照片拒絕、只清理專用殘留目錄，以及交付名稱不得沿用 staging 名稱；iPhone 17 Simulator 上完整 `CoupleSpaceTests` 40／40 通過，`build-for-testing` 亦通過。
 
 2026-08-07 使用已 archived 且仍持有 personal archive 的真實 iPhone 執行「3. 匯出自己的個人封存」，系統「儲存到檔案」正常完成。人工核對 `manifest.json`、照片檔案、manifest／JPEG 對應、訊息文字及敏感欄位均無異常；未發現 Email、原始照片檔名或 token。這關閉 W1 資料夾候選的真機交付與小型封存內容核對，但不接受為最終產品格式。
 
-此 PoC 仍會先把所有照片依序下載並保存在記憶體中的 `FileWrapper`，不適合據此宣稱大型封存容量安全。正式格式、串流／分批處理、磁碟空間與中斷恢復仍待決定。
+目前 PoC 保留相同資料夾格式，但不再把所有 JPEG 同時保存在記憶體：client 逐張下載後立即寫入具完整檔案保護的專用暫存目錄，再由磁碟 manifest／photos 子 wrapper 重建一個不含來源名稱的根 `FileWrapper` 交給 `fileExporter`。匯出成功、失敗、登出與刪除封存時清理目前 staging；若 App 在準備途中被終止，下次匯出前只依專用前綴回收殘留目錄。真機複驗兩次確認：單純設定 `preferredFilename` 仍會保留來源 staging `filename`，系統交付時因此與 `/tmp` 內的來源同名；client 現已重建根 wrapper，regression 直接要求根 `filename == nil`、對外名稱正確且輸出內容完整。更新後真機可選擇新父資料夾並成功交付，且再次匯出仍可進入系統選擇器並成功儲存，確認同名碰撞與完成後清理已修正。完全斷網時會明確停在匯出準備失敗，恢復網路後重新整理並重試可正常交付，沒有殘留 staging 阻塞。這降低記憶體峰值並提供可重試的中斷清理，但尚未實作中斷點續傳，也沒有真機大型封存與低磁碟空間證據，因此不能宣稱大型容量安全。
+
+系統選擇器若以左上角逐層返回後按 X，真機不會立即回傳取消結果；下一次點擊匯出時才顯示上一輪「個人封存交付失敗」，再點一次仍可重新進入選擇器並成功儲存。此為 `fileExporter` 取消 callback 的延遲時序，沒有資料錯交或重試阻塞，但即時取消提示維持未通過，不把它記為正常完成路徑。
+
+同次複驗亦發現 Simulator B 保留上一段 relationship 的 marker outbox。原本 fail-closed 規則正確阻止把舊項目混入目前 relationship，但沒有可恢復入口；W1 畫面現加入明確的「清除其他關係的待送測試標記」，只有整份 queue 都不屬於目前 relationship 才能清除，目前關係的待送項目仍必須重試。此規則已由 unit test 覆蓋；更新後 Simulator 冷啟動時 Outbox 已為「尚無待送標記」，因此本次沒有需要執行清除的舊項目。
 
 ## W1 尚未關閉
 
@@ -409,7 +413,7 @@ W1 client 只在 relationship 已 `archived` 且目前使用者仍持有 persona
 - 以雲端 Supabase 測試專案驗證第三身分拒絕；兩個 Apple 身分的 Auth、pairing、active relationship RLS marker、Realtime 雙向事件、Storage 私有照片雙向讀寫、單筆及三筆 FIFO marker 離線持久 outbox／冪等重送、三筆文字訊息 FIFO、closing／雙份 personal archive／archived photo，以及 owner-only archive delete／最後引用 object GC 已通過。
 - 照片 upload／closing orphan reconciliation 已通過；migration 011 已部署，頻繁弱網、容量與保存期限仍待驗證，大圖／方向與最後引用 GC 已通過。
 - 推播 production／TestFlight 與兩支真實 iPhone 的送達實測；development sandbox 的接收者、背景／終止、鎖定畫面隱私與 Watch 鏡像已通過。
-- 個人封存匯出的正式格式、容量、串流／分批處理與中斷恢復；version 1 資料夾候選的真機交付與小型封存內容核對已通過。
+- 個人封存匯出的正式格式、容量、大型真機壓力、低磁碟空間與中斷後續傳；version 1 資料夾候選的真機交付、小型封存內容核對及磁碟 staging／殘留清理已通過。
 - 正式訊息、照片政策、推播與背景重試的剩餘子決策；受管後端與共同資料系統紀錄已由 TD-001 關閉。
 
 在上述證據完成前，G1 與 M0 維持未通過，不進入大量功能實作。

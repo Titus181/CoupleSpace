@@ -212,6 +212,42 @@ struct CoupleSpaceTests {
         }
     }
 
+    @Test func markerOutboxExplicitlyDiscardsOnlyOtherRelationships() throws {
+        let suiteName = "MarkerOutboxRelationshipDiscardTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let userID = UUID()
+        let currentRelationshipID = UUID()
+        let otherRelationshipID = UUID()
+        let store = MarkerOutboxStore(defaults: defaults)
+        var queue = MarkerOutboxQueue()
+        queue.enqueue(MarkerOutboxEntry(
+            relationshipID: otherRelationshipID,
+            clientID: UUID(),
+            attemptCount: 1
+        ))
+        try store.save(queue, userID: userID)
+
+        #expect(try store.discardIfOnlyFromOtherRelationships(
+            userID: userID,
+            currentRelationshipID: currentRelationshipID
+        ))
+        #expect(try store.load(userID: userID).isEmpty)
+
+        queue.enqueue(MarkerOutboxEntry(
+            relationshipID: currentRelationshipID,
+            clientID: UUID(),
+            attemptCount: 1
+        ))
+        try store.save(queue, userID: userID)
+        #expect(try !store.discardIfOnlyFromOtherRelationships(
+            userID: userID,
+            currentRelationshipID: currentRelationshipID
+        ))
+        #expect(try store.load(userID: userID) == queue)
+    }
+
     @Test func photoOutboxPersistsDataAndAttemptAcrossStoreInstances() throws {
         let suiteName = "PhotoOutboxStoreTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -567,6 +603,16 @@ struct CoupleSpaceTests {
         let relationshipID = UUID(uuidString: "a0000000-0000-4000-8000-000000000001")!
         let messageID = UUID(uuidString: "a0000000-0000-4000-8000-000000000002")!
         let photoID = UUID(uuidString: "a0000000-0000-4000-8000-000000000003")!
+        let baseDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: baseDirectory,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
         let package = try PersonalArchiveExportPackage(
             relationshipID: relationshipID,
             exportedAt: Date(timeIntervalSince1970: 300),
@@ -585,17 +631,27 @@ struct CoupleSpaceTests {
                     text: "W1 test export",
                     photoFile: nil
                 ),
-            ],
-            photos: [PersonalArchiveExportPhoto(
-                clientID: photoID,
-                jpegData: Data([0xff, 0xd8, 0xff, 0xd9])
-            )]
+            ]
+        )
+        var staging = try PersonalArchiveExportStaging(
+            package: package,
+            baseDirectory: baseDirectory
+        )
+        try staging.writePhoto(
+            clientID: photoID,
+            jpegData: Data([0xff, 0xd8, 0xff, 0xd9])
         )
 
-        let root = try package.fileWrapper()
-        let rootFiles = try #require(root.fileWrappers)
-        let manifestData = try #require(rootFiles["manifest.json"]?.regularFileContents)
-        let photos = try #require(rootFiles["photos"]?.fileWrappers)
+        let exportedURL = baseDirectory.appendingPathComponent("exported", isDirectory: true)
+        try staging.fileWrapper().write(
+            to: exportedURL,
+            options: .atomic,
+            originalContentsURL: nil
+        )
+
+        let manifestData = try Data(
+            contentsOf: exportedURL.appendingPathComponent("manifest.json")
+        )
         let photoFileName = "a0000000-0000-4000-8000-000000000003.jpg"
 
         let decoder = JSONDecoder()
@@ -610,25 +666,83 @@ struct CoupleSpaceTests {
         #expect(manifest.items.map(\.clientID) == [messageID, photoID])
         #expect(manifest.items[0].text == "W1 test export")
         #expect(manifest.items[1].photoFile == photoFileName)
-        #expect(photos[photoFileName]?.regularFileContents == Data([0xff, 0xd8, 0xff, 0xd9]))
+        #expect(try Data(
+            contentsOf: exportedURL
+                .appendingPathComponent("photos", isDirectory: true)
+                .appendingPathComponent(photoFileName)
+        ) == Data([0xff, 0xd8, 0xff, 0xd9]))
     }
 
-    @Test func personalArchiveExportRejectsMissingPhoto() {
+    @Test func personalArchiveExportRejectsMissingPhoto() throws {
         let photoID = UUID()
+        let baseDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: baseDirectory,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let package = try PersonalArchiveExportPackage(
+            relationshipID: UUID(),
+            exportedAt: .now,
+            items: [PersonalArchiveExportItem(
+                clientID: photoID,
+                kind: "photo",
+                createdAt: .now,
+                text: nil,
+                photoFile: PersonalArchiveExportPackage.photoFileName(clientID: photoID)
+            )]
+        )
+        let staging = try PersonalArchiveExportStaging(
+            package: package,
+            baseDirectory: baseDirectory
+        )
         #expect(throws: PersonalArchiveExportError.photoSetMismatch) {
-            try PersonalArchiveExportPackage(
-                relationshipID: UUID(),
-                exportedAt: .now,
-                items: [PersonalArchiveExportItem(
-                    clientID: photoID,
-                    kind: "photo",
-                    createdAt: .now,
-                    text: nil,
-                    photoFile: PersonalArchiveExportPackage.photoFileName(clientID: photoID)
-                )],
-                photos: []
-            )
+            try staging.fileWrapper()
         }
+    }
+
+    @Test func personalArchiveExportDocumentSeparatesDeliveryAndStagingNames() throws {
+        let baseDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: baseDirectory,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let package = try PersonalArchiveExportPackage(
+            relationshipID: UUID(),
+            exportedAt: .now,
+            items: []
+        )
+        let staging = try PersonalArchiveExportStaging(
+            package: package,
+            baseDirectory: baseDirectory
+        )
+        let exportFileName = "CoupleSpace-personal-archive-test"
+        let wrapper = try staging.fileWrapper(exportFileName: exportFileName)
+
+        #expect(wrapper.filename == nil)
+        #expect(wrapper.preferredFilename == exportFileName)
+        #expect(wrapper.preferredFilename != staging.directoryURL.lastPathComponent)
+        let deliveredURL = baseDirectory.appendingPathComponent(
+            exportFileName,
+            isDirectory: true
+        )
+        try wrapper.write(
+            to: deliveredURL,
+            options: FileWrapper.WritingOptions.atomic,
+            originalContentsURL: nil
+        )
+        #expect(FileManager.default.fileExists(
+            atPath: deliveredURL.appendingPathComponent("manifest.json").path
+        ))
     }
 
     @Test func personalArchiveExportRejectsPrivateContentInPhotoEntry() {
@@ -643,13 +757,78 @@ struct CoupleSpaceTests {
                     createdAt: .now,
                     text: "must not be present",
                     photoFile: PersonalArchiveExportPackage.photoFileName(clientID: photoID)
-                )],
-                photos: [PersonalArchiveExportPhoto(
-                    clientID: photoID,
-                    jpegData: Data([1])
                 )]
             )
         }
+    }
+
+    @Test func personalArchiveExportRejectsDuplicatePhotoWrite() throws {
+        let photoID = UUID()
+        let baseDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: baseDirectory,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let package = try PersonalArchiveExportPackage(
+            relationshipID: UUID(),
+            exportedAt: .now,
+            items: [PersonalArchiveExportItem(
+                clientID: photoID,
+                kind: "photo",
+                createdAt: .now,
+                text: nil,
+                photoFile: PersonalArchiveExportPackage.photoFileName(clientID: photoID)
+            )]
+        )
+        var staging = try PersonalArchiveExportStaging(
+            package: package,
+            baseDirectory: baseDirectory
+        )
+        try staging.writePhoto(clientID: photoID, jpegData: Data([1]))
+        #expect(throws: PersonalArchiveExportError.duplicatePhoto) {
+            try staging.writePhoto(clientID: photoID, jpegData: Data([2]))
+        }
+    }
+
+    @Test func personalArchiveExportCleansOnlyAbandonedStagingDirectories() throws {
+        let baseDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(
+            UUID().uuidString,
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: baseDirectory,
+            withIntermediateDirectories: false
+        )
+        defer { try? FileManager.default.removeItem(at: baseDirectory) }
+
+        let abandonedURL = baseDirectory.appendingPathComponent(
+            PersonalArchiveExportStaging.directoryPrefix + UUID().uuidString,
+            isDirectory: true
+        )
+        let unrelatedURL = baseDirectory.appendingPathComponent("keep", isDirectory: true)
+        let similarlyNamedFileURL = baseDirectory.appendingPathComponent(
+            PersonalArchiveExportStaging.directoryPrefix + "file"
+        )
+        try FileManager.default.createDirectory(
+            at: abandonedURL,
+            withIntermediateDirectories: false
+        )
+        try FileManager.default.createDirectory(
+            at: unrelatedURL,
+            withIntermediateDirectories: false
+        )
+        try Data([1]).write(to: similarlyNamedFileURL)
+
+        try PersonalArchiveExportStaging.cleanupAbandoned(in: baseDirectory)
+
+        #expect(!FileManager.default.fileExists(atPath: abandonedURL.path))
+        #expect(FileManager.default.fileExists(atPath: unrelatedURL.path))
+        #expect(FileManager.default.fileExists(atPath: similarlyNamedFileURL.path))
     }
 
     @Test func notificationEnvelopeDoesNotExposePrivateContent() {

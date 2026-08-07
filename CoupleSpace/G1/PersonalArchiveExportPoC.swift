@@ -32,27 +32,25 @@ struct PersonalArchiveExportManifest: Codable, Equatable, Sendable {
     }
 }
 
-struct PersonalArchiveExportPhoto: Equatable, Sendable {
-    let clientID: UUID
-    let jpegData: Data
-}
-
 enum PersonalArchiveExportError: Error, Equatable {
     case duplicateItem
     case invalidItemContent
     case photoSetMismatch
+    case duplicatePhoto
     case importUnsupported
 }
 
 struct PersonalArchiveExportPackage: Sendable {
     let manifest: PersonalArchiveExportManifest
-    let photos: [PersonalArchiveExportPhoto]
+
+    var expectedPhotoIDs: Set<UUID> {
+        Set(manifest.items.filter { $0.kind == "photo" }.map(\.clientID))
+    }
 
     init(
         relationshipID: UUID,
         exportedAt: Date,
-        items: [PersonalArchiveExportItem],
-        photos: [PersonalArchiveExportPhoto]
+        items: [PersonalArchiveExportItem]
     ) throws {
         let sortedItems = items.sorted {
             if $0.createdAt != $1.createdAt { return $0.createdAt < $1.createdAt }
@@ -75,50 +73,19 @@ struct PersonalArchiveExportPackage: Sendable {
             throw PersonalArchiveExportError.invalidItemContent
         }
 
-        let expectedPhotos = Set(
-            sortedItems.filter { $0.kind == "photo" }.map(\.clientID)
-        )
-        let providedPhotos = Set(photos.map(\.clientID))
-        guard expectedPhotos == providedPhotos,
-              providedPhotos.count == photos.count else {
-            throw PersonalArchiveExportError.photoSetMismatch
-        }
-
         manifest = PersonalArchiveExportManifest(
             schemaVersion: 1,
             relationshipID: relationshipID,
             exportedAt: exportedAt,
             items: sortedItems
         )
-        self.photos = photos.sorted {
-            $0.clientID.uuidString < $1.clientID.uuidString
-        }
     }
 
-    func fileWrapper() throws -> FileWrapper {
+    func manifestData() throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
-        let manifestWrapper = FileWrapper(
-            regularFileWithContents: try encoder.encode(manifest)
-        )
-        manifestWrapper.preferredFilename = "manifest.json"
-
-        var rootFiles = ["manifest.json": manifestWrapper]
-        if !photos.isEmpty {
-            var photoFiles: [String: FileWrapper] = [:]
-            for photo in photos {
-                let fileName = Self.photoFileName(clientID: photo.clientID)
-                let wrapper = FileWrapper(regularFileWithContents: photo.jpegData)
-                wrapper.preferredFilename = fileName
-                photoFiles[fileName] = wrapper
-            }
-            let photosWrapper = FileWrapper(directoryWithFileWrappers: photoFiles)
-            photosWrapper.preferredFilename = "photos"
-            rootFiles["photos"] = photosWrapper
-        }
-
-        return FileWrapper(directoryWithFileWrappers: rootFiles)
+        return try encoder.encode(manifest)
     }
 
     static func photoFileName(clientID: UUID) -> String {
@@ -126,13 +93,124 @@ struct PersonalArchiveExportPackage: Sendable {
     }
 }
 
+struct PersonalArchiveExportStaging {
+    static let directoryPrefix = "CoupleSpace-personal-archive-staging-"
+
+    let directoryURL: URL
+    private let package: PersonalArchiveExportPackage
+    private var writtenPhotoIDs: Set<UUID> = []
+
+    init(
+        package: PersonalArchiveExportPackage,
+        baseDirectory: URL = FileManager.default.temporaryDirectory
+    ) throws {
+        self.package = package
+        directoryURL = baseDirectory.appendingPathComponent(
+            Self.directoryPrefix + UUID().uuidString,
+            isDirectory: true
+        )
+
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(
+            at: directoryURL,
+            withIntermediateDirectories: false
+        )
+        do {
+            try package.manifestData().write(
+                to: directoryURL.appendingPathComponent("manifest.json"),
+                options: [.atomic, .completeFileProtection]
+            )
+            if !package.expectedPhotoIDs.isEmpty {
+                try fileManager.createDirectory(
+                    at: directoryURL.appendingPathComponent("photos", isDirectory: true),
+                    withIntermediateDirectories: false
+                )
+            }
+        } catch {
+            try? fileManager.removeItem(at: directoryURL)
+            throw error
+        }
+    }
+
+    mutating func writePhoto(clientID: UUID, jpegData: Data) throws {
+        guard package.expectedPhotoIDs.contains(clientID) else {
+            throw PersonalArchiveExportError.photoSetMismatch
+        }
+        guard writtenPhotoIDs.insert(clientID).inserted else {
+            throw PersonalArchiveExportError.duplicatePhoto
+        }
+        do {
+            try jpegData.write(
+                to: directoryURL
+                    .appendingPathComponent("photos", isDirectory: true)
+                    .appendingPathComponent(PersonalArchiveExportPackage.photoFileName(
+                        clientID: clientID
+                    )),
+                options: [.atomic, .completeFileProtection]
+            )
+        } catch {
+            writtenPhotoIDs.remove(clientID)
+            throw error
+        }
+    }
+
+    func fileWrapper(exportFileName: String? = nil) throws -> FileWrapper {
+        guard writtenPhotoIDs == package.expectedPhotoIDs else {
+            throw PersonalArchiveExportError.photoSetMismatch
+        }
+
+        let manifestWrapper = try FileWrapper(
+            url: directoryURL.appendingPathComponent("manifest.json"),
+            options: []
+        )
+        manifestWrapper.preferredFilename = "manifest.json"
+
+        var files = ["manifest.json": manifestWrapper]
+        if !package.expectedPhotoIDs.isEmpty {
+            let photosWrapper = try FileWrapper(
+                url: directoryURL.appendingPathComponent("photos", isDirectory: true),
+                options: []
+            )
+            photosWrapper.preferredFilename = "photos"
+            files["photos"] = photosWrapper
+        }
+
+        let wrapper = FileWrapper(directoryWithFileWrappers: files)
+        if let exportFileName {
+            wrapper.preferredFilename = exportFileName
+        }
+        return wrapper
+    }
+
+    func remove() throws {
+        try FileManager.default.removeItem(at: directoryURL)
+    }
+
+    static func cleanupAbandoned(
+        in baseDirectory: URL = FileManager.default.temporaryDirectory
+    ) throws {
+        let fileManager = FileManager.default
+        let contents = try fileManager.contentsOfDirectory(
+            at: baseDirectory,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+        for url in contents where url.lastPathComponent.hasPrefix(directoryPrefix) {
+            guard try url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory == true else {
+                continue
+            }
+            try fileManager.removeItem(at: url)
+        }
+    }
+}
+
 struct PersonalArchiveExportDocument: FileDocument {
     static var readableContentTypes: [UTType] { [.folder] }
 
-    private let package: PersonalArchiveExportPackage
+    private let rootWrapper: FileWrapper
 
-    init(package: PersonalArchiveExportPackage) {
-        self.package = package
+    init(staging: PersonalArchiveExportStaging, exportFileName: String) throws {
+        rootWrapper = try staging.fileWrapper(exportFileName: exportFileName)
     }
 
     init(configuration: ReadConfiguration) throws {
@@ -140,6 +218,6 @@ struct PersonalArchiveExportDocument: FileDocument {
     }
 
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
-        try package.fileWrapper()
+        rootWrapper
     }
 }

@@ -205,6 +205,20 @@ struct MarkerOutboxStore {
         defaults.removeObject(forKey: key(userID))
     }
 
+    @discardableResult
+    func discardIfOnlyFromOtherRelationships(
+        userID: UUID,
+        currentRelationshipID: UUID
+    ) throws -> Bool {
+        let queue = try load(userID: userID)
+        guard !queue.isEmpty,
+              queue.entries.allSatisfy({ $0.relationshipID != currentRelationshipID }) else {
+            return false
+        }
+        clear(userID: userID)
+        return true
+    }
+
     private func key(_ userID: UUID) -> String {
         keyPrefix + userID.uuidString.lowercased()
     }

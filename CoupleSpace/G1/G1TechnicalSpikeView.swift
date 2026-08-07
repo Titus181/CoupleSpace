@@ -131,6 +131,13 @@ struct G1TechnicalSpikeView: View {
                                 Task { await pairingModel.retryPendingMarker() }
                             }
                             .disabled(pairingModel.isMarkerOutboxSending)
+
+                            Button("清除其他關係的待送測試標記", role: .destructive) {
+                                Task {
+                                    await pairingModel.discardPendingMarkersFromOtherRelationship()
+                                }
+                            }
+                            .disabled(pairingModel.isMarkerOutboxSending)
                         }
                         Button("重新整理 RLS 狀態") {
                             Task { await pairingModel.refresh() }

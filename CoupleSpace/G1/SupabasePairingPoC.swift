@@ -179,6 +179,7 @@ final class SupabasePairingPoC: ObservableObject {
     private var relationshipID: UUID?
     private var personalArchiveID: UUID?
     private var personalArchiveRelationshipID: UUID?
+    private var archiveExportStagingURL: URL?
     private var realtimeChannel: RealtimeChannelV2?
     private var realtimeTask: Task<Void, Never>?
 
@@ -305,6 +306,29 @@ final class SupabasePairingPoC: ObservableObject {
             await sendPendingMarkers(userID: session.user.id)
         } catch {
             markerOutboxStatus = "無法讀取待送標記：\(error.localizedDescription)"
+        }
+    }
+
+    func discardPendingMarkersFromOtherRelationship() async {
+        guard let relationshipID else {
+            markerOutboxStatus = "目前沒有可比對的關係，未清除待送標記"
+            return
+        }
+
+        do {
+            let session = try await client.auth.session
+            let didDiscard = try markerOutboxStore.discardIfOnlyFromOtherRelationships(
+                userID: session.user.id,
+                currentRelationshipID: relationshipID
+            )
+            guard didDiscard else {
+                markerOutboxStatus = "目前關係的待送標記不可清除，請改用重試"
+                return
+            }
+            hasPendingMarker = false
+            markerOutboxStatus = "已清除其他關係的待送測試標記"
+        } catch {
+            markerOutboxStatus = "清除其他關係待送標記失敗：\(error.localizedDescription)"
         }
     }
 
@@ -435,6 +459,7 @@ final class SupabasePairingPoC: ObservableObject {
             hasPersonalArchive = false
             personalArchiveItemCount = 0
             storagePhotoData = nil
+            cleanupArchiveExportStaging()
             archiveExportDocument = nil
             archiveExportStatus = "個人封存已刪除"
 
@@ -462,9 +487,11 @@ final class SupabasePairingPoC: ObservableObject {
         }
 
         archiveExportStatus = "正在準備個人封存匯出…"
+        cleanupArchiveExportStaging()
         archiveExportDocument = nil
 
         do {
+            try PersonalArchiveExportStaging.cleanupAbandoned()
             _ = try await client.auth.session
             let rows: [PersonalArchiveItemRow] = try await client
                 .from("personal_archive_items")
@@ -476,7 +503,6 @@ final class SupabasePairingPoC: ObservableObject {
                 .value
 
             var items: [PersonalArchiveExportItem] = []
-            var photos: [PersonalArchiveExportPhoto] = []
             for row in rows {
                 let photoFile = row.itemKind == "photo"
                     ? PersonalArchiveExportPackage.photoFileName(clientID: row.clientID)
@@ -489,39 +515,48 @@ final class SupabasePairingPoC: ObservableObject {
                     photoFile: photoFile
                 ))
 
-                if row.itemKind == "photo" {
+            }
+
+            let package = try PersonalArchiveExportPackage(
+                relationshipID: relationshipID,
+                exportedAt: .now,
+                items: items
+            )
+            var staging = try PersonalArchiveExportStaging(package: package)
+            do {
+                for row in rows where row.itemKind == "photo" {
                     let data = try await client.storage
                         .from("couplespace-w1-photos")
                         .download(path: storagePath(
                             relationshipID: relationshipID,
                             clientID: row.clientID
                         ))
-                    photos.append(PersonalArchiveExportPhoto(
-                        clientID: row.clientID,
-                        jpegData: data
-                    ))
+                    try staging.writePhoto(clientID: row.clientID, jpegData: data)
                 }
-            }
 
-            let package = try PersonalArchiveExportPackage(
-                relationshipID: relationshipID,
-                exportedAt: .now,
-                items: items,
-                photos: photos
-            )
-            archiveExportDocument = PersonalArchiveExportDocument(package: package)
-            archiveExportFileName = "CoupleSpace-personal-archive-\(shortToken(relationshipID))"
-            archiveExportStatus = "匯出已準備：manifest.json 與 \(photos.count) 張照片"
+                let exportFileName = "CoupleSpace-personal-archive-\(shortToken(relationshipID))"
+                archiveExportDocument = try PersonalArchiveExportDocument(
+                    staging: staging,
+                    exportFileName: exportFileName
+                )
+                archiveExportStagingURL = staging.directoryURL
+                archiveExportFileName = exportFileName
+                archiveExportStatus = "匯出已準備：manifest.json 與 \(package.expectedPhotoIDs.count) 張照片"
+            } catch {
+                try? staging.remove()
+                throw error
+            }
         } catch {
             archiveExportStatus = "個人封存匯出準備失敗：\(error.localizedDescription)"
         }
     }
 
     func finishPersonalArchiveExport(_ result: Result<URL, Error>) {
+        archiveExportDocument = nil
+        cleanupArchiveExportStaging()
         switch result {
         case .success:
             archiveExportStatus = "個人封存已交付至所選位置"
-            archiveExportDocument = nil
         case let .failure(error):
             archiveExportStatus = "個人封存交付失敗：\(error.localizedDescription)"
         }
@@ -851,6 +886,7 @@ final class SupabasePairingPoC: ObservableObject {
         personalArchiveItemCount = 0
         hasPersonalArchive = false
         archiveExportStatus = "尚未準備個人封存匯出"
+        cleanupArchiveExportStaging()
         archiveExportDocument = nil
         archiveExportFileName = "CoupleSpace-personal-archive"
         hasPendingMarker = false
@@ -863,6 +899,12 @@ final class SupabasePairingPoC: ObservableObject {
         personalArchiveID = nil
         personalArchiveRelationshipID = nil
         status = message
+    }
+
+    private func cleanupArchiveExportStaging() {
+        guard let archiveExportStagingURL else { return }
+        try? FileManager.default.removeItem(at: archiveExportStagingURL)
+        self.archiveExportStagingURL = nil
     }
 
     private func restoreRelationshipSnapshot(userID: UUID) throws {
