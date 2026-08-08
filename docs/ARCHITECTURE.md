@@ -1,7 +1,7 @@
 ---
 title: CoupleSpace Architecture
 status: provisional
-last_updated: 2026-08-07
+last_updated: 2026-08-08
 ---
 
 # CoupleSpace Architecture
@@ -64,8 +64,10 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 
 - 私密訊息、照片、Moment 內容與伴侶關係屬敏感資料。
 - 完整內容由受 relationship RLS 保護的 Supabase 產品資料與私有 Storage 保存，作為跨裝置同步、重新安裝恢復、共同歷史、匯出與個人封存的來源；分析資料不是備份來源。
+- 手機遺失、損壞或換機後的恢復只依賴已成功同步的遠端產品資料與 Private Storage，不依賴原裝置 cache；聊天正文、server timestamp、照片、Moment、共同約定、討論、時間線與本人個人封存必須能由新裝置重新取得。只存在遺失裝置 Outbox 的未同步內容不屬於可恢復資料。
 - 通知預設只帶最小路由資訊；鎖定畫面不得預設揭露內容。
 - 分析只記錄產品驗證所需的 relationship、interaction／內容參照、表面與參與種類、participant 與時間，不複製訊息文字、照片、Emoji 值或回答內容。
+- production 內容不得提供日常任意瀏覽；必要的 break-glass 維運存取採最小權限、指定原因、限時與 audit log。內容研究須由 relationship 兩位伴侶分別明確同意且可撤回，不得作為功能或權益條件。
 - 產品資料庫與 Storage 的雲端災難復原須有獨立備份、還原與演練 gate，不以分析事件或裝置快取替代。
 - Log、crash report、測試 fixture 與 Eval 不得包含真實私人資料或 secrets。
 - 匯出、刪除與解除配對必須共享同一套已核准的資料生命週期規則。
@@ -98,5 +100,6 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 5. 刪除、匯出與解除配對依同一份明確規則執行。
 6. iPhone 核心流程不依賴 Watch 或非 MVP 平台。
 7. 未通過 G1 實測的外部技術選擇維持 provisional，不寫成既定事實。
+8. 已成功同步的完整共同歷史必須能在遺失原裝置後由新裝置恢復；本機待送內容必須誠實顯示尚未備份。
 
 其中第 1–5 項由 Supabase constraint、RLS、RPC、私有 Storage 與受控 Edge Function 執行伺服器端 enforcement；精確產品資料模型仍須在後續垂直切片中補充，並轉成 unit／integration／real-device regression gates。

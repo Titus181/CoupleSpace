@@ -1,7 +1,7 @@
 ---
 title: 上市、客服與版本發布營運
 status: active
-last_updated: 2026-08-07
+last_updated: 2026-08-08
 ---
 
 # 上市、客服與版本發布營運
@@ -139,6 +139,29 @@ helpdesk 保留原文與回覆；產品 backlog 只保留去識別摘要、canon
 - 照片畫質適合共同回顧，且產品與商店文案未暗示原始畫質備份。
 - 資料庫與 Storage restore drill、弱網／離線、兩支真機、推播隱私、匯出、刪除與解除配對 gate 通過。
 - 成本警報、事故 runbook、phased release、暫停發布與降級流程完成。
+
+## TestFlight 轉正式版的資料延續
+
+階段一的真實使用者資料不是可丟棄 fixture。TestFlight 只負責 3–7 天熟人圈煙霧測試；進入 App Store 正式版時，同一段 relationship 的完整歷史必須無刪檔、無重建地接續使用。
+
+- External TestFlight 與 App Store 正式 build 使用同一個正式 Bundle ID、帳號身分規則、穩定 user／relationship／client UUID，以及同一套正式遠端 SSOT；若發布架構需要環境搬移，必須先完成可重複、可稽核且已演練的資料 migration，不能要求使用者重新配對或手動搬資料。
+- 開發 fixture、自動測試帳號與可回收壓力資料不得混入真實 production 資料；正式 TestFlight 開始前需確認 production 環境乾淨，dev／staging 仍保持分離。
+- 聊天、照片、Moment、回應、共同約定、專屬討論、共同時間線、個人封存與必要關聯 metadata 均由遠端產品資料／私有 Storage 延續。分析事件、裝置 cache 或 TestFlight 安裝本身都不是資料備份。
+- App Store 上架前必須以真實升級路徑演練：在 TestFlight 建立雙人資料與離線待送項目，安裝 release candidate／正式 build，重新登入或重新安裝後恢復 relationship 與完整歷史，確認待送項目只送達一次且沒有錯序。
+- schema／Storage migration 預設採向後相容、可觀察及可回復方式；不得為正式上線重建 production 資料庫、改發新身分或靜默清空 client outbox。任何必要的破壞性 migration 必須先阻擋發布並另行取得明確決策。
+- TestFlight 的 StoreKit／Sandbox 交易與測試 entitlement 不視為正式購買，也不搬成付費權益；正式上市的 30 天 Plus Launch Pass 由伺服器以 relationship 及活動資格獨立授予。
+- TestFlight build 可暫時繼續運作不代表轉版完成。需在 App 內與測試通知提供清楚的正式版安裝指引，並在測試 build 到期前確認早期使用者已能由 App Store 接續使用。
+
+## 手機遺失、換機與完整恢復
+
+CoupleSpace 的恢復承諾以遠端 SSOT 為準。使用者遺失或損壞原手機、換機或重新安裝後，以同一帳號完成驗證，即可恢復本人有權存取的完整共同歷史；不能要求仍持有舊手機、由裝置對裝置搬移或重新配對。
+
+- 恢復範圍至少包含 active／archived relationship、membership、聊天正文與 server timestamp、照片 metadata 與 Private Storage object、Moment／回應、共同約定／專屬討論、共同時間線、未讀／排序所需狀態，以及本人個人封存。
+- server timestamp、穩定 client UUID、內容引用與 Storage object identity 必須維持，避免恢復後重複、錯序、斷裂或 Moment 無法返回原對話／約定。
+- 上市前須以第二支已清除本機狀態的真實 iPhone 演練：同一帳號登入後重新取得 relationship，逐類核對數量、正文、照片可讀性、時間、順序與關聯，再執行重新安裝回歸。資料庫與 Storage restore drill 另須證明供應商／營運事故後仍能恢復兩者一致版本。
+- 只有伺服器已接受並可由另一裝置重新讀取的內容才算已同步。仍在本機 Outbox、尚未完成遠端 metadata finalization 或上傳的內容，若裝置永久遺失就可能無法恢復；介面不得以模糊的成功狀態隱藏此限制。
+- 正式用戶的完整內容只作 App 功能、同步、恢復、匯出、封存、安全與經授權支援之用。一般產品分析不讀取或複製正文、照片或回答；必要的 break-glass 維運存取須最小權限、指定原因、限時並留下 audit log。
+- 若提供內容研究模式，兩位伴侶必須分別明確同意、可隨時撤回，並清楚顯示範圍與期間；不同意不得影響 Free、Plus、Launch Pass 或核心功能。
 
 ## 尚待上線資料決定
 
