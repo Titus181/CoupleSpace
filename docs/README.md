@@ -32,7 +32,8 @@ last_updated: 2026-08-08
 8. [產品決策紀錄](decisions/product-decisions.md)
 9. [技術決策紀錄](decisions/technical-decisions.md)
 10. [品牌識別與方心吉祥物](design/01-brand-identity.md)
-11. [上市、客服與版本發布營運](operations/03-launch-support-and-release.md)
+11. [iPhone 核心畫面與功能佈局概念](design/02-iphone-core-screen-concepts.md)
+12. [上市、客服與版本發布營運](operations/03-launch-support-and-release.md)
 
 ## 文件維護原則
 
