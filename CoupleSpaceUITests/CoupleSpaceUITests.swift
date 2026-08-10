@@ -23,14 +23,14 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testLaunchAnimationCompletes() throws {
         let app = XCUIApplication()
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+        XCTAssertTrue(
+            app.descendants(matching: .any)["main-content"].waitForExistence(timeout: 3),
+            "The launch animation should finish and reveal the app content."
+        )
     }
 
     @MainActor
