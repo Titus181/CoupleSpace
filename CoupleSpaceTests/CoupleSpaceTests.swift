@@ -410,6 +410,59 @@ struct CoupleSpaceTests {
         #expect(try restoredStore.load(userID: userID).isEmpty)
     }
 
+    @Test func photoOutboxChecksCapacityBeforeWritingOrEnqueuing() throws {
+        let suiteName = "PhotoOutboxCapacityTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(suiteName, isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+
+        let userID = UUID()
+        let clientID = UUID()
+        let store = PhotoOutboxStore(
+            defaults: defaults,
+            directoryURL: directoryURL,
+            availableCapacity: { _ in 3 }
+        )
+
+        #expect(throws: PhotoOutboxStoreError.insufficientCapacity) {
+            try store.create(
+                jpegData: Data(repeating: 0xff, count: 4),
+                relationshipID: UUID(),
+                clientID: clientID,
+                userID: userID
+            )
+        }
+        #expect(try store.load(userID: userID).isEmpty)
+        #expect(!FileManager.default.fileExists(
+            atPath: directoryURL.appendingPathComponent(
+                clientID.uuidString.lowercased() + ".jpg"
+            ).path
+        ))
+    }
+
+    @Test func photoOutboxCapacityPolicyAllowsExactAndUnknownCapacity() {
+        #expect(PhotoOutboxCapacityPolicy.permitsWrite(
+            jpegByteCount: 4,
+            availableBytes: 4
+        ))
+        #expect(!PhotoOutboxCapacityPolicy.permitsWrite(
+            jpegByteCount: 4,
+            availableBytes: 3
+        ))
+        #expect(PhotoOutboxCapacityPolicy.permitsWrite(
+            jpegByteCount: 4,
+            availableBytes: nil
+        ))
+        #expect(!PhotoOutboxCapacityPolicy.permitsWrite(
+            jpegByteCount: -1,
+            availableBytes: 4
+        ))
+    }
+
     @Test func photoOutboxPreservesFIFOAndRejectsOutOfOrderAcknowledgement() throws {
         let suiteName = "PhotoOutboxFIFOTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))

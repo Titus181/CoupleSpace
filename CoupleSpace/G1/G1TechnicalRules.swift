@@ -310,6 +310,7 @@ struct PhotoOutboxQueue: Codable, Equatable {
 enum PhotoOutboxStoreError: LocalizedError, Equatable {
     case invalidLocalFileName
     case missingLocalFile
+    case insufficientCapacity
 
     var errorDescription: String? {
         switch self {
@@ -317,7 +318,33 @@ enum PhotoOutboxStoreError: LocalizedError, Equatable {
             "待送照片的本機檔名無效"
         case .missingLocalFile:
             "待送照片的本機檔案遺失"
+        case .insufficientCapacity:
+            "裝置可用空間不足，未保存待送照片"
         }
+    }
+}
+
+enum PhotoOutboxCapacityPolicy {
+    static func permitsWrite(jpegByteCount: Int, availableBytes: Int64?) -> Bool {
+        guard jpegByteCount >= 0,
+              let requiredBytes = Int64(exactly: jpegByteCount) else { return false }
+        guard let availableBytes else { return true }
+        return requiredBytes <= availableBytes
+    }
+
+    static func availableBytes(
+        at directoryURL: URL,
+        fileManager: FileManager = .default
+    ) -> Int64? {
+        let existingDirectoryURL = fileManager.fileExists(atPath: directoryURL.path)
+            ? directoryURL
+            : directoryURL.deletingLastPathComponent()
+        guard let number = try? fileManager.attributesOfFileSystem(
+            forPath: existingDirectoryURL.path
+        )[.systemFreeSize] as? NSNumber else {
+            return nil
+        }
+        return number.int64Value
     }
 }
 
@@ -325,12 +352,14 @@ struct PhotoOutboxStore {
     private let defaults: UserDefaults
     private let directoryURL: URL
     private let fileManager: FileManager
+    private let availableCapacity: (URL) -> Int64?
     private let keyPrefix = "couplespace.w1.photo-outbox."
 
     init(
         defaults: UserDefaults = .standard,
         directoryURL: URL? = nil,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        availableCapacity: ((URL) -> Int64?)? = nil
     ) {
         self.defaults = defaults
         self.fileManager = fileManager
@@ -340,6 +369,8 @@ struct PhotoOutboxStore {
                 .map { $0.appendingPathComponent("W1PhotoOutbox", isDirectory: true) }
             ?? fileManager.temporaryDirectory
                 .appendingPathComponent("W1PhotoOutbox", isDirectory: true)
+        self.availableCapacity = availableCapacity
+            ?? { PhotoOutboxCapacityPolicy.availableBytes(at: $0, fileManager: fileManager) }
     }
 
     func create(
@@ -349,6 +380,12 @@ struct PhotoOutboxStore {
         userID: UUID
     ) throws -> PhotoOutboxEntry {
         var queue = try load(userID: userID)
+        guard PhotoOutboxCapacityPolicy.permitsWrite(
+            jpegByteCount: jpegData.count,
+            availableBytes: availableCapacity(directoryURL)
+        ) else {
+            throw PhotoOutboxStoreError.insufficientCapacity
+        }
         try fileManager.createDirectory(
             at: directoryURL,
             withIntermediateDirectories: true

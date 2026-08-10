@@ -1,7 +1,7 @@
 ---
 title: W1 技術驗證紀錄
 status: in_progress
-last_updated: 2026-08-07
+last_updated: 2026-08-10
 ---
 
 # W1 技術驗證紀錄
@@ -347,6 +347,10 @@ W1 client 在 Supabase 登入狀態可用或 App 由背景回到前景時，會�
 
 PD-021 已接受 Free 每段關係每月 30 張照片及累積 1 GB 作為首輪研究起點，但不能只靠 App 隱藏按鈕或本機計數。migration `202608070012_w1_photo_quota.sql` 因此新增 `finalize_w1_photo_upload`：上傳仍先進入私有 Storage，RPC 再鎖住 relationship row、確認 active membership、核對 deterministic path、object owner 與 Storage metadata bytes，最後才建立 photo shared item。authenticated client 的一般 insert policy 明確排除 photo，雙方同時上傳也會由同一 relationship lock 串行計數。RPC 以 UTC 月曆月計 30 張，累積總量以 1,000,000,000 bytes 計算；這兩個精確語意都是 W1 候選，尚未升格為永久產品規則。
 
+照片 Outbox 另加入獨立於遠端配額的本機容量預檢。Client 在把已重新編碼 JPEG 寫入 Application Support 前，以檔案實際 bytes 比較該 volume 的已知可用空間；明確不足時回報「裝置可用空間不足，未保存待送照片」，且不建立 JPEG 或 queue metadata。可用容量無法取得時維持相容，仍交由既有原子寫入錯誤保護，不加安全倍數或推測性 queue 上限。完整 `CoupleSpaceTests` 61／61 通過，涵蓋剛好足夠、少一 byte、未知容量與拒絕後無殘留；尚未以真機實際低磁碟狀態驗證。
+
+2026-08-10 以真機 A 在 active relationship 選擇測試照片並完成上傳，沒有出現容量不足錯誤；Simulator B 重新整理後可讀取另一裝置上傳的私有照片，且 Photo Outbox 顯示沒有待送照片。這關閉容量預檢加入後的正常真機上傳回歸，不是低磁碟案例，因此實際低空間 gate 維持未通過。
+
 RPC 對相同 relationship／client identity 的重試保持冪等；不同 owner、kind 或 bytes 的碰撞一律拒絕。若回傳月新增或總容量上限，client 先透過既有 owner-only Storage policy 刪除剛上傳的 orphan，成功後才移除該筆本機 outbox；若網路、RPC 或清理失敗則保留原 JPEG 與 queue 供重試。migration 012、本機 Storage metadata、月界線、總容量、第三身分、closing 與直接 insert bypass 共 14 個新 pgTAP 已連同既有資料庫合約通過 139／139；iPhone `CoupleSpaceTests` 現為 55／55。新增的 client regressions 明確涵蓋成功確認、兩種配額拒絕文案、未知拒絕保留重試、先刪除遠端 object 再 acknowledge、遠端清理失敗時不得碰觸本機 Outbox，以及配額提示必須插入實際訊息與剩餘佇列數。2026-08-07 migration 012 已推送 Supabase 測試專案，遠端版本紀錄與本機一致。真機 A 與 Simulator B 隨後在同一 active relationship 近乎同時各上傳一張照片；雙方重新整理後都顯示同一張最新照片，最近照片列包含兩個不同的新 token，兩邊 Outbox 均清空，且沒有重複項目或錯誤提示，證明遠端 relationship lock 路徑可接受並排序兩筆競爭寫入。其後以固定 UUID、月初時間與 1 byte metadata 的可回收 fixture 將同一 relationship 從原有 5 張補至本月 30 張；真機 A 上傳第 31 張時正確顯示月上限、最近三個 token 不變且 Outbox 清空。遠端前後核對皆為 30 筆 metadata／5 個 Storage objects，證明被拒照片的 object 已刪除且沒有建立 metadata；刪除 25 筆 fixture 後回復原有 5 筆／5 個，無 fixture 殘留。第二組 fixture 使用前一月份、單筆不超過 5 MB 的 200 筆 metadata，將累積量補至 999,999,999 bytes 且本月仍只有原有 5 張；真機 A 再上傳時正確顯示 1 GB 上限、實際文案及「未建立共享照片」，Outbox 清空。遠端仍為 205 筆 metadata／5 個 Storage objects／999,999,999 bytes，證明被拒照片同樣沒有 metadata 或 orphan；清理後精準回復 5 筆／5 個／1,164,373 bytes，無 fixture 殘留。metadata-only fixture 曾短暫使 App 的最近照片查詢顯示「尚無照片」，屬受控測試資料副作用，清理後即可恢復，並非正常產品資料路徑。
 
 ### Supabase closing／personal archive client spike
@@ -441,7 +445,7 @@ W1 純規則使用 opaque content reference，而不是複製內容。完整文�
 
 - Supabase 路徑的兩支真實 iPhone、兩個 Apple ID 登入、配對、雙向資料與重啟證據。
 - 第三身分雲端拒絕已通過：遠端連線以不屬於目標 relationship 的 authenticated UUID 執行，relationship、memberships、shared items、personal archives 與 Storage objects 讀取皆為 0；marker、message、photo finalization 與解除配對 RPC 均回傳 `42501 relationship_not_accessible`。測後 relationship 仍為 active、probe rows 為 0，原有 5 筆照片 metadata／5 個 object 不變。這是受控遠端 RLS／RPC 證據，不等同第三個 Apple ID 的完整 UI 登入流程。
-- 照片 upload／closing orphan reconciliation、月 30 張／累積 1 GB 配額拒絕與 orphan 清理已通過；PD-022 已關閉保存生命週期，不做時間型自動刪除，配額或降級只阻止新增。頻繁弱網與真機容量壓力仍待驗證，大圖／方向與最後引用 GC 已通過。
+- 照片 upload／closing orphan reconciliation、月 30 張／累積 1 GB 配額拒絕與 orphan 清理已通過；PD-022 已關閉保存生命週期，不做時間型自動刪除，配額或降級只阻止新增。本機 Outbox 寫入前的精確 bytes 容量預檢已通過，頻繁弱網與真機低磁碟／容量壓力仍待驗證，大圖／方向與最後引用 GC 已通過。
 - 推播 production／TestFlight 與兩支真實 iPhone 的送達實測；development sandbox 的接收者、背景／終止、鎖定畫面隱私與 Watch 鏡像已通過。
 - 個人封存匯出的正式格式、容量、大型真機壓力、實際低磁碟空間與中斷後續傳；version 1 資料夾候選的真機交付、小型封存內容核對、磁碟 staging／殘留清理及容量預檢純規則已通過，migration 013 已部署 Supabase 測試專案。
 - 正式訊息、照片畫質／正式額度、推播與背景重試的剩餘子決策；照片保存生命週期已由 PD-022 關閉，受管後端與共同資料系統紀錄已由 TD-001 關閉。

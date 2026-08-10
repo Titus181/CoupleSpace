@@ -1,7 +1,7 @@
 ---
 title: 第一版開發路線圖
 status: active
-last_updated: 2026-08-08
+last_updated: 2026-08-10
 ---
 
 # 第一版開發路線圖
@@ -87,10 +87,12 @@ last_updated: 2026-08-08
 
 前景 outbox recovery 已進一步加入有限次短退避：登入／回到前景時立即嘗試，若仍有同一 active relationship 的待送項目，依序等待 1 秒與 4 秒再試，合計最多三次；之後停止並保留 Outbox。真機 A＋Simulator B 已完成短暫斷線後不按人工重試即自動送達、持續斷線至三次耗盡後保留待送項目，以及恢復網路後由下一次前景事件送達且對方只收到一次的驗證。W1 client 現另以 `NWPathMonitor` 觀察前景中的 unavailable→available，才觸發同一 coordinator；初次啟動已連線、重複 available、轉為離線或持續離線均不觸發。完整 `CoupleSpaceTests` 59／59 通過；真機 A 在 App 保持前景時離線建立待送 marker，恢復網路後 Outbox 自動清空，Simulator B 只收到一次。這不包含背景 task、長時間退避或無限輪詢。
 
+照片持久 Outbox 現另在寫入重新編碼 JPEG 前，檢查其所在 volume 的已知可用空間；若明確少於本次 JPEG bytes，會在建立本機檔案與 queue metadata 前拒絕並顯示空間不足。容量無法取得時仍沿用既有原子寫入錯誤保護，不加入任意安全倍數或新的商業配額。完整 `CoupleSpaceTests` 61／61 通過，涵蓋剛好足夠、少一 byte、容量未知，以及拒絕後不留下檔案／queue；2026-08-10 真機 A 的正常上傳路徑亦完成回歸，Simulator B 可讀取該照片且 Outbox 清空。這不代表真機低磁碟或容量壓力已通過。
+
 以下實作細節尚未決定，不得在規劃中默認某一實作方式：
 
 1. 正式訊息資料模型、長佇列真機壓力、正式自動排程、長時間退避、production 網路監聽與背景重試；message／marker 各 100 筆的本機 FIFO regression，以及登入／前景恢復的一次性 immediate retry 與三次有限短退避真機流程均已通過。前景離線→連線觸發已完成本機候選與真機跨裝置驗證；正式長時間重試與背景執行仍未定案。
-2. 照片正式 upload outbox、縮圖、壓縮、正式容量與高壓情境下的刪除一致性；保存生命週期已由 PD-022 關閉。
+2. 照片正式 upload outbox、縮圖、壓縮、正式容量與高壓情境下的刪除一致性；保存生命週期已由 PD-022 關閉，本機 Outbox 寫入前的精確 bytes 容量預檢已完成，但真機低磁碟壓力仍待驗證。
 3. 個人封存匯出的正式格式、容量與中斷後續傳；W1 資料夾候選已改為逐張下載至磁碟 staging，64 張／4 MiB 合成樣本與部分 staging 清理通過本機測試。migration 013 另把照片 byte size 複製進個人封存，讓 App 在下載前比較 manifest＋照片總大小與暫存 volume 可用空間；140 個 pgTAP、58 個 Simulator tests、本機與 linked `public` schema lint 通過，migration 已部署 Supabase 測試專案，既有 archived relationship 的真機正常匯出路徑亦完成複驗。大型真機壓力、實際低磁碟空間與中斷點續傳仍待驗證，也不代表最終產品格式。
 4. 推播 production／TestFlight 與兩支真實 iPhone 的送達證據；development sandbox 的接收者、背景／終止與敏感內容隱藏已通過。
 
