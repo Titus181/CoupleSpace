@@ -47,6 +47,8 @@ There is no standalone linter configured yet. Do not claim lint passed; the Swif
 - Every behavior change needs a test at the lowest reliable layer. A bug fix must add a regression case that fails before the fix when practical.
 - Do not mechanically duplicate every feature across unit, integration, and UI tests. Use unit tests for deterministic rules, integration tests for storage/sync/service boundaries, UI tests for critical journeys, and real-device tests for Apple services and cross-device behavior.
 - During development, run affected tests and the affected target build.
+- Work in the smallest complete vertical slice and finish all locally automatable implementation, affected tests, Simulator builds, and Harness checks before requesting human validation; do not interrupt the user to manually test each incremental edit.
+- Batch human validation at a coherent slice or milestone boundary, with one concise checklist. Request it earlier only when progress requires Xcode UI, Apple ID, signing, a real device, push/background behavior, cross-device Apple-service behavior, destructive remote-test-data approval, or subjective UX judgment.
 - Before a PR is merged, run the full iPhone automated suite plus applicable integration/UI tests. Run Watch tests only when Watch or shared behavior is affected.
 - Before TestFlight or release, execute the two-iPhone/two-Apple-ID, weak-network, offline, push privacy, App Lock, export, deletion, and unpairing checks in `docs/HARNESS.md`.
 - A fresh green result is required after the final code change. Do not reuse a test result from before the last behavior-affecting edit.
