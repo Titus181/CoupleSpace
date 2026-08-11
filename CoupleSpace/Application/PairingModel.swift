@@ -46,6 +46,12 @@ final class PairingModel: ObservableObject {
     }
 
     func createOrRetryInvitation() async {
+        let previousInvitationToken: UUID?
+        if case let .waiting(_, invitation) = state {
+            previousInvitationToken = invitation?.token
+        } else {
+            previousInvitationToken = nil
+        }
         guard let generation = beginOperation() else { return }
         defer { finishOperation(generation: generation) }
 
@@ -56,7 +62,13 @@ final class PairingModel: ObservableObject {
                 PairingRelationship(id: invitation.relationshipID, memberCount: 1),
                 invitation: invitation
             )
-            statusMessage = "邀請已準備好，可以分享給伴侶。"
+            if let previousInvitationToken {
+                statusMessage = previousInvitationToken == invitation.token
+                    ? "目前的邀請仍然有效。"
+                    : "已建立新的邀請碼，請重新分享給伴侶。"
+            } else {
+                statusMessage = "邀請已準備好，可以分享給伴侶。"
+            }
         } catch {
             guard generation == sessionGeneration else { return }
             statusMessage = message(for: error)
@@ -95,6 +107,21 @@ final class PairingModel: ObservableObject {
             guard generation == sessionGeneration else { return }
             state = .unpaired
             statusMessage = "已拒絕這份邀請。"
+        } catch {
+            guard generation == sessionGeneration else { return }
+            statusMessage = message(for: error)
+        }
+    }
+
+    func cancelInvitation() async {
+        guard let generation = beginOperation() else { return }
+        defer { finishOperation(generation: generation) }
+
+        do {
+            try await service.cancelInvitation()
+            guard generation == sessionGeneration else { return }
+            state = .unpaired
+            statusMessage = "已取消邀請，可以改用伴侶的邀請碼。"
         } catch {
             guard generation == sessionGeneration else { return }
             statusMessage = message(for: error)

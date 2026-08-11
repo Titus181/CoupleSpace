@@ -52,6 +52,7 @@ private struct PairingSetupView: View {
     let onSignOut: () -> Void
     @State private var invitationCode = ""
     @State private var isConfirmingDecline = false
+    @State private var isConfirmingCancellation = false
     @State private var isConfirmingSignOut = false
 
     private var hasValidInput: Bool {
@@ -87,6 +88,20 @@ private struct PairingSetupView: View {
                         Text("邀請將於 \(invitation.expiresAt.formatted(date: .omitted, time: .shortened)) 失效；失效或被拒絕後可產生新邀請。")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+
+                        Button {
+                            Task { await model.createOrRetryInvitation() }
+                        } label: {
+                            Label("檢查並重試邀請", systemImage: "arrow.clockwise")
+                        }
+                        .disabled(model.isWorking)
+                        .accessibilityIdentifier("retry-pairing-invitation")
+
+                        Button("取消我的邀請", role: .destructive) {
+                            isConfirmingCancellation = true
+                        }
+                        .disabled(model.isWorking)
+                        .accessibilityIdentifier("cancel-pairing-invitation")
                     } else {
                         Button {
                             Task { await model.createOrRetryInvitation() }
@@ -168,6 +183,17 @@ private struct PairingSetupView: View {
                 Button("取消", role: .cancel) {}
             } message: {
                 Text("邀請者之後可以建立新的邀請。")
+            }
+            .alert(
+                "要取消自己的邀請嗎？",
+                isPresented: $isConfirmingCancellation
+            ) {
+                Button("取消邀請", role: .destructive) {
+                    Task { await model.cancelInvitation() }
+                }
+                Button("保留邀請", role: .cancel) {}
+            } message: {
+                Text("取消後可以改為接受伴侶建立的邀請；尚未配對的空白關係會一併移除。")
             }
             .alert(
                 "要登出 CoupleSpace 嗎？",

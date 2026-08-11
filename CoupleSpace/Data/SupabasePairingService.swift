@@ -38,6 +38,7 @@ protocol PairingRemoteServing {
     func createInvitation() async throws -> PairingInvitation
     func acceptInvitation(token: UUID) async throws -> UUID
     func declineInvitation(token: UUID) async throws
+    func cancelInvitation() async throws
 }
 
 final class SupabasePairingService: PairingRemoteServing {
@@ -106,6 +107,13 @@ final class SupabasePairingService: PairingRemoteServing {
                 "decline_relationship_invitation",
                 params: PairingInvitationParameters(providedInviteToken: token)
             )
+            .execute()
+    }
+
+    func cancelInvitation() async throws {
+        _ = try await client.auth.session
+        try await client
+            .rpc("cancel_relationship_invitation")
             .execute()
     }
 }

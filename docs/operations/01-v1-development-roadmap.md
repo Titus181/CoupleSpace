@@ -39,7 +39,7 @@ last_updated: 2026-08-11
 | W1，8/4–8/11 | **G1 技術決策與風險驗證（已完成）** | 兩支真實 iPhone、兩個 Apple 身分已完成 development 登入、配對、雙向資料、弱網／跨啟動 Outbox 與雙向推播實測；TD-001 已決定 Supabase 架構及共同資料的所有權、解除配對、刪除與匯出規則 |
 | W2，8/10–8/16 | **G2 iPhone App 基礎骨架（已完成）** | 移除預設範例資料模型；建立「今天／對話／我們」三分頁、環境設定、領域模型與測試框架；iPhone target 可穩定建置與執行 |
 | W3，8/17–8/23 | **G3 帳號與使用者身分（已完成）** | 使用者可登入、登出，重新啟動後可恢復登入；取消與失敗狀態明確；不建立重複帳號 |
-| W4，8/24–8/30 | **G4 邀請與一對一配對（開發中）** | A 可邀請 B；B 接受後雙方看到同一段伴侶關係；一人只能有一個有效伴侶；邀請可拒絕、失效與重試 |
+| W4，8/24–8/30 | **G4 邀請與一對一配對（已完成）** | A 可邀請 B；B 接受後雙方看到同一段伴侶關係；一人只能有一個有效伴侶；邀請可拒絕、失效與重試 |
 | W5，8/31–9/6 | **G5 第一個 Moment 垂直切片** | 可建立心情、短句或照片 Moment；另一支手機能同步看到；Moment 自動進入共同時間線 |
 | W6，9/7–9/13 | **G6 Moment 雙向互動** | 支援 Emoji、短文字回應及固定題庫版「我們的一題」；雙方互動後形成完整 Moment |
 | W7，9/14–9/20 | **G7 基本文字聊天** | 一對一文字訊息可跨裝置同步；顯示訊息時間與未讀數；不顯示已讀狀態 |
@@ -55,16 +55,17 @@ last_updated: 2026-08-11
 | G16 通過後 | **G17 正式上架與首月驗證** | TestFlight 使用者的完整關係資料可無刪檔接續至 App Store 正式版；執行一個月繁中上市活動與 30 天 Plus Launch Pass，追蹤雙人啟用、雙向互動、W1／W4 留存、品質、成本及自願訂閱 |
 | 上市活動滿一個月 | **G18 第一版決策點** | 依伴侶對行為、使用者回饋、可靠性、客服與成本證據，決定修正核心循環、擴大投放或安排下一版；此時重新評估 Widget、進階回顧與訂閱優先順序 |
 
-### G4 開發中證據（2026-08-11）
+### G4 完成證據（2026-08-11）
 
 - 正式 App 已在 Supabase session 恢復後重新經 RLS 讀取目前 active relationship；未完成 `2/2` 配對前顯示邀請與配對流程，完成後才進入「今天／對話／我們」。不同登入身分不沿用前一位使用者的 pairing presentation state，配對前仍可登出。
 - A 可建立或取回一小時邀請碼並使用系統分享表傳給 B；B 可貼上完整邀請碼接受或明確拒絕。拒絕會使原 token 不可接受，A 重試時在同一段單人成員 relationship 輪替新 token；既有 server constraint 繼續保證每位使用者只有一個 active membership。
 - 成功配對後雙方可在帳號設定核對相同 relationship UUID 前 8 碼；這只是識別複驗，不是新的邀請碼或 client-side 授權來源。
-- iPhone Simulator target build 已通過；行為最後修改前的完整 suite 為 75／75，最後加入登入身分隔離與配對前登出後，affected unit、配對 UI 與三分頁 regression 亦以 `xcodebuild test` exit 0 完成。
-- 重建本機 Supabase、依序套用 migrations 001–014 後，完整 database suite 的 13 files／147 tests 全部通過，涵蓋拒絕、舊 token 不可接受、同一 relationship 輪替新 token，以及所有既有 RLS／資料生命週期 regression。
-- migration 014 已部署 Supabase 測試專案；遠端 migration list 顯示 local／remote 001–014 一致，linked `public`／`extensions` schema lint 無錯誤。
+- 最終 iPhone Simulator target build、PairingModel affected tests、配對 UI regression 與完整 iPhone automated suite 均以 `xcodebuild` exit 0 通過。
+- 重建本機 Supabase、依序套用 migrations 001–015 後，完整 database suite 的 14 files／156 tests 全部通過，涵蓋拒絕、取消空白單人邀請、舊 token 不可接受、同一 relationship 輪替新 token，以及所有既有 RLS／資料生命週期 regression。
+- migrations 014／015 已部署 Supabase 測試專案；遠端 migration list 顯示 local／remote 001–015 一致，linked `public`／`extensions` schema lint 無錯誤。
 - Debug build 的帳號設定已恢復明確標示的「W1 技術驗證工具」入口，復用既有訊息、照片、配對與解除關係 spike 做真機回歸；正式三分頁不提前承載 W7–W9／W13 產品介面。帳號設定與配對前的登出確認改用標準 alert，避免錨定式浮窗。
-- G4 尚未完成：尚未以兩支真實 iPhone 驗證建立／接受、拒絕後重試、自然失效後重試，以及雙方顯示同一 relationship。
+- 兩支真機同時各自建立邀請時，會形成兩段各一人的 active relationship，雙方因一人只能有一個 active membership 而無法接受另一份邀請。migration 015 與 App 已加入「取消我的邀請」恢復路徑：只允許建立者刪除未接受、單人成員且完全沒有共同資料／照片／封存／push job 的空白邀請關係；真機已完成其中一方取消後回到未配對、拒絕另一方邀請，以及邀請者在同一 relationship 輪替新 token。
+- 兩支真機另以授權的測試專案單筆 `expires_at` 調整，控制式觸發與自然逾時相同的伺服器失效判斷；App 的「檢查並重試邀請」在原 relationship 內把 token 由 `614895a0…` 輪替為 `f4221447…`，並延後一小時。這是控制式過期證據，不宣稱實際等待一小時。B 接受新 token 後，雙方均進入三分頁並在帳號設定看到相同 relationship `632fd4c5…`。G4 完成。
 
 ## 關鍵里程碑
 

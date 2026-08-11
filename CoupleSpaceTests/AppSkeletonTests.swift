@@ -133,6 +133,15 @@ struct AppSkeletonTests {
             invitation: invitation
         ))
 
+        await model.createOrRetryInvitation()
+        #expect(model.statusMessage == "目前的邀請仍然有效。")
+
+        await model.cancelInvitation()
+        #expect(model.state == .unpaired)
+        #expect(service.cancelInvitationCallCount == 1)
+
+        await model.createOrRetryInvitation()
+
         await model.acceptInvitation(rawToken: invitation.code)
         #expect(model.state == .paired(PairingRelationship(id: relationshipID, memberCount: 2)))
         #expect(service.acceptedTokens == [invitationToken])
@@ -172,6 +181,7 @@ private final class PairingRemoteServiceFake: PairingRemoteServing {
     let acceptedRelationshipID: UUID
     var acceptedTokens: [UUID] = []
     var declinedTokens: [UUID] = []
+    var cancelInvitationCallCount = 0
 
     init(
         currentRelationship: PairingRelationship?,
@@ -199,6 +209,10 @@ private final class PairingRemoteServiceFake: PairingRemoteServing {
     func declineInvitation(token: UUID) async throws {
         declinedTokens.append(token)
     }
+
+    func cancelInvitation() async throws {
+        cancelInvitationCallCount += 1
+    }
 }
 
 private final class SuspendedPairingRemoteServiceFake: PairingRemoteServing {
@@ -224,4 +238,6 @@ private final class SuspendedPairingRemoteServiceFake: PairingRemoteServing {
     }
 
     func declineInvitation(token: UUID) async throws {}
+
+    func cancelInvitation() async throws {}
 }
