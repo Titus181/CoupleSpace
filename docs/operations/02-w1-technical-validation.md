@@ -19,7 +19,7 @@ W1 不先完成正式產品功能。先以最小真機 spike 驗證最大未知�
 | 身分與配對 | Sign in with Apple credential 交由 Supabase Auth；Postgres constraint、RLS 與 RPC 管理一對一 relationship | 真機 A＋Simulator B、兩個 Apple ID 的登入、配對、session 恢復與雙向 RLS 初步通過；遠端測試專案的第三 authenticated UUID 對 relationship、memberships、shared items、personal archives 與 Storage 均不可見，四種敏感 RPC 亦拒絕 | 兩支真實 iPhone 待驗證 |
 | 同步與聊天 | Realtime 只作變更提示並重新經 RLS 讀取；client UUID、server timestamp 與持久 outbox 提供冪等和穩定順序 | 單筆及三筆 FIFO marker metadata outbox 的斷網、重啟、重連、順序與雙裝置一致性通過；message／marker 各 100 筆本機持久化與完整 FIFO drain regression 通過 | 正式訊息內容、長佇列真機壓力、自動排程與弱網仍待驗證 |
 | 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理；不按時間自動到期 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；三張持久 FIFO upload outbox 的斷網、跨啟動、重送與順序通過，另有 32 筆本機檔案持久化／FIFO drain regression；實際 JPEG regression 證明大圖縮放、方向正規化與 GPS 移除，真機高解析直向照片跨裝置方向／比例亦通過；closing orphan reconciliation、月 30 張／累積 1 GB 配額與拒絕後 orphan 清理均通過遠端實測；PD-022 的保存政策與既有 lifecycle 一致，不需 migration | 頻繁弱網與真機容量壓力待驗證 |
-| 推播 | 伺服器驗證 relationship／recipient 後才送出泛化 APNs 文案；App 收到提示後重新讀取 | migrations 009／010、APNs secrets 與 Edge sender 已部署；Simulator B→真機 A 的背景、終止、鎖定與 Watch 鏡像通知皆成功 | 仍需兩支真實 iPhone 與 production／TestFlight 證據 |
+| 推播 | 伺服器驗證 relationship／recipient 後才送出泛化 APNs 文案；App 收到提示後重新讀取 | migrations 009／010、APNs secrets 與 Edge sender 已部署；兩支真實 iPhone 的雙向背景、終止與鎖定 development sandbox 通知皆成功，既有 Watch 鏡像通知亦成功 | 仍需 production／TestFlight 證據 |
 | 所有權與解除配對 | Supabase 伺服器建立雙份 owner-isolated 唯讀封存，兩人可獨立刪除或匯出 | closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過；version 1 manifest＋JPEG 資料夾候選通過真機交付核對，64 張／4 MiB 合成照片磁碟 staging、部分 staging 清理與下載前容量預檢 regression 通過；migration 013 已部署測試專案 | 最終格式、大型真機壓力、實際低磁碟空間與中斷後續傳待驗證 |
 | 核心雙向互動與聊天活躍 | PD-020 將同一 Moment／題目／共同約定內的雙方參與定義為核心雙向互動；同週雙方各至少一則聊天訊息另列聊天活躍。完整內容留在產品資料／私有 Storage，分析事件只保存內容參照與必要 metadata | 純規則涵蓋單方重複、混合物件、重複內容參照、第二位參與完成時間、週期邊界與雙方聊天；編碼 regression 確認沒有私密內容欄位 | 雲端彙整事件尚未實作；產品資料與 Storage 的備份／還原及演練另列 release gate |
 
@@ -441,12 +441,70 @@ migration `202608070013_w1_personal_archive_media_size.sql` 新增 owner-only ar
 
 W1 純規則使用 opaque content reference，而不是複製內容。完整文字、照片、Emoji 與回答仍保存在受 relationship RLS 保護的 Supabase 產品資料與私有 Storage，供跨裝置同步、重新安裝恢復、共同歷史、匯出與個人封存；分析資料只含 relationship、interaction／內容參照、表面、參與種類、participant 與時間。單方重複、不同 interaction object、重複內容參照及週期結束邊界均有 deterministic regression。雲端事件表／彙整尚未建立，也沒有新增 migration；產品資料與 Storage 的備份、還原與演練是獨立 release gate，分析事件不得被當成備份副本。
 
+## Supabase 兩支真實 iPhone 最終 W1 閘門
+
+此流程只關閉「兩支真實 iPhone、兩個 Apple 身分」的 development 證據，不取代 production／TestFlight 推播、實際低磁碟空間、大型封存或正式產品規格。不得再使用 Simulator 的成功結果代替其中任一裝置。
+
+### 前提與紀錄邊界
+
+1. 準備真實 iPhone A、B，兩台都安裝同一個目前 commit 的 Development build，並分別登入不同 Apple 身分。
+2. 兩台都允許 CoupleSpace 通知，Supabase environment、App bundle identifier 與 APNs sandbox 環境一致。
+3. 使用不含私人內容的測試文字與照片；只記錄裝置型號、iOS 版本、App build／commit、執行時間與畫面短 token，不保存完整 Email、access token、APNs token、invitation token 或照片內容。
+4. 若沿用既有 relationship，先確認兩台顯示相同 relationship 短代碼、`active`、`2/2` 且 Outbox 全空；否則建立一段新的測試 relationship。
+
+### A. 身分、配對與冷啟動
+
+1. A、B 分別以 Apple 登入 Supabase；確認登入可用，且使用者短代碼不同。
+2. 由 A 建立 invitation，B 接受；兩台重新整理後必須顯示同一 relationship 短代碼、`active`、`2/2`。
+3. 兩台都強制結束 App，再重新啟動；不得重新登入，且 relationship 快照先可顯示，連網重新整理後仍收斂到相同 `active`、`2/2`。
+
+2026-08-10 通過：iPhone 17 Pro Max（A）與 iPhone 14 Pro Max（B）均為 iOS 26.6，安裝相同 Development build `1.0 (1)`；來源以 commit `b1fca7b` 為基底，另含尚未提交的 iOS 26.0 deployment target 調整。兩台皆可完成 Supabase Apple 登入，使用者短代碼不同；A 建立 invitation、B 接受後，兩台確認為同一 relationship、`active`、`2/2`。雙方強制結束 App 並直接由主畫面重新啟動後，session 均保持登入，重新整理仍收斂到相同 relationship、`active`、`2/2`。未記錄完整 Apple ID、使用者代碼、invitation token 或 relationship 代碼。此結果關閉本節身分、配對與冷啟動證據，不推論後續雙向資料、弱網或推播已通過。
+
+### B. 雙向資料與去重
+
+1. A 寫入一筆 marker、一筆 W1 測試訊息及一張非私人照片；B 以前景 Realtime 或明確重新整理取得資料。
+2. B 核對 marker／message／photo 短 token 與 A 相同；照片方向、比例與內容一致，沒有重複項目。
+3. B 以另一組 marker、message、photo 回寫，A 完成同樣核對。
+4. 兩台強制結束並重開，再次重新整理；雙方資料仍存在、最新順序一致，所有 Outbox 維持清空。
+
+2026-08-10 通過：A 寫入新的 marker、W1 測試訊息與非私人測試照片後，三種 Outbox 均清空；B 明確重新整理後取得相同短 token。B 以另一組 marker、message、photo 回寫後，A 亦取得相同 token。雙向照片方向與比例正常，沒有重複項目。兩台強制結束並重開後，marker 與 message 會隨既有 RLS refresh 自動出現；photo 必須明確點選 Storage 重新整理才載入，載入後內容與 token 正確，Outbox 仍為空且沒有復活。此結果關閉本節雙向資料、去重與重啟持久性證據；照片冷啟動不自動讀取是目前 W1 技術畫面的已知 UX 邊界，不推論為資料遺失，也不代表正式 App 已接受人工重新整理。
+
+### C. 頻繁弱網與跨啟動 Outbox
+
+依序執行下列五輪，每輪使用新的短 token，且前一輪雙方收斂後才開始下一輪：
+
+1. A 完全斷網，依序建立 marker、message、photo，確認三種 Outbox 都保留待送項目；保持斷網強制結束並重開 App，項目不得消失。
+2. A 恢復網路並讓前景 recovery 自動處理，不按人工重試；B 核對三種資料各只出現一次、順序一致，A 的 Outbox 全部清空。
+3. B 重複同一流程，讓 A 核對。
+4. 再執行三輪：由具行動網路的裝置分別測一次 Wi-Fi→行動網路與行動網路→Wi-Fi，另一台至少測一次 Wi-Fi 短暫完全中斷與恢復。沒有行動網路的裝置須記為該切換情境不適用，不得以假設標為通過。若三次有限退避耗盡，項目必須保留，下一次前景或 unavailable→available 才可繼續，不得建立重複資料。
+5. 任一輪若出現遺失、重複、錯序、舊 relationship 項目被送到目前 relationship，或成功後 Outbox 復活，即停止並記錄完整錯誤，不標示通過。
+
+2026-08-10 五輪通過：A 完全斷網後建立 marker、message、photo，三種 Outbox 均顯示待送；保持斷網強制結束並直接重開 App 後，三種待送項目仍存在，relationship 可由使用者隔離的本機快照顯示。A 保持前景恢復網路且不按人工重試或重新整理後，unavailable→available recovery 自動清空三種 Outbox；B 明確重新整理後取得相同 token 與順序，三種資料都只新增一次。第二輪交換由 B 執行相同流程，跨啟動保存、自動清空及 A 端單次收斂結果亦相同。第三輪由 A 排入三種待送項目，恢復網路後立即由 Wi-Fi 切至行動網路；Outbox 最終自動清空，B 端三種資料各新增一次且 token、順序與照片均正確。B 沒有行動網路，因此 B 的行動網路切換情境記為不適用而非通過；第四輪改由 B 在 Wi-Fi 恢復、開始處理 Outbox 後短暫完全中斷約 5 秒再恢復，三種 Outbox 最終自動清空，A 端各新增一次且資料正確。第五輪由 A 在行動網路恢復、開始處理 Outbox 後切至 Wi-Fi，三種 Outbox 同樣自動清空，B 端各新增一次且 token、順序與照片均正確。此結果關閉本節五輪 development 前景／跨啟動證據，不代表真正背景傳送、無限重試或正式長時間退避已完成。
+
+### D. Development 私人推播雙向送達
+
+1. A 將 App 置於背景，由 B 排入一筆泛化 W1 測試推播；A 應收到不含 sender、relationship、訊息或照片內容的通知。
+2. 將 A 的 App 完全終止後重測，再鎖定 A 重測；三種狀態都只能顯示相同泛化文案，點擊後由 App 重新讀取 RLS 資料。
+3. 交換 A、B 角色，至少完成 B 的背景、終止與鎖定三種狀態。
+4. 每一筆新工作只送達一次；若 Apple Watch 鏡像通知，只記錄為系統鏡像，不視為獨立 watchOS 功能。
+
+2026-08-11 雙向三種狀態均通過：兩支真實 iPhone 都成功允許通知並登記 sandbox APNs token，畫面顯示的不可逆短指紋互不相同；完整 token 未記錄。A 分別在 App 置於背景、完全終止及裝置鎖定時，由 B 各排入一筆新的泛化 W1 測試推播；交換角色後，B 在相同三種狀態亦分別收到 A 排入的新工作。六筆工作都各只送達一次「CoupleSpace 有新動態／打開 App 查看」，通知未顯示 sender、relationship、訊息或照片內容；由通知開啟 App 後可正常讀取 relationship 資料。這關閉 development sandbox 的兩支真實 iPhone 雙向送達證據，不代表 production／TestFlight 已通過。
+
+### 通過紀錄
+
+- A、B 的裝置型號、iOS 版本、相同 App build／commit 與測試時間。
+- A／B 使用不同 Apple 身分、相同 relationship、`2/2` 的匿名確認。
+- 雙向 marker／message／photo、五輪弱網／跨啟動 Outbox 與雙向 development 推播的逐項結果。
+- 任何失敗必須保留 Xcode／App 的完整錯誤碼與發生步驟；不得只以再次點擊成功覆蓋第一次失敗。
+
+全部通過後，只能把「Supabase development 的兩支真實 iPhone」與「development 雙向推播」改為已完成。production／TestFlight、實際低磁碟、大型封存、中斷點續傳及未決正式規格仍保持未通過。
+
 ## W1 尚未關閉
 
-- Supabase 路徑的兩支真實 iPhone、兩個 Apple ID 登入、配對、雙向資料與重啟證據。
+- Supabase 路徑的兩支真實 iPhone、兩個 Apple 身分登入、配對、雙向 marker／message／photo、冷啟動及五輪弱網／跨啟動 Outbox 證據已通過；照片冷啟動後仍需明確重新整理才顯示，屬目前 W1 技術畫面的已知接縫，不代表資料遺失。
 - 第三身分雲端拒絕已通過：遠端連線以不屬於目標 relationship 的 authenticated UUID 執行，relationship、memberships、shared items、personal archives 與 Storage objects 讀取皆為 0；marker、message、photo finalization 與解除配對 RPC 均回傳 `42501 relationship_not_accessible`。測後 relationship 仍為 active、probe rows 為 0，原有 5 筆照片 metadata／5 個 object 不變。這是受控遠端 RLS／RPC 證據，不等同第三個 Apple ID 的完整 UI 登入流程。
 - 照片 upload／closing orphan reconciliation、月 30 張／累積 1 GB 配額拒絕與 orphan 清理已通過；PD-022 已關閉保存生命週期，不做時間型自動刪除，配額或降級只阻止新增。本機 Outbox 寫入前的精確 bytes 容量預檢已通過，頻繁弱網與真機低磁碟／容量壓力仍待驗證，大圖／方向與最後引用 GC 已通過。
-- 推播 production／TestFlight 與兩支真實 iPhone 的送達實測；development sandbox 的接收者、背景／終止、鎖定畫面隱私與 Watch 鏡像已通過。
+- 推播 production／TestFlight 送達仍待實測；development sandbox 的兩支真實 iPhone 雙向接收者、背景／終止、鎖定畫面隱私已通過，既有 Watch 鏡像亦已通過但不視為獨立 watchOS 功能。
 - 個人封存匯出的正式格式、容量、大型真機壓力、實際低磁碟空間與中斷後續傳；version 1 資料夾候選的真機交付、小型封存內容核對、磁碟 staging／殘留清理及容量預檢純規則已通過，migration 013 已部署 Supabase 測試專案。
 - 正式訊息、照片畫質／正式額度、推播與背景重試的剩餘子決策；照片保存生命週期已由 PD-022 關閉，受管後端與共同資料系統紀錄已由 TD-001 關閉。
 - 登入／前景一次性 outbox recovery 與三次有限短退避已通過本機規則及真機 A＋Simulator B 的背景返回、強制結束後重啟、短暫斷線自動送達、耗盡停止保留與下一次前景恢復送達；前景 unavailable→available 觸發已通過 59 個 Simulator tests，以及真機 A＋Simulator B 的自動清空與只送達一次驗證。正式長時間退避、production 網路監聽與真正背景重試仍未決定。
