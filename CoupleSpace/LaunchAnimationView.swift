@@ -14,7 +14,7 @@ struct LaunchAnimationView: View {
 
     var body: some View {
         ZStack {
-            LaunchPalette.oatWhite
+            Color("LaunchBackground")
                 .ignoresSafeArea()
 
             VStack(spacing: 34) {
@@ -127,7 +127,6 @@ private enum LaunchPalette {
     // Provisional approximations until the brand color tokens are finalized.
     static let indigo = Color(red: 0.20, green: 0.14, blue: 0.27)
     static let coral = Color(red: 0.91, green: 0.43, blue: 0.35)
-    static let oatWhite = Color(red: 0.976, green: 0.957, blue: 0.929)
     static let amber = Color(red: 1.0, green: 0.72, blue: 0.31)
     static let window = Color(red: 1.0, green: 0.89, blue: 0.62)
 }

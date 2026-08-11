@@ -1,5 +1,8 @@
 import Foundation
 import Testing
+#if os(iOS)
+import UIKit
+#endif
 @testable import CoupleSpace
 
 struct AppSkeletonTests {
@@ -7,6 +10,15 @@ struct AppSkeletonTests {
         #expect(AppLaunchOptions(arguments: []).isUITesting == false)
         #expect(AppLaunchOptions(arguments: ["--other", "--ui-testing"]).isUITesting)
     }
+
+#if os(iOS)
+    @Test func systemAndInAppLaunchBackgroundShareTheNamedAsset() {
+        let launchScreen = Bundle.main.object(forInfoDictionaryKey: "UILaunchScreen") as? [String: Any]
+
+        #expect(launchScreen?["UIColorName"] as? String == "LaunchBackground")
+        #expect(UIColor(named: "LaunchBackground", in: .main, compatibleWith: nil) != nil)
+    }
+#endif
 
     @Test func appConfigurationLoadsExplicitRuntimeAndSupabaseSettings() throws {
         let configuration = try AppConfiguration(values: [
