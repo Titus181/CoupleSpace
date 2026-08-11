@@ -17,16 +17,16 @@ struct CoupleSpaceApp: App {
 
     init() {
         do {
-            let configuration = try SupabaseConfiguration.load()
-            supabaseClient = CoupleSpaceSupabaseClient.make(configuration: configuration)
+            let configuration = try AppConfiguration.load()
+            supabaseClient = CoupleSpaceSupabaseClient.make(configuration: configuration.supabase)
         } catch {
-            fatalError("Supabase client configuration is missing or invalid")
+            fatalError("App configuration is missing or invalid")
         }
     }
 
     var body: some Scene {
         WindowGroup {
-            ContentView(supabaseClient: supabaseClient)
+            ContentView()
         }
     }
 }

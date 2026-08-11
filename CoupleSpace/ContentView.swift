@@ -6,11 +6,8 @@
 //
 
 import SwiftUI
-import Supabase
 
 struct ContentView: View {
-    let supabaseClient: SupabaseClient
-
 #if os(iOS)
     @State private var isShowingLaunchAnimation = true
 #endif
@@ -18,7 +15,7 @@ struct ContentView: View {
     var body: some View {
 #if os(iOS)
         ZStack {
-            G1TechnicalSpikeView(supabaseClient: supabaseClient)
+            RootTabView()
                 .accessibilityIdentifier("main-content")
                 .accessibilityHidden(isShowingLaunchAnimation)
 
@@ -33,11 +30,11 @@ struct ContentView: View {
             }
         }
 #else
-        G1TechnicalSpikeView(supabaseClient: supabaseClient)
+        RootTabView()
 #endif
     }
 }
 
 #Preview {
-    ContentView(supabaseClient: CoupleSpaceSupabaseClient.preview)
+    ContentView()
 }

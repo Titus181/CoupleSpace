@@ -1,1 +1,5 @@
 #include? "Secrets.xcconfig"
+
+// Keep the checked-in build on the non-production backend until a production
+// environment is explicitly provisioned and validated.
+APP_ENVIRONMENT = development

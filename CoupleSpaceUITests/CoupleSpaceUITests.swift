@@ -34,6 +34,20 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testPrimaryNavigationStartsOnTodayAndSwitchesTabs() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["today-screen"].waitForExistence(timeout: 3))
+
+        app.tabBars.buttons["對話"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["conversation-screen"].waitForExistence(timeout: 1))
+
+        app.tabBars.buttons["我們"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["us-screen"].waitForExistence(timeout: 1))
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {
