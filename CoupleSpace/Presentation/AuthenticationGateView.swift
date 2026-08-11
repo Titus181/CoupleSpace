@@ -1,9 +1,11 @@
 import AuthenticationServices
+import Supabase
 import SwiftUI
 
 struct AuthenticationGateView: View {
     @ObservedObject var authModel: SupabaseAppleAuthenticationModel
     @ObservedObject var pairingModel: PairingModel
+    let supabaseClient: SupabaseClient
     let bypassesAuthentication: Bool
     let bypassesPairing: Bool
 
@@ -11,10 +13,11 @@ struct AuthenticationGateView: View {
         Group {
             if bypassesAuthentication {
                 if bypassesPairing {
-                    RootTabView()
+                    RootTabView(technicalValidationClient: supabaseClient)
                 } else {
                     PairingGateView(
                         model: pairingModel,
+                        supabaseClient: supabaseClient,
                         accountUserToken: nil,
                         accountStatusMessage: nil,
                         onSignOut: {}
@@ -32,6 +35,7 @@ struct AuthenticationGateView: View {
                 case .signedIn, .signingOut:
                     PairingGateView(
                         model: pairingModel,
+                        supabaseClient: supabaseClient,
                         accountUserToken: authModel.state.userToken,
                         accountStatusMessage: authModel.state.message == "已登入"
                             ? nil

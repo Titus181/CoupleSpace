@@ -6,11 +6,13 @@
 //
 
 import SwiftUI
+import Supabase
 
 struct ContentView: View {
 #if os(iOS)
     @ObservedObject private var authModel: SupabaseAppleAuthenticationModel
     @ObservedObject private var pairingModel: PairingModel
+    private let supabaseClient: SupabaseClient
     @State private var isShowingLaunchAnimation: Bool
     private let bypassesAuthentication: Bool
     private let bypassesPairing: Bool
@@ -18,12 +20,14 @@ struct ContentView: View {
     init(
         authModel: SupabaseAppleAuthenticationModel,
         pairingModel: PairingModel,
+        supabaseClient: SupabaseClient,
         showsLaunchAnimation: Bool = true,
         bypassesAuthentication: Bool = false,
         bypassesPairing: Bool = false
     ) {
         self.authModel = authModel
         self.pairingModel = pairingModel
+        self.supabaseClient = supabaseClient
         _isShowingLaunchAnimation = State(initialValue: showsLaunchAnimation)
         self.bypassesAuthentication = bypassesAuthentication
         self.bypassesPairing = bypassesPairing
@@ -32,6 +36,7 @@ struct ContentView: View {
     init(
         authModel: SupabaseAppleAuthenticationModel,
         pairingModel: PairingModel,
+        supabaseClient: SupabaseClient,
         showsLaunchAnimation: Bool = true,
         bypassesAuthentication: Bool = false,
         bypassesPairing: Bool = false
@@ -44,6 +49,7 @@ struct ContentView: View {
             AuthenticationGateView(
                 authModel: authModel,
                 pairingModel: pairingModel,
+                supabaseClient: supabaseClient,
                 bypassesAuthentication: bypassesAuthentication,
                 bypassesPairing: bypassesPairing
             )
@@ -73,6 +79,7 @@ struct ContentView: View {
             client: CoupleSpaceSupabaseClient.preview,
             initialState: .unpaired
         ),
+        supabaseClient: CoupleSpaceSupabaseClient.preview,
         showsLaunchAnimation: false
     )
 }

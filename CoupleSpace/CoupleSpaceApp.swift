@@ -45,6 +45,7 @@ struct CoupleSpaceApp: App {
             ContentView(
                 authModel: authModel,
                 pairingModel: pairingModel,
+                supabaseClient: supabaseClient,
                 showsLaunchAnimation: !launchOptions.isUITesting,
                 bypassesAuthentication: launchOptions.isUITesting,
                 bypassesPairing: launchOptions.isUITesting && !launchOptions.isPairingUITesting

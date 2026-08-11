@@ -62,7 +62,9 @@ last_updated: 2026-08-11
 - 成功配對後雙方可在帳號設定核對相同 relationship UUID 前 8 碼；這只是識別複驗，不是新的邀請碼或 client-side 授權來源。
 - iPhone Simulator target build 已通過；行為最後修改前的完整 suite 為 75／75，最後加入登入身分隔離與配對前登出後，affected unit、配對 UI 與三分頁 regression 亦以 `xcodebuild test` exit 0 完成。
 - 重建本機 Supabase、依序套用 migrations 001–014 後，完整 database suite 的 13 files／147 tests 全部通過，涵蓋拒絕、舊 token 不可接受、同一 relationship 輪替新 token，以及所有既有 RLS／資料生命週期 regression。
-- G4 尚未完成：migration 014 尚未部署 Supabase 測試專案，也尚未以兩支真實 iPhone 驗證建立／接受、拒絕後重試、自然失效後重試，以及雙方顯示同一 relationship。
+- migration 014 已部署 Supabase 測試專案；遠端 migration list 顯示 local／remote 001–014 一致，linked `public`／`extensions` schema lint 無錯誤。
+- Debug build 的帳號設定已恢復明確標示的「W1 技術驗證工具」入口，復用既有訊息、照片、配對與解除關係 spike 做真機回歸；正式三分頁不提前承載 W7–W9／W13 產品介面。帳號設定與配對前的登出確認改用標準 alert，避免錨定式浮窗。
+- G4 尚未完成：尚未以兩支真實 iPhone 驗證建立／接受、拒絕後重試、自然失效後重試，以及雙方顯示同一 relationship。
 
 ## 關鍵里程碑
 

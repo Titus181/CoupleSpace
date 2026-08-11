@@ -1,3 +1,4 @@
+import Supabase
 import SwiftUI
 
 struct RootTabView: View {
@@ -5,17 +6,20 @@ struct RootTabView: View {
     let accountUserToken: String?
     let accountStatusMessage: String?
     let relationshipToken: String?
+    let technicalValidationClient: SupabaseClient?
     let onSignOut: () -> Void
 
     init(
         accountUserToken: String? = nil,
         accountStatusMessage: String? = nil,
         relationshipToken: String? = nil,
+        technicalValidationClient: SupabaseClient? = nil,
         onSignOut: @escaping () -> Void = {}
     ) {
         self.accountUserToken = accountUserToken
         self.accountStatusMessage = accountStatusMessage
         self.relationshipToken = relationshipToken
+        self.technicalValidationClient = technicalValidationClient
         self.onSignOut = onSignOut
     }
 
@@ -34,6 +38,7 @@ struct RootTabView: View {
                     accountUserToken: accountUserToken,
                     accountStatusMessage: accountStatusMessage,
                     relationshipToken: relationshipToken,
+                    technicalValidationClient: technicalValidationClient,
                     onSignOut: onSignOut
                 )
             }
@@ -88,6 +93,7 @@ private struct UsView: View {
     let accountUserToken: String?
     let accountStatusMessage: String?
     let relationshipToken: String?
+    let technicalValidationClient: SupabaseClient?
     let onSignOut: () -> Void
 
     var body: some View {
@@ -124,6 +130,7 @@ private struct UsView: View {
                     userToken: accountUserToken,
                     statusMessage: accountStatusMessage,
                     relationshipToken: relationshipToken,
+                    technicalValidationClient: technicalValidationClient,
                     onSignOut: onSignOut
                 )
             }
@@ -135,9 +142,11 @@ private struct UsView: View {
 private struct AccountSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isConfirmingSignOut = false
+    @State private var isShowingTechnicalValidation = false
     let userToken: String?
     let statusMessage: String?
     let relationshipToken: String?
+    let technicalValidationClient: SupabaseClient?
     let onSignOut: () -> Void
 
     var body: some View {
@@ -169,6 +178,23 @@ private struct AccountSettingsView: View {
                     }
                 }
 
+#if DEBUG
+                if technicalValidationClient != nil {
+                    Section("開發測試") {
+                        Button {
+                            isShowingTechnicalValidation = true
+                        } label: {
+                            Label("W1 技術驗證工具", systemImage: "wrench.and.screwdriver")
+                        }
+                        .accessibilityIdentifier("w1-technical-tools")
+
+                        Text("可測試訊息、照片、配對、解除關係與個人封存；不屬於正式產品介面。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+#endif
+
                 Section {
                     Button("登出", role: .destructive) {
                         isConfirmingSignOut = true
@@ -182,10 +208,9 @@ private struct AccountSettingsView: View {
                     Button("完成") { dismiss() }
                 }
             }
-            .confirmationDialog(
+            .alert(
                 "要登出 CoupleSpace 嗎？",
-                isPresented: $isConfirmingSignOut,
-                titleVisibility: .visible
+                isPresented: $isConfirmingSignOut
             ) {
                 Button("登出", role: .destructive) {
                     onSignOut()
@@ -194,6 +219,13 @@ private struct AccountSettingsView: View {
             } message: {
                 Text("之後可使用同一個 Apple 帳號重新登入。")
             }
+#if DEBUG
+            .sheet(isPresented: $isShowingTechnicalValidation) {
+                if let technicalValidationClient {
+                    G1TechnicalSpikeView(supabaseClient: technicalValidationClient)
+                }
+            }
+#endif
         }
     }
 }

@@ -1,7 +1,9 @@
 import SwiftUI
+import Supabase
 
 struct PairingGateView: View {
     @ObservedObject var model: PairingModel
+    let supabaseClient: SupabaseClient
     let accountUserToken: String?
     let accountStatusMessage: String?
     let onSignOut: () -> Void
@@ -34,6 +36,7 @@ struct PairingGateView: View {
                     accountUserToken: accountUserToken,
                     accountStatusMessage: accountStatusMessage,
                     relationshipToken: relationship.displayToken,
+                    technicalValidationClient: supabaseClient,
                     onSignOut: onSignOut
                 )
             }
@@ -166,10 +169,9 @@ private struct PairingSetupView: View {
             } message: {
                 Text("邀請者之後可以建立新的邀請。")
             }
-            .confirmationDialog(
+            .alert(
                 "要登出 CoupleSpace 嗎？",
-                isPresented: $isConfirmingSignOut,
-                titleVisibility: .visible
+                isPresented: $isConfirmingSignOut
             ) {
                 Button("登出", role: .destructive) {
                     onSignOut()

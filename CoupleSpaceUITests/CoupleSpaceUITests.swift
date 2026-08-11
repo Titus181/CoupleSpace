@@ -49,6 +49,25 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testAccountSettingsUsesAnAlertAndKeepsW1ValidationToolsReachable() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        app.buttons["account-settings"].tap()
+
+        app.buttons["登出"].tap()
+        XCTAssertTrue(app.alerts["要登出 CoupleSpace 嗎？"].waitForExistence(timeout: 1))
+        app.alerts.buttons["取消"].tap()
+
+        let toolsButton = app.buttons["w1-technical-tools"]
+        XCTAssertTrue(toolsButton.waitForExistence(timeout: 1))
+        toolsButton.tap()
+        XCTAssertTrue(app.navigationBars["W1 技術驗證"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testPairingEntryRequiresACompleteInvitationCode() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-pairing"]
