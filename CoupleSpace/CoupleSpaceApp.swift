@@ -14,8 +14,11 @@ struct CoupleSpaceApp: App {
     @UIApplicationDelegateAdaptor(CloudKitShareAppDelegate.self) private var appDelegate
 #endif
     private let supabaseClient: SupabaseClient
+    private let launchOptions: AppLaunchOptions
 
     init() {
+        launchOptions = .current
+
         do {
             let configuration = try AppConfiguration.load()
             supabaseClient = CoupleSpaceSupabaseClient.make(configuration: configuration.supabase)
@@ -26,7 +29,7 @@ struct CoupleSpaceApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(showsLaunchAnimation: !launchOptions.isUITesting)
         }
     }
 }

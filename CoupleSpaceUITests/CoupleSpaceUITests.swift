@@ -36,6 +36,7 @@ final class CoupleSpaceUITests: XCTestCase {
     @MainActor
     func testPrimaryNavigationStartsOnTodayAndSwitchesTabs() throws {
         let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
         app.launch()
 
         XCTAssertTrue(app.descendants(matching: .any)["today-screen"].waitForExistence(timeout: 3))

@@ -9,7 +9,13 @@ import SwiftUI
 
 struct ContentView: View {
 #if os(iOS)
-    @State private var isShowingLaunchAnimation = true
+    @State private var isShowingLaunchAnimation: Bool
+
+    init(showsLaunchAnimation: Bool = true) {
+        _isShowingLaunchAnimation = State(initialValue: showsLaunchAnimation)
+    }
+#else
+    init(showsLaunchAnimation: Bool = true) {}
 #endif
 
     var body: some View {
@@ -36,5 +42,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(showsLaunchAnimation: false)
 }

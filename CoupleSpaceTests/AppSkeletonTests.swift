@@ -3,6 +3,11 @@ import Testing
 @testable import CoupleSpace
 
 struct AppSkeletonTests {
+    @Test func uiTestingLaunchOptionIsExplicitAndOrderIndependent() {
+        #expect(AppLaunchOptions(arguments: []).isUITesting == false)
+        #expect(AppLaunchOptions(arguments: ["--other", "--ui-testing"]).isUITesting)
+    }
+
     @Test func appConfigurationLoadsExplicitRuntimeAndSupabaseSettings() throws {
         let configuration = try AppConfiguration(values: [
             "AppEnvironment": "test",
