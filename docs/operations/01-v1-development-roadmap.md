@@ -40,7 +40,7 @@ last_updated: 2026-08-11
 | W2，8/10–8/16 | **G2 iPhone App 基礎骨架（已完成）** | 移除預設範例資料模型；建立「今天／對話／我們」三分頁、環境設定、領域模型與測試框架；iPhone target 可穩定建置與執行 |
 | W3，8/17–8/23 | **G3 帳號與使用者身分（已完成）** | 使用者可登入、登出，重新啟動後可恢復登入；取消與失敗狀態明確；不建立重複帳號 |
 | W4，8/24–8/30 | **G4 邀請與一對一配對（已完成）** | A 可邀請 B；B 接受後雙方看到同一段伴侶關係；一人只能有一個有效伴侶；邀請可拒絕、失效與重試 |
-| W5，8/31–9/6 | **G5 第一個 Moment 垂直切片** | 可建立心情、短句或照片 Moment；另一支手機能同步看到；Moment 自動進入共同時間線 |
+| W5，8/31–9/6 | **G5 第一個 Moment 垂直切片（已完成）** | 可建立心情、短句或照片 Moment；另一支手機能同步看到；Moment 自動進入共同時間線 |
 | W6，9/7–9/13 | **G6 Moment 雙向互動** | 支援 Emoji、短文字回應及固定題庫版「我們的一題」；雙方互動後形成完整 Moment |
 | W7，9/14–9/20 | **G6A 名稱與此刻狀態垂直切片** | G6 後先通過分開訪談與可點擊原型；本人可設定伴侶可見顯示名稱及 owner-only 伴侶稱呼；雙方可跨裝置看到本人主動設定、具期限的固定或自訂狀態，過期結果一致；只有明確選擇才同時建立 Moment，不提供在線、最後上線、觀看紀錄或完整動態牆 |
 | W8，9/21–9/27 | **G7 基本文字聊天** | 一對一文字訊息可跨裝置同步；顯示訊息時間與未讀數；不顯示已讀狀態 |
@@ -78,6 +78,15 @@ last_updated: 2026-08-11
 - migration 016 已部署 Supabase 測試專案；remote migration 001–016 一致，linked `extensions`／`public` schema lint 無錯誤。兩支真實 iPhone 已完成雙向心情、短句、照片同步、共同時間線順序／去重及強制結束後恢復。最終以全新 DerivedData 串行執行完整 iPhone scheme，73 個 unit tests 與 11 次 UI executions 全數通過，0 failure、0 skip，並產生完整 `.xcresult`；G5 正式完成。
 - 首次雙機驗證確認同步後，同時發現最新照片的 `Image` hit-test 區域會攔截上方「留下 Moment」按鈕。修正只停用 W5 純展示照片的 hit testing，未改資料層；新增預載照片的 UI regression，Simulator 以實際照片重現修正前無反應，修正後同位置點擊可再次開啟 composer。修正版部署兩支真機後，雙方均可正常再次開啟建立介面。
 - 真機共同時間線另發現 Moment 雖已保存 `creator_user_id`，畫面只顯示內容與時間，久後無法辨識由誰留下。現直接以登入 session UUID 比對既有建立者欄位，在雙方各自視角顯示「你留下的」或「對方留下的」，不新增暱稱／頭像或暴露帳號識別碼。修正版部署後，兩支真實 iPhone 已確認同一筆 Moment 在建立者端顯示「你留下的」、另一端顯示「對方留下的」，且「今天」與「我們」標示一致；建立者判斷 regression 已納入本輪 73 個 unit tests。
+
+### G6 本機實作證據（2026-08-11，待遠端與雙真機 gate）
+
+- 正式 Moment domain 與卡片已加入六個固定 Emoji、最多 80 字短文字回應，以及固定四題、每份最多 280 字的「我們的一題」。一般 Moment 只由非建立者伴侶留一筆回應；題目由發起者先答，第二位回答前不顯示第一份內容，完成後雙方在同一張卡片共同揭曉。
+- migration 017 新增 `moment_responses`、`moment_question_answers`、固定題庫、Question Moment 欄位、Security Definer RPC、relationship RLS 與 Realtime publication。答案揭曉由 RLS 執行，不只靠 SwiftUI 隱藏；第三人、直接 DML、自己回應自己、非 active `2/2` relationship、內容越界及 client identity 碰撞均拒絕。
+- 回應、回答與題目建立的失敗重試會在內容不變時沿用 stable client UUID；正式持久 Outbox、背景傳送、長時間退避、推播與分析事件仍依後續目標處理，未提前納入 W6。
+- 本機 Supabase 已由空資料庫依序套用 migrations 001–017；完整 16 files／201 pgTAP tests 與 local `extensions`／`public` schema lint 通過。
+- 以全新 DerivedData 串行執行完整 iPhone scheme，76 個 unit tests、11 個一般 UI tests 及四組 launch matrix 共 91 次 test executions 全數通過，0 failure、0 skip；`.xcresult` 摘要記錄 88 個測試定義，動態 launch 參數展開後為 91 次執行。Xcode 26.5 仍輸出既有 LLDB `DebuggerVersionStore.StoreError`／`no debugger version` 警告，但 runner 完整進入 `xctest`、產生結果並以 exit 0 結束。
+- G6 尚未標記完成：migration 017 尚未部署 Supabase 測試專案，也尚未以兩支真實 iPhone 驗證雙向 Emoji／短文字、第一份答案不可見、第二份回答後共同揭曉、Realtime 收斂及強制結束後恢復。完成這一次集中 gate 後才能關閉 M1。
 
 ## 關鍵里程碑
 
