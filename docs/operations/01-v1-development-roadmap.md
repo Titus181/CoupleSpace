@@ -67,6 +67,17 @@ last_updated: 2026-08-11
 - 兩支真機同時各自建立邀請時，會形成兩段各一人的 active relationship，雙方因一人只能有一個 active membership 而無法接受另一份邀請。migration 015 與 App 已加入「取消我的邀請」恢復路徑：只允許建立者刪除未接受、單人成員且完全沒有共同資料／照片／封存／push job 的空白邀請關係；真機已完成其中一方取消後回到未配對、拒絕另一方邀請，以及邀請者在同一 relationship 輪替新 token。
 - 兩支真機另以授權的測試專案單筆 `expires_at` 調整，控制式觸發與自然逾時相同的伺服器失效判斷；App 的「檢查並重試邀請」在原 relationship 內把 token 由 `614895a0…` 輪替為 `f4221447…`，並延後一小時。這是控制式過期證據，不宣稱實際等待一小時。B 接受新 token 後，雙方均進入三分頁並在帳號設定看到相同 relationship `632fd4c5…`。G4 完成。
 
+### G5 本機實作進度（2026-08-11，`in_progress`）
+
+- 已建立最小 Moment domain：固定心情、最長 280 字短句與單張照片；Emoji／短文字回應及「我們的一題」仍留在 W6，不提前實作。
+- 「今天」提供 Moment 建立入口並顯示最新一筆；「我們」以同一個 `MomentModel` 顯示共同時間線，不另建第二份本機時間線資料。
+- migration 016 新增 relationship-scoped `moments`、伺服器驗證且可依 stable client UUID 冪等重試的建立 RPC、current-member RLS、active relationship 寫入限制、私有 Moment photo bucket 與 Realtime publication。照片先沿用 W1 已驗證的縮放、重新編碼及 metadata 移除處理；W8 才關閉正式持久 Outbox、離線重送與傳送狀態。
+- 本機 Supabase 已由空資料庫依序套用 migrations 001–016；完整 15 files／174 pgTAP tests 與 local `extensions`／`public` schema lint 通過。新增的 18 cases 涵蓋心情／短句／照片、文字正規化與長度、同 identity 重試去重、內容碰撞、Storage owner／bytes 核對、第三人隔離及 closing 拒絕新增。
+- iPhone Simulator target build 與包含 unit／UI tests 的 `build-for-testing` 通過；已安裝並以 `--ui-testing` 啟動 Simulator App，目視確認「今天」空狀態與「留下 Moment」入口。兩次 runtime test 嘗試均停在 runner 啟動前，出現 LLDB `DebuggerVersionStore.StoreError`／`no debugger version`，未進入 `xctest`，因此不列為 runtime test 通過。
+- migration 016 已部署 Supabase 測試專案；remote migration 001–016 一致，linked `extensions`／`public` schema lint 無錯誤。兩支真實 iPhone 已完成雙向心情、短句、照片同步、共同時間線順序／去重及強制結束後恢復；fresh automated runtime suite 仍受本機 Xcode runner 阻擋，因此 G5 暫不標示完成。
+- 首次雙機驗證確認同步後，同時發現最新照片的 `Image` hit-test 區域會攔截上方「留下 Moment」按鈕。修正只停用 W5 純展示照片的 hit testing，未改資料層；新增預載照片的 UI regression，Simulator 以實際照片重現修正前無反應，修正後同位置點擊可再次開啟 composer。修正版部署兩支真機後，雙方均可正常再次開啟建立介面。
+- 真機共同時間線另發現 Moment 雖已保存 `creator_user_id`，畫面只顯示內容與時間，久後無法辨識由誰留下。現直接以登入 session UUID 比對既有建立者欄位，在雙方各自視角顯示「你留下的」或「對方留下的」，不新增暱稱／頭像或暴露帳號識別碼。修正版部署後，兩支真實 iPhone 已確認同一筆 Moment 在建立者端顯示「你留下的」、另一端顯示「對方留下的」，且「今天」與「我們」標示一致。test bundle build 已通過，單一 runtime regression 仍停在相同 runner 啟動問題、未進入 `xctest`。
+
 ## 關鍵里程碑
 
 ### M0：技術方案可行（W1）

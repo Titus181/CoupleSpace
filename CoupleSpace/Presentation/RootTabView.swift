@@ -3,6 +3,7 @@ import SwiftUI
 
 struct RootTabView: View {
     @State private var selection = PrimarySection.defaultSelection
+    @StateObject private var momentModel: MomentModel
     let accountUserToken: String?
     let accountStatusMessage: String?
     let relationshipToken: String?
@@ -12,6 +13,7 @@ struct RootTabView: View {
     init(
         accountUserToken: String? = nil,
         accountStatusMessage: String? = nil,
+        relationshipID: UUID? = nil,
         relationshipToken: String? = nil,
         technicalValidationClient: SupabaseClient? = nil,
         onSignOut: @escaping () -> Void = {}
@@ -21,12 +23,44 @@ struct RootTabView: View {
         self.relationshipToken = relationshipToken
         self.technicalValidationClient = technicalValidationClient
         self.onSignOut = onSignOut
+        if let relationshipID, let technicalValidationClient {
+            _momentModel = StateObject(
+                wrappedValue: MomentModel(
+                    service: SupabaseMomentService(
+                        client: technicalValidationClient,
+                        relationshipID: relationshipID
+                    )
+                )
+            )
+        } else {
+            let service: InMemoryMomentService
+            if ProcessInfo.processInfo.arguments.contains("--ui-testing-photo-moment"),
+               let photoData = Data(base64Encoded:
+                   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+               ) {
+                let momentID = UUID(uuidString: "B1000000-0000-0000-0000-000000000099")!
+                service = InMemoryMomentService(
+                    moments: [Moment(
+                        id: momentID,
+                        creatorUserID: UUID(),
+                        content: .photo,
+                        createdAt: .now
+                    )],
+                    photoDataByMomentID: [momentID: photoData]
+                )
+            } else {
+                service = InMemoryMomentService()
+            }
+            _momentModel = StateObject(
+                wrappedValue: MomentModel(service: service)
+            )
+        }
     }
 
     var body: some View {
         TabView(selection: $selection) {
             Tab("今天", systemImage: "sun.max", value: PrimarySection.today) {
-                TodayView()
+                TodayMomentView(model: momentModel)
             }
 
             Tab("對話", systemImage: "bubble.left.and.bubble.right", value: PrimarySection.conversation) {
@@ -35,6 +69,7 @@ struct RootTabView: View {
 
             Tab("我們", systemImage: "person.2", value: PrimarySection.us) {
                 UsView(
+                    momentModel: momentModel,
                     accountUserToken: accountUserToken,
                     accountStatusMessage: accountStatusMessage,
                     relationshipToken: relationshipToken,
@@ -44,33 +79,10 @@ struct RootTabView: View {
             }
         }
         .tint(.accentColor)
-    }
-}
-
-private struct TodayView: View {
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("再忙，也能每天留一點位置給彼此。")
-                            .font(.title2.weight(.semibold))
-                        Text("把零碎日常，慢慢變成我們的生活。")
-                            .foregroundStyle(.secondary)
-                    }
-
-                    ContentUnavailableView {
-                        Label("Moment・此刻", systemImage: "sparkles")
-                    } description: {
-                        Text("之後可以在這裡留下心情、照片或一句話。")
-                    }
-                    .frame(maxWidth: .infinity, minHeight: 280)
-                }
-                .padding()
-            }
-            .navigationTitle("今天")
+        .task { await momentModel.start() }
+        .onDisappear {
+            Task { await momentModel.stop() }
         }
-        .accessibilityIdentifier("today-screen")
     }
 }
 
@@ -90,6 +102,7 @@ private struct ConversationView: View {
 
 private struct UsView: View {
     @State private var isShowingAccountSettings = false
+    @ObservedObject var momentModel: MomentModel
     let accountUserToken: String?
     let accountStatusMessage: String?
     let relationshipToken: String?
@@ -98,13 +111,8 @@ private struct UsView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 12) {
-                ContentUnavailableView(
-                    "我們的生活",
-                    systemImage: "person.2",
-                    description: Text("共同時間線、日程與收藏會慢慢累積在這裡。")
-                )
-
+            VStack(spacing: 0) {
+                MomentTimelineView(model: momentModel)
                 if let accountStatusMessage {
                     Text(accountStatusMessage)
                         .font(.footnote)

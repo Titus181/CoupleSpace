@@ -35,6 +35,7 @@ struct PairingGateView: View {
                 RootTabView(
                     accountUserToken: accountUserToken,
                     accountStatusMessage: accountStatusMessage,
+                    relationshipID: relationship.id,
                     relationshipToken: relationship.displayToken,
                     technicalValidationClient: supabaseClient,
                     onSignOut: onSignOut

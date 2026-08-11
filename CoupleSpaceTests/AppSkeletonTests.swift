@@ -47,6 +47,53 @@ struct AppSkeletonTests {
         #expect(PrimarySection.defaultSelection == .today)
     }
 
+    @Test func momentDraftNormalizesShortTextAndRejectsInvalidContent() {
+        #expect(MomentDraftPolicy.normalizedText("  想到你  ") == "想到你")
+        #expect(MomentDraftPolicy.normalizedText(" \n\t ") == nil)
+        #expect(MomentDraftPolicy.normalizedText(
+            String(repeating: "a", count: MomentDraftPolicy.maximumTextLength + 1)
+        ) == nil)
+        #expect(MomentMood.allCases.map(\.rawValue) == [
+            "calm", "happy", "tired", "thinking_of_you", "need_hug",
+        ])
+    }
+
+    @MainActor
+    @Test func momentModelLoadsCreatesAndRefreshesFromRemoteChanges() async throws {
+        let first = Moment(
+            id: UUID(uuidString: "B1000000-0000-0000-0000-000000000001")!,
+            creatorUserID: UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!,
+            content: .mood(.calm),
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let service = MomentRemoteServiceFake(moments: [first])
+        let model = MomentModel(service: service)
+
+        #expect(model.authorLabel(for: first) == "留下者未確認")
+        await model.start()
+        #expect(model.moments == [first])
+        #expect(model.authorLabel(for: first) == "你留下的")
+        #expect(service.isObserving)
+
+        #expect(await model.create(.text("  今天看到漂亮的天空  ")))
+        #expect(model.moments.first?.content == .text("今天看到漂亮的天空"))
+        #expect(service.createdDrafts == [.text("  今天看到漂亮的天空  ")])
+
+        let partnerMoment = Moment(
+            id: UUID(uuidString: "B1000000-0000-0000-0000-000000000003")!,
+            creatorUserID: UUID(uuidString: "00000000-0000-0000-0000-0000000000B2")!,
+            content: .mood(.happy),
+            createdAt: Date(timeIntervalSince1970: 300)
+        )
+        service.moments.insert(partnerMoment, at: 0)
+        await service.sendChange()
+        #expect(model.moments.first == partnerMoment)
+        #expect(model.authorLabel(for: partnerMoment) == "對方留下的")
+
+        await model.stop()
+        #expect(!service.isObserving)
+    }
+
     @Test func authenticationStateDistinguishesRestoreCancelFailureAndSignOut() {
         if case .checking = AuthenticationState.checking.phase {} else {
             Issue.record("The initial authentication state should restore the session first.")
@@ -240,4 +287,56 @@ private final class SuspendedPairingRemoteServiceFake: PairingRemoteServing {
     func declineInvitation(token: UUID) async throws {}
 
     func cancelInvitation() async throws {}
+}
+
+@MainActor
+private final class MomentRemoteServiceFake: MomentRemoteServing {
+    private let userID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+    var moments: [Moment]
+    var createdDrafts: [MomentDraft] = []
+    var isObserving = false
+    private var onChange: (@MainActor () async -> Void)?
+
+    init(moments: [Moment]) {
+        self.moments = moments
+    }
+
+    func currentUserID() async throws -> UUID { userID }
+
+    func fetchMoments() async throws -> [Moment] { moments }
+
+    func createMoment(_ draft: MomentDraft, clientID: UUID) async throws -> Moment {
+        createdDrafts.append(draft)
+        let content: MomentContent
+        switch draft {
+        case let .mood(mood): content = .mood(mood)
+        case let .text(value):
+            content = .text(try #require(MomentDraftPolicy.normalizedText(value)))
+        case .photo: content = .photo
+        }
+        let moment = Moment(
+            id: clientID,
+            creatorUserID: userID,
+            content: content,
+            createdAt: Date(timeIntervalSince1970: 200)
+        )
+        moments.insert(moment, at: 0)
+        return moment
+    }
+
+    func photoData(for momentID: UUID) async throws -> Data { Data() }
+
+    func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
+        isObserving = true
+        self.onChange = onChange
+    }
+
+    func stopObservingChanges() async {
+        isObserving = false
+        onChange = nil
+    }
+
+    func sendChange() async {
+        await onChange?()
+    }
 }

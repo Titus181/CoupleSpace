@@ -49,6 +49,43 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testCreatesShortTextMomentAndShowsItInSharedTimeline() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+
+        XCTAssertTrue(app.buttons["create-moment"].waitForExistence(timeout: 3))
+        app.buttons["create-moment"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["moment-composer"].waitForExistence(timeout: 1))
+
+        app.buttons["一句話"].tap()
+        let editor = app.textViews["moment-text"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 1))
+        editor.tap()
+        editor.typeText("今天看到漂亮的天空")
+        app.buttons["save-moment"].tap()
+
+        XCTAssertTrue(app.staticTexts["今天看到漂亮的天空"].waitForExistence(timeout: 2))
+        app.tabBars.buttons["我們"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["moment-timeline"].waitForExistence(timeout: 1))
+        XCTAssertTrue(app.staticTexts["今天看到漂亮的天空"].exists)
+    }
+
+    @MainActor
+    func testPhotoMomentDoesNotBlockOpeningComposerAgain() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-photo-moment"]
+        app.launch()
+
+        XCTAssertTrue(app.images["moment-card"].waitForExistence(timeout: 3))
+        app.buttons["create-moment"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["moment-composer"].waitForExistence(timeout: 1),
+            "A displayed photo must not intercept taps intended for the Moment button."
+        )
+    }
+
+    @MainActor
     func testAccountSettingsUsesAnAlertAndKeepsW1ValidationToolsReachable() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
