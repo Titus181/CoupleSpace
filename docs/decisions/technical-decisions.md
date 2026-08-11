@@ -1,7 +1,7 @@
 ---
 title: 技術決策紀錄
 status: active
-last_updated: 2026-08-07
+last_updated: 2026-08-11
 ---
 
 # 技術決策紀錄
@@ -40,13 +40,14 @@ last_updated: 2026-08-07
 - 三筆 FIFO photo outbox 已通過斷網 enqueue、強制結束 App、恢復網路、單次 drain、順序一致與跨裝置可見性驗證。
 - 最近一次伺服器確認的 relationship 識別、狀態與成員數可依使用者保存為唯讀顯示快照；快照不得取代 session、RPC 或 RLS 授權。
 - relationship closing、禁止新增、雙份 owner-isolated archive、獨立刪除及最後引用 Storage GC 已通過雲端實測。
+- 兩支真實 iPhone、兩個不同 Apple 身分已完成 development 登入、配對、雙向 marker／message／photo、五輪弱網／跨啟動 Outbox，以及雙向背景／終止／鎖定 sandbox 推播實測。
 - CloudKit Sharing 的 owner／participant 權限無法單獨保證 PD-011 要求的對等封存權，因此不符合正式共同資料來源的硬性條件。
 
 #### 本決策不會一併定案
 
 - 正式訊息、Moment、共同約定及其討論的完整資料模型。
 - 照片的確切上市額度、顯示尺寸、壓縮品質、正式 upload queue、自動重試與清理細節；PD-019 已確認產品只需共同回顧畫質、不提供原始畫質備份，PD-021 的 30 張／1 GB 研究邊界及拒絕清理已通過 W1 遠端實測，但尚未成為永久上市規格。PD-022 已接受不按時間自動到期，並沿用 relationship／個人封存／明確刪除／最後引用 GC 的既有生命週期。
-- APNs device token、推播 worker、背景喚醒及鎖定畫面實測細節。
+- production／TestFlight 的 APNs token、worker、送達與鎖定畫面實測細節；development sandbox 的兩支真實 iPhone 雙向背景／終止／鎖定送達已通過。
 - 個人封存的正式匯出格式、交付方式與大型資料處理；W1 已有 version 1 JSON manifest＋UUID JPEG 資料夾候選，以及依封存照片 byte size 執行的下載前暫存容量預檢，但尚未接受為最終產品契約，也未完成大型真機與低磁碟實測。
 - outbox 的正式自動排程、長時間退避、production 網路監聽、背景執行與正式訊息長佇列上限；W1 只保留「登入、回到前景或前景中觀察到離線→連線後，active relationship 立即嘗試，失敗後以 1 秒、4 秒延遲再試，合計最多三次」的可撤換候選。此候選已通過真機 A＋Simulator B 的短暫斷線、上限停止保留、下一次前景恢復，以及前景離線→連線後自動清空且只送達一次實測。
 - Firebase 作為事故備援或未來替代方案；v1 不為未採用的第二套後端預建 adapter。
@@ -55,7 +56,7 @@ last_updated: 2026-08-07
 
 - `ARCHITECTURE.md` 可將帳號、共同資料、同步與資料生命週期由 provisional 候選更新為上述責任邊界。
 - W1 後續只需關閉 Supabase 路徑的剩餘風險，不再為 CloudKit Sharing 補做兩支真機的正式架構證據。
-- G1 與 M0 仍不得標示通過，直到照片頻繁弱網與大型真機壓力、production／TestFlight 推播，以及必要的兩支真實 iPhone 證據完成；照片保存生命週期、第三身分雲端拒絕與 development 推播隱私已通過。
+- G1 與 M0 於 2026-08-11 通過，可進入 W2。production／TestFlight 推播、大型封存、實際低磁碟與中斷續傳保留為 G13／G15 release gates，不作為 Supabase 架構可行性的循環前置條件。
 - CloudKit Sharing PoC 保留為實驗紀錄；正式 App 不進行雙寫、資料遷移或 fallback，以避免衝突與不一致的所有權語意。
 
 #### 替代方案

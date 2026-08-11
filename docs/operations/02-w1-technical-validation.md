@@ -1,7 +1,7 @@
 ---
 title: W1 技術驗證紀錄
-status: in_progress
-last_updated: 2026-08-10
+status: complete
+last_updated: 2026-08-11
 ---
 
 # W1 技術驗證紀錄
@@ -10,15 +10,15 @@ last_updated: 2026-08-10
 
 W1 不先完成正式產品功能。先以最小真機 spike 驗證最大未知數，再依結果接受或否決候選方案。
 
-2026-08-06 已接受 TD-001：Supabase 是 iPhone v1 使用者身分、伴侶關係、共同資料與資料生命週期的唯一遠端系統紀錄；CloudKit Sharing 保留為實驗證據，不進行雙寫。PD-022 已接受照片不按時間自動到期，並沿用 active relationship、owner-only 個人封存、明確刪除與最後引用 GC 的既有生命週期。個人封存匯出候選已通過真機交付與內容核對，但匯出大型資料、production 推播與必要真機證據仍未完成，因此 G1 與 M0 尚未通過。
+2026-08-06 已接受 TD-001：Supabase 是 iPhone v1 使用者身分、伴侶關係、共同資料與資料生命週期的唯一遠端系統紀錄；CloudKit Sharing 保留為實驗證據，不進行雙寫。PD-022 已接受照片不按時間自動到期，並沿用 active relationship、owner-only 個人封存、明確刪除與最後引用 GC 的既有生命週期。2026-08-11 完成兩支真實 iPhone 的 development 登入、配對、雙向資料、五輪弱網／跨啟動 Outbox 與雙向推播後，G1 與 M0 正式通過；大型封存、production／TestFlight 推播、實際低磁碟與中斷續傳保留為 G13／G15 release gates。
 
 ## 候選方案狀態
 
 | 閘門 | TD-001 已接受方向 | 驗證狀態 | 尚未關閉的風險 |
 | --- | --- | --- | --- |
-| 身分與配對 | Sign in with Apple credential 交由 Supabase Auth；Postgres constraint、RLS 與 RPC 管理一對一 relationship | 真機 A＋Simulator B、兩個 Apple ID 的登入、配對、session 恢復與雙向 RLS 初步通過；遠端測試專案的第三 authenticated UUID 對 relationship、memberships、shared items、personal archives 與 Storage 均不可見，四種敏感 RPC 亦拒絕 | 兩支真實 iPhone 待驗證 |
-| 同步與聊天 | Realtime 只作變更提示並重新經 RLS 讀取；client UUID、server timestamp 與持久 outbox 提供冪等和穩定順序 | 單筆及三筆 FIFO marker metadata outbox 的斷網、重啟、重連、順序與雙裝置一致性通過；message／marker 各 100 筆本機持久化與完整 FIFO drain regression 通過 | 正式訊息內容、長佇列真機壓力、自動排程與弱網仍待驗證 |
-| 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理；不按時間自動到期 | 真機 A＋Simulator B 雙向讀寫、重啟恢復、封存唯讀與最後引用 GC 通過；三張持久 FIFO upload outbox 的斷網、跨啟動、重送與順序通過，另有 32 筆本機檔案持久化／FIFO drain regression；實際 JPEG regression 證明大圖縮放、方向正規化與 GPS 移除，真機高解析直向照片跨裝置方向／比例亦通過；closing orphan reconciliation、月 30 張／累積 1 GB 配額與拒絕後 orphan 清理均通過遠端實測；PD-022 的保存政策與既有 lifecycle 一致，不需 migration | 頻繁弱網與真機容量壓力待驗證 |
+| 身分與配對 | Sign in with Apple credential 交由 Supabase Auth；Postgres constraint、RLS 與 RPC 管理一對一 relationship | 兩支真實 iPhone、兩個 Apple 身分的登入、配對、session 恢復與相同 active `2/2` relationship 已通過；遠端第三 authenticated UUID 對 relationship、memberships、shared items、personal archives 與 Storage 均不可見，四種敏感 RPC 亦拒絕 | 正式登入／邀請 UX 於 G3／G4 完成 |
+| 同步與聊天 | Realtime 只作變更提示並重新經 RLS 讀取；client UUID、server timestamp 與持久 outbox 提供冪等和穩定順序 | 兩支真實 iPhone 的雙向 marker／message、冷啟動、五輪弱網／跨啟動 Outbox 與去重已通過；message／marker 各 100 筆本機持久化與完整 FIFO drain regression 通過 | 正式資料模型、長佇列真機壓力與長時間／背景排程於後續垂直切片完成 |
+| 照片 | 裝置端重新編碼後存入 Supabase 私有 Storage；metadata 經 relationship RLS 管理；不按時間自動到期 | 兩支真實 iPhone 的雙向照片、五輪弱網／跨啟動 Outbox、方向／比例與去重已通過；32 筆本機 FIFO、實際 JPEG 縮放／方向／GPS 移除、closing orphan reconciliation、月 30 張／累積 1 GB 拒絕清理及最後引用 GC 亦通過 | 正式畫質／額度、真機低磁碟與容量壓力於後續垂直切片及 release gate 完成 |
 | 推播 | 伺服器驗證 relationship／recipient 後才送出泛化 APNs 文案；App 收到提示後重新讀取 | migrations 009／010、APNs secrets 與 Edge sender 已部署；兩支真實 iPhone 的雙向背景、終止與鎖定 development sandbox 通知皆成功，既有 Watch 鏡像通知亦成功 | 仍需 production／TestFlight 證據 |
 | 所有權與解除配對 | Supabase 伺服器建立雙份 owner-isolated 唯讀封存，兩人可獨立刪除或匯出 | closing、雙份封存、archived photo、owner-only 獨立刪除與最後引用 Storage GC 的雲端實測通過；version 1 manifest＋JPEG 資料夾候選通過真機交付核對，64 張／4 MiB 合成照片磁碟 staging、部分 staging 清理與下載前容量預檢 regression 通過；migration 013 已部署測試專案 | 最終格式、大型真機壓力、實際低磁碟空間與中斷後續傳待驗證 |
 | 核心雙向互動與聊天活躍 | PD-020 將同一 Moment／題目／共同約定內的雙方參與定義為核心雙向互動；同週雙方各至少一則聊天訊息另列聊天活躍。完整內容留在產品資料／私有 Storage，分析事件只保存內容參照與必要 metadata | 純規則涵蓋單方重複、混合物件、重複內容參照、第二位參與完成時間、週期邊界與雙方聊天；編碼 regression 確認沒有私密內容欄位 | 雲端彙整事件尚未實作；產品資料與 Storage 的備份／還原及演練另列 release gate |
@@ -499,7 +499,7 @@ W1 純規則使用 opaque content reference，而不是複製內容。完整文�
 
 全部通過後，只能把「Supabase development 的兩支真實 iPhone」與「development 雙向推播」改為已完成。production／TestFlight、實際低磁碟、大型封存、中斷點續傳及未決正式規格仍保持未通過。
 
-## W1 尚未關閉
+## W1 已關閉與後續 release gates
 
 - Supabase 路徑的兩支真實 iPhone、兩個 Apple 身分登入、配對、雙向 marker／message／photo、冷啟動及五輪弱網／跨啟動 Outbox 證據已通過；照片冷啟動後仍需明確重新整理才顯示，屬目前 W1 技術畫面的已知接縫，不代表資料遺失。
 - 第三身分雲端拒絕已通過：遠端連線以不屬於目標 relationship 的 authenticated UUID 執行，relationship、memberships、shared items、personal archives 與 Storage objects 讀取皆為 0；marker、message、photo finalization 與解除配對 RPC 均回傳 `42501 relationship_not_accessible`。測後 relationship 仍為 active、probe rows 為 0，原有 5 筆照片 metadata／5 個 object 不變。這是受控遠端 RLS／RPC 證據，不等同第三個 Apple ID 的完整 UI 登入流程。
@@ -509,4 +509,4 @@ W1 純規則使用 opaque content reference，而不是複製內容。完整文�
 - 正式訊息、照片畫質／正式額度、推播與背景重試的剩餘子決策；照片保存生命週期已由 PD-022 關閉，受管後端與共同資料系統紀錄已由 TD-001 關閉。
 - 登入／前景一次性 outbox recovery 與三次有限短退避已通過本機規則及真機 A＋Simulator B 的背景返回、強制結束後重啟、短暫斷線自動送達、耗盡停止保留與下一次前景恢復送達；前景 unavailable→available 觸發已通過 59 個 Simulator tests，以及真機 A＋Simulator B 的自動清空與只送達一次驗證。正式長時間退避、production 網路監聽與真正背景重試仍未決定。
 
-在上述證據完成前，G1 與 M0 維持未通過，不進入大量功能實作。
+G1 與 M0 已於 2026-08-11 通過，可進入 W2。上列未決正式規格與 release 壓力情境必須在對應垂直切片及 G13／G15 關閉，不得因 W1 通過而推論為已完成。
