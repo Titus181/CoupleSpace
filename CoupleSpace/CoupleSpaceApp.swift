@@ -15,13 +15,18 @@ struct CoupleSpaceApp: App {
 #endif
     private let supabaseClient: SupabaseClient
     private let launchOptions: AppLaunchOptions
+    @StateObject private var authModel: SupabaseAppleAuthenticationModel
 
     init() {
         launchOptions = .current
 
         do {
             let configuration = try AppConfiguration.load()
-            supabaseClient = CoupleSpaceSupabaseClient.make(configuration: configuration.supabase)
+            let client = CoupleSpaceSupabaseClient.make(configuration: configuration.supabase)
+            supabaseClient = client
+            _authModel = StateObject(
+                wrappedValue: SupabaseAppleAuthenticationModel(client: client)
+            )
         } catch {
             fatalError("App configuration is missing or invalid")
         }
@@ -29,7 +34,11 @@ struct CoupleSpaceApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView(showsLaunchAnimation: !launchOptions.isUITesting)
+            ContentView(
+                authModel: authModel,
+                showsLaunchAnimation: !launchOptions.isUITesting,
+                bypassesAuthentication: launchOptions.isUITesting
+            )
         }
     }
 }

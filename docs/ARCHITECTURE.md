@@ -17,6 +17,7 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 - TD-001 已接受 Supabase 作為 iPhone v1 使用者身分、伴侶關係、共同資料與資料生命週期的唯一遠端系統紀錄；正式 App 不使用 CloudKit／Supabase 雙寫。
 - G1／M0 已於 2026-08-11 通過：兩支真實 iPhone、兩個 Apple 身分完成 development 登入、配對、雙向 marker／message／photo、五輪弱網／跨啟動 Outbox 與雙向背景／終止／鎖定 sandbox 推播。production／TestFlight、大型封存、實際低磁碟與中斷續傳留在 G13／G15 release gates，不阻擋 W2。
 - `CoupleSpace/` 已完成 W2 最小產品骨架：正式入口預設進入「今天」，底部只保留「今天／對話／我們」三分頁；預設 SwiftData `Item` 已移除，W1 Supabase spike 保留為技術證據與後續資料層基礎，不再作為正式 App 首頁。
+- G3／W3 已於 2026-08-11 通過。W1 驗證過的 Supabase Sign in with Apple session 已接入正式 App composition：啟動先等待本機 session 恢復，未登入才顯示 Apple 登入；取消與失敗可明確重試，登出需使用者確認，登出失敗時不會把仍有效的 session 誤判為已登出。App 不另建 client-side 帳號資料列，同一 Apple／Supabase identity 沿用同一 user UUID；帳號設定只顯示 UUID 前 8 碼供同帳號複驗。真機已通過取消、登入、登出、強制結束後 session 恢復、離線入口停用與提示，以及同一 Apple 帳號登出再登入後識別碼不變；Apple 登入按鈕維持 50pt 高度。iPhone target build、7 個 affected tests、Harness 與 diff check 均通過。
 - App composition 會先驗證明確的 runtime environment 與 Supabase 設定；checked-in build 維持 development environment，production 尚未明確配置前不會被默認為正式環境。
 - `CoupleSpaceTests/` 已涵蓋 W2 runtime environment、核心分頁順序／預設入口，以及 W1 設定、登入 session、nonce、冪等／FIFO outbox、排序、照片政策、解除配對與通知隱私等純規則；`CoupleSpaceUITests/` 已加入啟動後預設進入「今天」並可切換三分頁的核心骨架旅程。導覽測試只在明確傳入 `--ui-testing` 時略過啟動動畫；獨立啟動動畫測試仍走正式啟動路徑。
 - `CoupleSpace Watch App Watch App/` 是獨立的初始 Watch 畫面，不是 iPhone MVP 必要流程。

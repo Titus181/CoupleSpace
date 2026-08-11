@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 
 struct G1TechnicalSpikeView: View {
     @Environment(\.scenePhase) private var scenePhase
-    @StateObject private var authModel: SupabaseAppleAuthPoC
+    @StateObject private var authModel: SupabaseAppleAuthenticationModel
     @StateObject private var pairingModel: SupabasePairingPoC
     @StateObject private var networkRecoveryMonitor = NetworkRecoveryMonitor()
 #if os(iOS)
@@ -24,7 +24,7 @@ struct G1TechnicalSpikeView: View {
 
     init(supabaseClient: SupabaseClient) {
         _authModel = StateObject(
-            wrappedValue: SupabaseAppleAuthPoC(client: supabaseClient)
+            wrappedValue: SupabaseAppleAuthenticationModel(client: supabaseClient)
         )
         _pairingModel = StateObject(
             wrappedValue: SupabasePairingPoC(client: supabaseClient)

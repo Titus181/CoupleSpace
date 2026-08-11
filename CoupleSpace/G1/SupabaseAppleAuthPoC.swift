@@ -39,11 +39,78 @@ enum AppleSignInNonce {
     }
 }
 
+enum AuthenticationPhase {
+    case checking
+    case signedOut
+    case signingIn
+    case signedIn
+    case signingOut
+}
+
+struct AuthenticationStartPolicy {
+    static func canStartSignIn(
+        phase: AuthenticationPhase,
+        networkState: NetworkReachabilityState
+    ) -> Bool {
+        guard networkState == .available else { return false }
+        if case .signingIn = phase { return false }
+        return true
+    }
+}
+
+struct AuthenticationState {
+    let phase: AuthenticationPhase
+    let message: String
+    let userToken: String?
+
+    static let checking = AuthenticationState(
+        phase: .checking,
+        message: "正在確認登入狀態…",
+        userToken: nil
+    )
+
+    static func signedOut(message: String = "使用 Apple 登入，進入只屬於你們的空間。") -> Self {
+        AuthenticationState(phase: .signedOut, message: message, userToken: nil)
+    }
+
+    static let signingIn = AuthenticationState(
+        phase: .signingIn,
+        message: "正在登入…",
+        userToken: nil
+    )
+
+    static func signedIn(userID: UUID, message: String = "已登入") -> Self {
+        AuthenticationState(
+            phase: .signedIn,
+            message: message,
+            userToken: String(userID.uuidString.lowercased().prefix(8))
+        )
+    }
+
+    func signingOut() -> Self {
+        AuthenticationState(phase: .signingOut, message: "正在登出…", userToken: userToken)
+    }
+
+    func restoringAfterSignOutFailure() -> Self {
+        AuthenticationState(
+            phase: .signedIn,
+            message: "登出失敗，請稍後再試。",
+            userToken: userToken
+        )
+    }
+
+    var isSignedIn: Bool {
+        phase == .signedIn || phase == .signingOut
+    }
+}
+
 @MainActor
-final class SupabaseAppleAuthPoC: ObservableObject {
-    @Published private(set) var status = "正在檢查 Supabase 登入狀態…"
-    @Published private(set) var userToken = "尚未登入"
-    @Published private(set) var isSignedIn = false
+final class SupabaseAppleAuthenticationModel: ObservableObject {
+    @Published private(set) var state = AuthenticationState.checking
+
+    var status: String { state.message }
+    var userToken: String { state.userToken ?? "尚未登入" }
+    var isSignedIn: Bool { state.isSignedIn }
 
     private let client: SupabaseClient
     private var rawNonce: String?
@@ -65,10 +132,14 @@ final class SupabaseAppleAuthPoC: ObservableObject {
             rawNonce = nonce
             request.nonce = AppleSignInNonce.hash(nonce)
             request.requestedScopes = []
-            status = "等待 Apple 驗證…"
+            state = AuthenticationState(
+                phase: .signingIn,
+                message: "等待 Apple 驗證…",
+                userToken: nil
+            )
         } catch {
             rawNonce = nil
-            status = "無法建立 Apple 登入請求"
+            state = .signedOut(message: "無法建立 Apple 登入請求，請再試一次。")
         }
     }
 
@@ -81,12 +152,12 @@ final class SupabaseAppleAuthPoC: ObservableObject {
                   let nonce = rawNonce
             else {
                 rawNonce = nil
-                status = "Apple 未提供可用的登入憑證"
+                state = .signedOut(message: "Apple 未提供可用的登入憑證，請再試一次。")
                 return
             }
 
             rawNonce = nil
-            status = "正在建立 Supabase session…"
+            state = .signingIn
             Task {
                 do {
                     let session = try await client.auth.signInWithIdToken(
@@ -98,7 +169,7 @@ final class SupabaseAppleAuthPoC: ObservableObject {
                     )
                     apply(session: session)
                 } catch {
-                    status = "Supabase Apple 登入失敗，請檢查 Provider 設定"
+                    state = .signedOut(message: "登入失敗，請確認網路後再試一次。")
                 }
             }
 
@@ -106,19 +177,21 @@ final class SupabaseAppleAuthPoC: ObservableObject {
             rawNonce = nil
             if let authorizationError = error as? ASAuthorizationError,
                authorizationError.code == .canceled {
-                status = "已取消 Apple 登入"
+                state = .signedOut(message: "已取消登入，你可以隨時再試。")
             } else {
-                status = "Apple 登入未完成"
+                state = .signedOut(message: "Apple 登入未完成，請再試一次。")
             }
         }
     }
 
     func signOut() async {
+        let signedInState = state
+        state = state.signingOut()
         do {
             try await client.auth.signOut()
             apply(session: nil)
         } catch {
-            status = "登出失敗，請稍後再試"
+            state = signedInState.restoringAfterSignOutFailure()
         }
     }
 
@@ -130,20 +203,18 @@ final class SupabaseAppleAuthPoC: ObservableObject {
 
         switch decision {
         case .signedOut:
-            status = "尚未登入 Supabase"
-            userToken = "尚未登入"
-            isSignedIn = false
+            state = .signedOut()
 
         case .refreshingExpiredSession:
-            status = "已載入過期 session，正在等待更新…"
-            userToken = "尚未登入"
-            isSignedIn = false
+            state = AuthenticationState(
+                phase: .checking,
+                message: "正在更新登入狀態…",
+                userToken: nil
+            )
 
         case .signedIn:
             guard let session else { return }
-            status = "Supabase Apple 登入可用"
-            userToken = String(session.user.id.uuidString.lowercased().prefix(8))
-            isSignedIn = true
+            state = .signedIn(userID: session.user.id)
         }
     }
 }
