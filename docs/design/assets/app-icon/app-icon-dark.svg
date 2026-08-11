@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0D0A16"/>
+      <stop offset="1" stop-color="#21152B"/>
+    </linearGradient>
+    <linearGradient id="violet" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#85628C"/>
+      <stop offset="1" stop-color="#493052"/>
+    </linearGradient>
+    <linearGradient id="coral" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F28C72"/>
+      <stop offset="1" stop-color="#C94E53"/>
+    </linearGradient>
+    <linearGradient id="window" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#FFF5C7"/>
+      <stop offset="1" stop-color="#FFC966"/>
+    </linearGradient>
+  </defs>
+  <rect width="1024" height="1024" fill="url(#background)"/>
+  <rect x="170" y="176" width="500" height="500" rx="78" fill="url(#violet)"/>
+  <rect x="430" y="404" width="424" height="444" rx="72" fill="url(#coral)"/>
+  <path d="M430 404h168a72 72 0 0 1 72 72v200H430V404Z" fill="url(#window)"/>
+</svg>
