@@ -97,9 +97,10 @@ CoupleSpace 可在「我們 → 設定 → 關於 CoupleSpace」提供低干擾�
 ## 未來平台與付費層級
 
 - 目前維持 iPhone-only；其他平台不得延遲 iPhone 核心循環。
-- 未來推出 Apple Watch、iPad、Mac 或 Vision Pro 時，既有方案在該平台對應的基本能力不得再按裝置收費。
+- Apple Watch、iPad、Mac 與 Apple TV 的產品角色、隱私邊界及建議驗證順序，以[Apple 平台產品策略](07-apple-platform-strategy.md)為準。
+- 未來推出 Apple Watch、iPad、Mac、Apple TV 或 Vision Pro 時，既有方案在該平台對應的基本能力不得再按裝置收費。
 - Apple Watch 的基本通知、快速回應與查看最新 Moment 應納入既有方案；購買與方案管理仍由支援 StoreKit 的 App 完成，再同步權益。
-- iPad／Mac 的基本瀏覽，以及 Vision Pro 的基本回憶存取，沿用同一段關係的既有權益。
+- iPad／Mac 的基本瀏覽，以及 Apple TV／Vision Pro 的基本回憶存取，沿用同一段關係的既有權益。
 - 首輪只提供單一 `CoupleSpace Plus`；NT$290／月、NT$1,990／年是 Plus 本身的價格，不另設 `Plus Max`。
 - 只有當跨裝置創作、沉浸回顧、進階儀式或高成本持續服務已證明具有獨立價值時，才另案評估更高層級；目前沒有名稱、功能、價格或推出時間候選，不得預先實作或對外承諾。
 

@@ -28,12 +28,13 @@ last_updated: 2026-08-11
 4. [iPhone 首版範圍](product/04-iphone-mvp-scope.md)
 5. [商業模式與市場成長](product/05-business-and-growth.md)
 6. [成功指標與驗證計畫](product/06-metrics-and-validation.md)
-7. [第一版開發路線圖](operations/01-v1-development-roadmap.md)
-8. [產品決策紀錄](decisions/product-decisions.md)
-9. [技術決策紀錄](decisions/technical-decisions.md)
-10. [品牌識別與角色宇宙](design/01-brand-identity.md)
-11. [iPhone 核心畫面與功能佈局概念](design/02-iphone-core-screen-concepts.md)
-12. [上市、客服與版本發布營運](operations/03-launch-support-and-release.md)
+7. [Apple 平台產品策略](product/07-apple-platform-strategy.md)
+8. [第一版開發路線圖](operations/01-v1-development-roadmap.md)
+9. [產品決策紀錄](decisions/product-decisions.md)
+10. [技術決策紀錄](decisions/technical-decisions.md)
+11. [品牌識別與角色宇宙](design/01-brand-identity.md)
+12. [iPhone 核心畫面與功能佈局概念](design/02-iphone-core-screen-concepts.md)
+13. [上市、客服與版本發布營運](operations/03-launch-support-and-release.md)
 
 ## 文件維護原則
 
