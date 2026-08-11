@@ -4,15 +4,18 @@ struct RootTabView: View {
     @State private var selection = PrimarySection.defaultSelection
     let accountUserToken: String?
     let accountStatusMessage: String?
+    let relationshipToken: String?
     let onSignOut: () -> Void
 
     init(
         accountUserToken: String? = nil,
         accountStatusMessage: String? = nil,
+        relationshipToken: String? = nil,
         onSignOut: @escaping () -> Void = {}
     ) {
         self.accountUserToken = accountUserToken
         self.accountStatusMessage = accountStatusMessage
+        self.relationshipToken = relationshipToken
         self.onSignOut = onSignOut
     }
 
@@ -30,6 +33,7 @@ struct RootTabView: View {
                 UsView(
                     accountUserToken: accountUserToken,
                     accountStatusMessage: accountStatusMessage,
+                    relationshipToken: relationshipToken,
                     onSignOut: onSignOut
                 )
             }
@@ -83,6 +87,7 @@ private struct UsView: View {
     @State private var isShowingAccountSettings = false
     let accountUserToken: String?
     let accountStatusMessage: String?
+    let relationshipToken: String?
     let onSignOut: () -> Void
 
     var body: some View {
@@ -118,6 +123,7 @@ private struct UsView: View {
                 AccountSettingsView(
                     userToken: accountUserToken,
                     statusMessage: accountStatusMessage,
+                    relationshipToken: relationshipToken,
                     onSignOut: onSignOut
                 )
             }
@@ -131,6 +137,7 @@ private struct AccountSettingsView: View {
     @State private var isConfirmingSignOut = false
     let userToken: String?
     let statusMessage: String?
+    let relationshipToken: String?
     let onSignOut: () -> Void
 
     var body: some View {
@@ -143,6 +150,16 @@ private struct AccountSettingsView: View {
                     Text("識別碼只顯示前 8 碼，可用來確認重新登入後是否仍是同一個 CoupleSpace 帳號。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+
+                if let relationshipToken {
+                    Section("伴侶關係") {
+                        LabeledContent("關係識別碼", value: relationshipToken)
+                            .accessibilityIdentifier("relationship-token")
+                        Text("雙方應看到相同的前 8 碼；這不是邀請碼。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 if let statusMessage {

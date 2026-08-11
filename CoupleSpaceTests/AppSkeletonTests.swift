@@ -9,6 +9,7 @@ struct AppSkeletonTests {
     @Test func uiTestingLaunchOptionIsExplicitAndOrderIndependent() {
         #expect(AppLaunchOptions(arguments: []).isUITesting == false)
         #expect(AppLaunchOptions(arguments: ["--other", "--ui-testing"]).isUITesting)
+        #expect(AppLaunchOptions(arguments: ["--ui-testing-pairing"]).isPairingUITesting)
     }
 
 #if os(iOS)
@@ -98,4 +99,129 @@ struct AppSkeletonTests {
             networkState: .available
         ) == false)
     }
+
+    @Test func pairingInputAcceptsOnlyACompleteUUIDAndMapsExpectedServerOutcomes() {
+        let token = "11111111-2222-4333-8444-555555555555"
+        #expect(PairingInputPolicy.invitationToken(from: "  \(token)\n")?.uuidString.lowercased() == token)
+        #expect(PairingInputPolicy.invitationToken(from: "11111111") == nil)
+        #expect(PairingErrorMessage.message(serverMessage: "invitation_not_available").contains("已失效"))
+        #expect(PairingErrorMessage.message(serverMessage: "participant_already_paired").contains("已有"))
+    }
+
+    @MainActor
+    @Test func pairingModelCreatesAcceptsAndDeclinesWithoutInventingClientRelationships() async {
+        let relationshipID = UUID(uuidString: "90000000-0000-4000-8000-000000000004")!
+        let invitationToken = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
+        let invitation = PairingInvitation(
+            relationshipID: relationshipID,
+            token: invitationToken,
+            expiresAt: Date(timeIntervalSince1970: 2_000_000_000)
+        )
+        let service = PairingRemoteServiceFake(
+            currentRelationship: nil,
+            invitation: invitation,
+            acceptedRelationshipID: relationshipID
+        )
+        let model = PairingModel(service: service)
+
+        await model.refresh()
+        #expect(model.state == .unpaired)
+
+        await model.createOrRetryInvitation()
+        #expect(model.state == .waiting(
+            PairingRelationship(id: relationshipID, memberCount: 1),
+            invitation: invitation
+        ))
+
+        await model.acceptInvitation(rawToken: invitation.code)
+        #expect(model.state == .paired(PairingRelationship(id: relationshipID, memberCount: 2)))
+        #expect(service.acceptedTokens == [invitationToken])
+
+        model.resetForAuthenticatedSession()
+        #expect(model.state == .checking)
+
+        await model.declineInvitation(rawToken: invitation.code)
+        #expect(model.state == .unpaired)
+        #expect(service.declinedTokens == [invitationToken])
+    }
+
+    @MainActor
+    @Test func pairingModelIgnoresAResponseFromThePreviousAuthenticatedSession() async {
+        let service = SuspendedPairingRemoteServiceFake()
+        let model = PairingModel(service: service)
+        let oldSessionRefresh = Task { await model.refresh() }
+
+        while service.currentRelationshipContinuation == nil {
+            await Task.yield()
+        }
+
+        model.resetForAuthenticatedSession()
+        service.resumeCurrentRelationship(
+            PairingRelationship(id: UUID(), memberCount: 2)
+        )
+        await oldSessionRefresh.value
+
+        #expect(model.state == .checking)
+        #expect(model.isWorking == false)
+    }
+}
+
+private final class PairingRemoteServiceFake: PairingRemoteServing {
+    var currentRelationshipValue: PairingRelationship?
+    let invitation: PairingInvitation
+    let acceptedRelationshipID: UUID
+    var acceptedTokens: [UUID] = []
+    var declinedTokens: [UUID] = []
+
+    init(
+        currentRelationship: PairingRelationship?,
+        invitation: PairingInvitation,
+        acceptedRelationshipID: UUID
+    ) {
+        currentRelationshipValue = currentRelationship
+        self.invitation = invitation
+        self.acceptedRelationshipID = acceptedRelationshipID
+    }
+
+    func currentRelationship() async throws -> PairingRelationship? {
+        currentRelationshipValue
+    }
+
+    func createInvitation() async throws -> PairingInvitation {
+        invitation
+    }
+
+    func acceptInvitation(token: UUID) async throws -> UUID {
+        acceptedTokens.append(token)
+        return acceptedRelationshipID
+    }
+
+    func declineInvitation(token: UUID) async throws {
+        declinedTokens.append(token)
+    }
+}
+
+private final class SuspendedPairingRemoteServiceFake: PairingRemoteServing {
+    var currentRelationshipContinuation: CheckedContinuation<PairingRelationship?, Never>?
+
+    func currentRelationship() async throws -> PairingRelationship? {
+        await withCheckedContinuation { continuation in
+            currentRelationshipContinuation = continuation
+        }
+    }
+
+    func resumeCurrentRelationship(_ relationship: PairingRelationship?) {
+        currentRelationshipContinuation?.resume(returning: relationship)
+        currentRelationshipContinuation = nil
+    }
+
+    func createInvitation() async throws -> PairingInvitation {
+        PairingInvitation(relationshipID: UUID(), token: UUID(), expiresAt: .now)
+    }
+
+    func acceptInvitation(token: UUID) async throws -> UUID {
+        UUID()
+    }
+
+    func declineInvitation(token: UUID) async throws {}
 }

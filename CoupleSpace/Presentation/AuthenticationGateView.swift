@@ -3,12 +3,23 @@ import SwiftUI
 
 struct AuthenticationGateView: View {
     @ObservedObject var authModel: SupabaseAppleAuthenticationModel
+    @ObservedObject var pairingModel: PairingModel
     let bypassesAuthentication: Bool
+    let bypassesPairing: Bool
 
     var body: some View {
         Group {
             if bypassesAuthentication {
-                RootTabView()
+                if bypassesPairing {
+                    RootTabView()
+                } else {
+                    PairingGateView(
+                        model: pairingModel,
+                        accountUserToken: nil,
+                        accountStatusMessage: nil,
+                        onSignOut: {}
+                    )
+                }
             } else {
                 switch authModel.state.phase {
                 case .checking:
@@ -19,7 +30,8 @@ struct AuthenticationGateView: View {
                     SignInView(authModel: authModel)
 
                 case .signedIn, .signingOut:
-                    RootTabView(
+                    PairingGateView(
+                        model: pairingModel,
                         accountUserToken: authModel.state.userToken,
                         accountStatusMessage: authModel.state.message == "已登入"
                             ? nil
@@ -33,6 +45,11 @@ struct AuthenticationGateView: View {
         .task {
             guard !bypassesAuthentication else { return }
             await authModel.observeAuthState()
+        }
+        .task(id: authModel.state.userToken) {
+            guard !bypassesAuthentication, authModel.state.isSignedIn else { return }
+            pairingModel.resetForAuthenticatedSession()
+            await pairingModel.refresh()
         }
     }
 }

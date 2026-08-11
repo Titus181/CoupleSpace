@@ -49,6 +49,26 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testPairingEntryRequiresACompleteInvitationCode() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-pairing"]
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["pairing-screen"].waitForExistence(timeout: 3))
+
+        let acceptButton = app.buttons["accept-pairing-invitation"]
+        let declineButton = app.buttons["decline-pairing-invitation"]
+        XCTAssertFalse(acceptButton.isEnabled)
+        XCTAssertFalse(declineButton.isEnabled)
+
+        app.textFields["pairing-invitation-input"].tap()
+        app.textFields["pairing-invitation-input"].typeText("11111111-2222-4333-8444-555555555555")
+
+        XCTAssertTrue(acceptButton.isEnabled)
+        XCTAssertTrue(declineButton.isEnabled)
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {

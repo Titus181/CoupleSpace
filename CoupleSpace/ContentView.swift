@@ -10,23 +10,31 @@ import SwiftUI
 struct ContentView: View {
 #if os(iOS)
     @ObservedObject private var authModel: SupabaseAppleAuthenticationModel
+    @ObservedObject private var pairingModel: PairingModel
     @State private var isShowingLaunchAnimation: Bool
     private let bypassesAuthentication: Bool
+    private let bypassesPairing: Bool
 
     init(
         authModel: SupabaseAppleAuthenticationModel,
+        pairingModel: PairingModel,
         showsLaunchAnimation: Bool = true,
-        bypassesAuthentication: Bool = false
+        bypassesAuthentication: Bool = false,
+        bypassesPairing: Bool = false
     ) {
         self.authModel = authModel
+        self.pairingModel = pairingModel
         _isShowingLaunchAnimation = State(initialValue: showsLaunchAnimation)
         self.bypassesAuthentication = bypassesAuthentication
+        self.bypassesPairing = bypassesPairing
     }
 #else
     init(
         authModel: SupabaseAppleAuthenticationModel,
+        pairingModel: PairingModel,
         showsLaunchAnimation: Bool = true,
-        bypassesAuthentication: Bool = false
+        bypassesAuthentication: Bool = false,
+        bypassesPairing: Bool = false
     ) {}
 #endif
 
@@ -35,7 +43,9 @@ struct ContentView: View {
         ZStack {
             AuthenticationGateView(
                 authModel: authModel,
-                bypassesAuthentication: bypassesAuthentication
+                pairingModel: pairingModel,
+                bypassesAuthentication: bypassesAuthentication,
+                bypassesPairing: bypassesPairing
             )
                 .accessibilityIdentifier("main-content")
                 .accessibilityHidden(isShowingLaunchAnimation)
@@ -59,6 +69,10 @@ struct ContentView: View {
 #Preview {
     ContentView(
         authModel: SupabaseAppleAuthenticationModel(client: CoupleSpaceSupabaseClient.preview),
+        pairingModel: PairingModel(
+            client: CoupleSpaceSupabaseClient.preview,
+            initialState: .unpaired
+        ),
         showsLaunchAnimation: false
     )
 }
