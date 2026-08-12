@@ -14,7 +14,7 @@ CoupleSpace 是以 iPhone 為首要平台的一對一伴侶私人空間。首版
 1. Read this file.
 2. Read `harness-version.yaml` and `docs/HARNESS.md`.
 3. Read `docs/ARCHITECTURE.md`.
-4. Read the relevant product scope, roadmap, tests, and Evals before changing behavior.
+4. Read `quality/README.md`, the relevant test catalog entries, product scope, roadmap, tests, and Evals before changing behavior.
 5. Read the nearest nested `AGENTS.md` if one is added later.
 
 ## Commands
@@ -26,6 +26,8 @@ Run from the repository root. Use RTK-wrapped shell commands by default.
 - iPhone build: `rtk xcodebuild build -project CoupleSpace.xcodeproj -scheme CoupleSpace -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO`
 - iPhone tests: `rtk xcodebuild test -project CoupleSpace.xcodeproj -scheme CoupleSpace -destination 'platform=iOS Simulator,name=iPhone 17 Pro,OS=latest'`
 - Watch tests, only when Watch behavior or shared code changes: `rtk xcodebuild test -project CoupleSpace.xcodeproj -scheme 'CoupleSpace Watch App Watch App' -destination 'platform=watchOS Simulator,name=Apple Watch Series 11 (46mm),OS=latest'`
+- Full local automated gates: `quality/scripts/run-full-automated-suite.sh`
+- TestFlight/release-candidate automated gates: `quality/scripts/run-full-automated-suite.sh --reset-local-database`
 - Diff hygiene: `rtk git diff --check`
 - Harness integrity: `rtk ../../agent-harness/scripts/project-harness.sh check .`
 
@@ -51,6 +53,7 @@ There is no standalone linter configured yet. Do not claim lint passed; the Swif
 - Batch human validation at a coherent slice or milestone boundary, with one concise checklist. Request it earlier only when progress requires Xcode UI, Apple ID, signing, a real device, push/background behavior, cross-device Apple-service behavior, destructive remote-test-data approval, or subjective UX judgment.
 - Before a PR is merged, run the full iPhone automated suite plus applicable integration/UI tests. Run Watch tests only when Watch or shared behavior is affected.
 - Before TestFlight or release, execute the two-iPhone/two-Apple-ID, weak-network, offline, push privacy, App Lock, export, deletion, and unpairing checks in `docs/HARNESS.md`.
+- `quality/test-catalog.md` is the canonical test index and `quality/release-gates.md` defines the blocking evidence required for TestFlight and public releases. Record every release candidate with `quality/release-record-template.md`.
 - A fresh green result is required after the final code change. Do not reuse a test result from before the last behavior-affecting edit.
 - Flaky tests are defects. Do not hide them with unconditional retries or silently weaken assertions.
 

@@ -1,7 +1,7 @@
 ---
 title: 上市、客服與版本發布營運
 status: active
-last_updated: 2026-08-08
+last_updated: 2026-08-12
 ---
 
 # 上市、客服與版本發布營運
@@ -132,6 +132,7 @@ helpdesk 保留原文與回覆；產品 backlog 只保留去識別摘要、canon
 
 ## 正式上市檢查
 
+- 依[版本發布閘門](../../quality/release-gates.md)建立本次 release record；最後行為變更後的全部自動化測試，以及所有適用真機／資料生命週期 gate 均通過。
 - 四語 UI、App Store metadata、版本說明、FAQ 與關鍵流程 QA 完成。
 - 只啟動繁中市場投放；沒有中國大陸商店供應或市場活動。
 - 單一客服 queue、案件識別、搜尋欄位、隱私同意、自動確認與狀態頁可用。

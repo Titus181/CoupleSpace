@@ -1,7 +1,7 @@
 ---
 title: CoupleSpace Project Harness
 status: active
-last_updated: 2026-08-06
+last_updated: 2026-08-12
 ---
 
 # CoupleSpace Project Harness
@@ -27,6 +27,7 @@ last_updated: 2026-08-06
 - 產品範圍：`product/04-iphone-mvp-scope.md`
 - 開發目標：`operations/01-v1-development-roadmap.md`
 - Agent Evals：`../evals/README.md`
+- 測試控制中心：`../quality/README.md`
 
 CoupleSpace 的產品事實、私人資料限制、Apple 平台驗證與完成條件只保存在產品 repo。
 
@@ -100,6 +101,8 @@ CI 建立後，將較慢的完整 integration/UI matrix、離線重試、資料 
 5. App Lock、背景切換與重新啟動行為正確。
 6. 匯出、刪除與解除配對依已核准規則執行，雙方結果一致。
 7. 分析事件不含私密訊息或照片內容。
+
+實際測試 ID、人工清單、阻擋規則與每版證據格式以 `../quality/test-catalog.md`、`../quality/release-gates.md` 及 `../quality/release-record-template.md` 為準。正式版本更新前必須執行目前全部自動化測試，以及所有適用的 Critical／High 人工 gate；未執行、blocked、failure 或最後行為改動前的歷史結果都不能視為通過。
 
 G1 尚未決定的技術方案，在完成兩支真機／兩個 Apple ID 的小型驗證前不得標示通過。
 

@@ -1,0 +1,56 @@
+---
+status: active
+last_updated: 2026-08-12
+---
+
+# CoupleSpace 測試目錄
+
+本表以行為風險為單位，不逐列複製每個 XCTest 或 pgTAP case。實際 case 名稱以連結的測試檔為準；數量會隨功能增加，不能把歷史數字當成目前通過證據。
+
+## 自動化測試
+
+| ID | 範圍 | 主要防範失敗 | 層級 | 實際位置 | 必要 gate |
+| --- | --- | --- | --- | --- | --- |
+| CFG-001 | W1–W2 環境與啟動 | 錯誤 runtime／Supabase 設定、測試參數污染正式啟動 | Unit／UI | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceTests/CoupleSpaceTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITestsLaunchTests.swift` | A、B、D |
+| NAV-001 | W2 三分頁 | 預設頁面或「今天／對話／我們」順序退化 | Unit／UI | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift` | A、B、D |
+| AUTH-001 | W1／W3 session | 過期 session 被視為登入、取消／失敗／登出狀態錯判 | Unit | `CoupleSpaceTests/CoupleSpaceTests.swift`、`CoupleSpaceTests/AppSkeletonTests.swift` | A、B、D |
+| AUTH-002 | W3 Apple 登入 | 離線仍開啟 Apple sheet、nonce 或同帳號恢復錯誤 | Unit＋真機 | `CoupleSpaceTests/CoupleSpaceTests.swift`、`CoupleSpaceTests/AppSkeletonTests.swift`、`manual/two-iphone.md` | A、B、D |
+| PAIR-001 | W1／W4 配對授權 | 第三人存取、重複 active relationship、無效邀請接受 | pgTAP／Unit | `supabase/tests/database/pairing_invitation.test.sql`、`pairing_decline.test.sql`、`pairing_cancel.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift` | A、B、D |
+| PAIR-002 | W4 配對恢復 | 同時邀請、拒絕／失效後無法重試、錯誤取消關係 | pgTAP／UI＋真機 | 同上、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
+| RLS-001 | W1–W8 私密資料邊界 | 非 relationship member 讀寫共同或個人資料 | pgTAP | `supabase/tests/database/*.test.sql` | A、B、D |
+| SYNC-001 | W1 Realtime／排序 | 重讀未經 RLS、server timestamp 排序不穩定 | pgTAP／Unit＋真機 | `shared_items_realtime.test.sql`、`CoupleSpaceTests/CoupleSpaceTests.swift`、`manual/two-iphone.md` | A、B、D |
+| OUTBOX-001 | W1 訊息／marker／照片 | 離線內容遺失、重複、錯序或錯 relationship 送出 | Unit＋真機 | `CoupleSpaceTests/CoupleSpaceTests.swift`、`manual/weak-network.md` | A、B、D |
+| PHOTO-001 | W1 照片處理 | 大圖方向錯誤、GPS 遺留、容量不足仍寫入 | Unit | `CoupleSpaceTests/CoupleSpaceTests.swift` | A、B、D |
+| PHOTO-002 | W1 Storage／配額 | 越權 object、quota 競態、orphan 未清理 | pgTAP／Unit | `private_photo_storage.test.sql`、`photo_quota_contract.test.sql`、`photo_orphan_cleanup.test.sql`、`CoupleSpaceTests/CoupleSpaceTests.swift` | A、B、D |
+| PUSH-001 | W1 推播隱私 | payload、token 或 routing metadata 洩漏私密內容 | pgTAP／Unit／Function | `private_push_boundary.test.sql`、`push_delivery_claim.test.sql`、`CoupleSpaceTests/CoupleSpaceTests.swift`、`supabase/functions/send-w1-push/apns.test.ts` | A、B、D |
+| ARCHIVE-001 | W1 封存／匯出 | 單方越權、照片缺失、容量與 staging 清理錯誤 | pgTAP／Unit＋真機 | `relationship_archive.test.sql`、`archived_photo_access.test.sql`、`CoupleSpaceTests/CoupleSpaceTests.swift`、`manual/deletion-and-unpairing.md` | A、B、D |
+| DELETE-001 | W1 刪除／解除配對 | 單方刪除影響另一方、GC／雙方結果不一致 | pgTAP／Unit＋真機 | `personal_archive_deletion_queue.test.sql`、`CoupleSpaceTests/CoupleSpaceTests.swift`、`manual/deletion-and-unpairing.md` | A、B、D |
+| MOMENT-001 | W5 Moment 建立 | 空白／過長內容、client ID 碰撞、非 active relationship 寫入 | pgTAP／Unit／UI | `moment_vertical_slice.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift` | A、B、D |
+| MOMENT-002 | W5 照片 Moment UI | 展示照片攔截 composer、時間線顯示與建立者標示錯誤 | Unit／UI＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
+| INTERACT-001 | W6 Moment 回應 | 非伴侶回應、重試重複、回應長度或類型繞過 | pgTAP／Unit／UI | `moment_interactions.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift` | A、B、D |
+| QUESTION-001 | W6 共同問答 | 第一份答案提前洩漏、共同揭曉不一致 | pgTAP／Unit／UI＋真機 | `moment_interactions.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
+| STATUS-001 | W7 名稱與私人稱呼 | 私人稱呼被伴侶讀取、清除與 fallback 錯誤 | pgTAP／Unit／UI＋真機 | `together_now.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
+| STATUS-002 | W7 此刻狀態 | 到期仍顯示、重建後未恢復、未選擇卻建立歷史 | pgTAP／Unit／UI＋真機 | 同上、`manual/upgrade-and-recovery.md` | A、B、D |
+| CHAT-001 | W1／W8 基本文字聊天 | 內容長度、伺服器排序、第三人存取、未讀游標倒退或外洩 | pgTAP／Unit／UI＋真機 | `text_message_contract.test.sql`、`basic_text_chat.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift` | A、B、D |
+| EVAL-001 | Agent 行為 | 未讀文件、越權遠端寫入、跳過測試或洩漏私人資料 | Agent Eval／Harness | `evals/README.md`、`.harness/` | B、D |
+
+Gate A／B／D 定義見 [版本發布閘門](release-gates.md)。W8 已存在於目前 checkout，但正式持久 Outbox、離線重送、可靠重試與傳送狀態仍屬後續 W9，`CHAT-001` 不得被解讀成這些能力已完成。
+
+## 目前必須保留的人工證據
+
+| ID | 風險 | 清單 |
+| --- | --- | --- |
+| DEVICE-001 | 雙帳號、跨裝置同步與恢復 | `manual/two-iphone.md` |
+| NETWORK-001 | 弱網、離線、重連、去重與順序 | `manual/weak-network.md` |
+| PUSH-002 | 真實 APNs、背景／終止／鎖定畫面隱私 | `manual/push-privacy.md` |
+| UPGRADE-001 | TestFlight／正式版升級、換機、重裝與資料延續 | `manual/upgrade-and-recovery.md` |
+| LIFECYCLE-001 | 匯出、刪除、解除配對與雙方一致性 | `manual/deletion-and-unpairing.md` |
+| LOCK-001 | App Lock、背景切換與重新啟動 | `manual/app-lock-and-background.md` |
+
+## 已知未關閉範圍
+
+- Production／TestFlight push 不能由 development sandbox 證據取代。
+- 大型真機封存、實際低磁碟與中斷續傳尚需對應 release gate。
+- App Lock 尚未因文件存在而視為已實作或通過。
+- Database／Storage restore drill 必須使用一致版本演練，不能用單純「備份已開啟」代替。
+- W9 以前不得把基本聊天測試解讀為正式離線 Outbox 與傳送狀態已完成。
