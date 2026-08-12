@@ -137,6 +137,17 @@ enum MomentResponsePolicy {
         guard !normalized.isEmpty, normalized.count <= maximumTextLength else { return nil }
         return normalized
     }
+
+    static func normalizedEmoji(_ value: String) -> String? {
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard normalized.count == 1,
+              let character = normalized.first,
+              character.unicodeScalars.contains(where: {
+                  $0.properties.isEmojiPresentation || $0.value == 0xFE0F
+              })
+        else { return nil }
+        return normalized
+    }
 }
 
 struct MomentQuestionPrompt: Identifiable, Hashable, Sendable {

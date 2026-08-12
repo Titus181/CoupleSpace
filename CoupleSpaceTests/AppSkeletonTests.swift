@@ -47,6 +47,77 @@ struct AppSkeletonTests {
         #expect(PrimarySection.defaultSelection == .today)
     }
 
+    @Test func chatTextPolicyNormalizesContentAndRejectsInvalidMessages() {
+        #expect(ChatTextPolicy.normalizedBody("  晚點一起吃飯  ") == "晚點一起吃飯")
+        #expect(ChatTextPolicy.normalizedBody(" \n\t ") == nil)
+        #expect(ChatTextPolicy.normalizedBody(
+            String(repeating: "a", count: ChatTextPolicy.maximumLength + 1)
+        ) == nil)
+    }
+
+    @MainActor
+    @Test func conversationModelTracksUnreadVisibilityAndStableSendRetries() async throws {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
+        let partnerUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C2")!
+        let partnerMessage = ChatMessage(
+            id: UUID(uuidString: "C1000000-0000-0000-0000-000000000001")!,
+            senderUserID: partnerUserID,
+            body: "今天還好嗎？",
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let service = ConversationRemoteServiceFake(
+            currentUserID: currentUserID,
+            messages: [partnerMessage],
+            unreadCount: 1
+        )
+        let model = ConversationModel(service: service)
+
+        await model.start()
+        #expect(model.messages == [partnerMessage])
+        #expect(model.unreadCount == 1)
+        #expect(service.isObserving)
+
+        await model.setConversationVisible(true)
+        #expect(model.unreadCount == 0)
+        #expect(service.markedReadMessageIDs == [partnerMessage.id])
+
+        service.sendDelay = .milliseconds(300)
+        let slowSend = Task { await model.send("立即顯示") }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(model.messages.last?.body == "立即顯示")
+        #expect(model.messages.last?.deliveryState == .sending)
+        #expect(await slowSend.value)
+        #expect(model.messages.last?.deliveryState == .synced)
+
+        service.sendDelay = .zero
+        service.sendFailuresRemaining = 1
+        #expect(await model.send("  我很好  ") == false)
+        #expect(model.messages.last?.body == "我很好")
+        #expect(model.messages.last?.deliveryState == .failed)
+        let failedMessageID = try #require(model.messages.last?.id)
+        await model.retryMessage(id: failedMessageID)
+        #expect(service.sentBodies == ["立即顯示", "我很好", "我很好"])
+        #expect(service.sentClientIDs[1] == service.sentClientIDs[2])
+        #expect(model.messages.last?.body == "我很好")
+        #expect(model.messages.last?.deliveryState == .synced)
+
+        let realtimeMessage = ChatMessage(
+            id: UUID(uuidString: "C1000000-0000-0000-0000-000000000003")!,
+            senderUserID: partnerUserID,
+            body: "那就好",
+            createdAt: Date(timeIntervalSince1970: 300)
+        )
+        service.messages.append(realtimeMessage)
+        service.unreadCount = 1
+        await service.sendChange()
+        #expect(model.messages.last == realtimeMessage)
+        #expect(model.unreadCount == 0)
+        #expect(service.markedReadMessageIDs.last == realtimeMessage.id)
+
+        await model.stop()
+        #expect(!service.isObserving)
+    }
+
     @Test func momentDraftNormalizesShortTextAndRejectsInvalidContent() {
         #expect(MomentDraftPolicy.normalizedText("  想到你  ") == "想到你")
         #expect(MomentDraftPolicy.normalizedText(" \n\t ") == nil)
@@ -64,6 +135,10 @@ struct AppSkeletonTests {
         #expect(MomentResponsePolicy.normalizedText(
             String(repeating: "a", count: MomentResponsePolicy.maximumTextLength + 1)
         ) == nil)
+        #expect(MomentResponsePolicy.normalizedEmoji("  🥳  ") == "🥳")
+        #expect(MomentResponsePolicy.normalizedEmoji("👩🏽‍💻") == "👩🏽‍💻")
+        #expect(MomentResponsePolicy.normalizedEmoji("🥳🥰") == nil)
+        #expect(MomentResponsePolicy.normalizedEmoji("A") == nil)
         #expect(MomentQuestionPolicy.normalizedAnswer("  下班一起吃飯  ") == "下班一起吃飯")
         #expect(MomentQuestionPrompt.accepted.map(\.id) == [
             "understand_today",
@@ -165,7 +240,13 @@ struct AppSkeletonTests {
         await model.start()
 
         #expect(!model.currentUserHasAnswered(questionMoment))
-        #expect(await model.respond(to: partnerMoment, with: .emoji(.hug)))
+        service.responseDelay = .milliseconds(300)
+        let slowResponse = Task { await model.respond(to: partnerMoment, with: .emoji(.hug)) }
+        try await Task.sleep(for: .milliseconds(50))
+        let optimisticMoment = try #require(model.moments.first { $0.id == partnerMoment.id })
+        #expect(model.response(for: optimisticMoment)?.content == .emoji(.hug))
+        #expect(await slowResponse.value)
+        service.responseDelay = .zero
         let refreshedPartnerMoment = try #require(model.moments.first { $0.id == partnerMoment.id })
         #expect(refreshedPartnerMoment.isComplete)
         #expect(model.response(for: refreshedPartnerMoment)?.content == .emoji(.hug))
@@ -467,6 +548,73 @@ struct AppSkeletonTests {
     }
 }
 
+@MainActor
+private final class ConversationRemoteServiceFake: ConversationRemoteServing {
+    let currentUserID: UUID
+    var messages: [ChatMessage]
+    var unreadCount: Int
+    var sentBodies: [String] = []
+    var sentClientIDs: [UUID] = []
+    var markedReadMessageIDs: [UUID] = []
+    var sendFailuresRemaining = 0
+    var sendDelay: Duration = .zero
+    var nextAcceptedAt = Date(timeIntervalSince1970: 200)
+    var isObserving = false
+    private var onChange: (@MainActor () async -> Void)?
+
+    init(currentUserID: UUID, messages: [ChatMessage], unreadCount: Int) {
+        self.currentUserID = currentUserID
+        self.messages = messages
+        self.unreadCount = unreadCount
+    }
+
+    func fetchSnapshot() async throws -> ConversationSnapshot {
+        ConversationSnapshot(
+            currentUserID: currentUserID,
+            messages: messages,
+            unreadCount: unreadCount
+        )
+    }
+
+    func sendMessage(body: String, clientID: UUID) async throws -> Date {
+        sentBodies.append(body)
+        sentClientIDs.append(clientID)
+        try await Task.sleep(for: sendDelay)
+        if sendFailuresRemaining > 0 {
+            sendFailuresRemaining -= 1
+            throw TestServiceError.expected
+        }
+        let acceptedAt = nextAcceptedAt
+        nextAcceptedAt = nextAcceptedAt.addingTimeInterval(1)
+        messages.append(ChatMessage(
+            id: clientID,
+            senderUserID: currentUserID,
+            body: body,
+            createdAt: acceptedAt
+        ))
+        return acceptedAt
+    }
+
+    func markRead(through messageID: UUID) async throws {
+        markedReadMessageIDs.append(messageID)
+        unreadCount = 0
+    }
+
+    func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
+        isObserving = true
+        self.onChange = onChange
+    }
+
+    func stopObservingChanges() async {
+        isObserving = false
+        onChange = nil
+    }
+
+    func sendChange() async {
+        await onChange?()
+    }
+}
+
 private final class PairingRemoteServiceFake: PairingRemoteServing {
     var currentRelationshipValue: PairingRelationship?
     let invitation: PairingInvitation
@@ -627,6 +775,7 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
     var answerClientIDs: [UUID] = []
     var questionAttemptIDs: [(UUID, UUID)] = []
     var responseFailuresRemaining = 0
+    var responseDelay: Duration = .zero
     var answerFailuresRemaining = 0
     var questionFailuresRemaining = 0
     var isObserving = false
@@ -693,6 +842,7 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
         clientID: UUID
     ) async throws -> MomentResponse {
         responseClientIDs.append(clientID)
+        try await Task.sleep(for: responseDelay)
         if responseFailuresRemaining > 0 {
             responseFailuresRemaining -= 1
             throw CancellationError()

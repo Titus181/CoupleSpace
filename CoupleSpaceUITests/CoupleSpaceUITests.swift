@@ -50,6 +50,30 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testReadsPartnerMessageAndSendsBasicTextChat() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-partner-message"]
+        app.launch()
+
+        app.tabBars.buttons["對話"].tap()
+        XCTAssertTrue(app.staticTexts["晚點一起吃飯嗎？"].waitForExistence(timeout: 3))
+
+        let input = app.textFields["conversation-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 1))
+        input.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
+        input.typeText("好，晚點見")
+        app.buttons["send-conversation-message"].tap()
+
+        XCTAssertTrue(app.staticTexts["好，晚點見"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '已讀'")).firstMatch.exists)
+        app.staticTexts["晚點一起吃飯嗎？"].tap()
+        XCTAssertFalse(app.keyboards.firstMatch.waitForExistence(timeout: 1))
+        app.tabBars.buttons["今天"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["today-screen"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testCreatesShortTextMomentAndShowsItInSharedTimeline() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
@@ -176,6 +200,23 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testRespondsToPartnerMomentWithCustomEmoji() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-partner-moment"]
+        app.launch()
+
+        let moreButton = app.buttons["more-moment-emoji"]
+        XCTAssertTrue(moreButton.waitForExistence(timeout: 3))
+        moreButton.tap()
+
+        let partyEmoji = app.buttons["custom-moment-emoji-🥳"]
+        XCTAssertTrue(partyEmoji.waitForExistence(timeout: 1))
+        partyEmoji.tap()
+
+        XCTAssertTrue(app.staticTexts["🥳"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testRespondsToPartnerMomentWithShortText() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-partner-moment"]
@@ -251,7 +292,12 @@ final class CoupleSpaceUITests: XCTestCase {
         app.tabBars.buttons["我們"].tap()
         app.buttons["account-settings"].tap()
 
-        app.buttons["登出"].tap()
+        let signOutButton = app.buttons["登出"]
+        if !signOutButton.waitForExistence(timeout: 1) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(signOutButton.waitForExistence(timeout: 2))
+        signOutButton.tap()
         XCTAssertTrue(app.alerts["要登出 CoupleSpace 嗎？"].waitForExistence(timeout: 1))
         app.alerts.buttons["取消"].tap()
 

@@ -139,6 +139,7 @@ struct MomentCard: View {
     let names: TogetherNowSnapshot?
     @ObservedObject var model: MomentModel
     @State private var isWritingResponse = false
+    @State private var isChoosingEmoji = false
     @State private var isAnsweringQuestion = false
 
     var body: some View {
@@ -154,10 +155,8 @@ struct MomentCard: View {
                 if let photoData, let image = UIImage(data: photoData) {
                     Image(uiImage: image)
                         .resizable()
-                        .scaledToFill()
+                        .scaledToFit()
                         .frame(maxWidth: .infinity)
-                        .frame(height: 220)
-                        .clipped()
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .allowsHitTesting(false)
                 } else {
@@ -197,6 +196,11 @@ struct MomentCard: View {
         .sheet(isPresented: $isWritingResponse) {
             MomentTextResponseView(moment: moment, model: model)
         }
+        .sheet(isPresented: $isChoosingEmoji) {
+            MomentEmojiResponseView(moment: moment, model: model)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
         .sheet(isPresented: $isAnsweringQuestion) {
             MomentQuestionAnswerView(moment: moment, model: model)
         }
@@ -227,6 +231,7 @@ struct MomentCard: View {
                         .accessibilityLabel(emoji.accessibilityLabel)
                 case let .text(text):
                     Text(text)
+                        .font(MomentResponsePolicy.normalizedEmoji(text) == nil ? .body : .title2)
                 }
             }
             .accessibilityIdentifier("moment-response")
@@ -237,7 +242,7 @@ struct MomentCard: View {
             Text("回應這一刻")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 8) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 7), spacing: 8) {
                 ForEach(MomentEmoji.allCases, id: \.self) { emoji in
                     Button {
                         Task { await model.respond(to: moment, with: .emoji(emoji)) }
@@ -251,6 +256,15 @@ struct MomentCard: View {
                     .accessibilityIdentifier("moment-emoji-\(emoji.rawValue)")
                     .disabled(model.activeInteractionMomentIDs.contains(moment.id))
                 }
+                Button { isChoosingEmoji = true } label: {
+                    Image(systemName: "plus")
+                        .font(.title3.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 36)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("更多 Emoji")
+                .accessibilityIdentifier("more-moment-emoji")
+                .disabled(model.activeInteractionMomentIDs.contains(moment.id))
             }
             Button("回一句") { isWritingResponse = true }
                 .font(.subheadline.weight(.semibold))
@@ -283,6 +297,88 @@ struct MomentCard: View {
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("answer-moment-question")
         }
+    }
+}
+
+private struct MomentEmojiResponseView: View {
+    private struct EmojiSection: Identifiable {
+        let title: String
+        let emojis: [String]
+        var id: String { title }
+    }
+
+    private static let sections = [
+        EmojiSection(title: "笑臉與人物", emojis: emojiList(
+            "😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋 😛 😝 😜 🤪 🤨 🧐 🤓 😎 🥸 🤩 🥳 😏 😒 😞 😔 😟 😕 🙁 ☹️ 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🫣 🤗 🫡 🤔 🫢 🤭 🤫 🤥 😶 🫥 😐 🫤 😑 😬 🙄 😯 😦 😧 😮 😲 🥱 😴 🤤 😪 😵 🤐 🥴 🤢 🤮 🤧 😷 🤒 🤕"
+        )),
+        EmojiSection(title: "手勢與愛心", emojis: emojiList(
+            "👋 🤚 🖐️ ✋ 🖖 🫱 🫲 🫳 🫴 👌 🤌 🤏 ✌️ 🤞 🫰 🤟 🤘 🤙 👈 👉 👆 🖕 👇 ☝️ 👍 👎 ✊ 👊 🤛 🤜 👏 🙌 🫶 👐 🤲 🤝 🙏 ✍️ 💅 🤳 💪 🦾 🫂 ❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❤️‍🔥 ❤️‍🩹 ❣️ 💕 💞 💓 💗 💖 💘 💝 💟"
+        )),
+        EmojiSection(title: "動物與自然", emojis: emojiList(
+            "🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐻‍❄️ 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🙈 🙉 🙊 🐒 🐔 🐧 🐦 🐤 🦆 🦅 🦉 🦇 🐺 🐗 🐴 🦄 🐝 🐛 🦋 🐌 🐞 🐜 🕷️ 🦂 🐢 🐍 🦎 🐙 🦑 🦐 🦞 🦀 🐠 🐟 🐡 🐬 🐳 🦈 🐊 🐅 🐆 🦓 🦍 🐘 🦛 🦏 🐪 🦒 🦘 🦬 🐄 🐎 🐖 🐏 🦙 🐐 🦌 🐕 🐈 🦜 🦢 🦩 🕊️ 🐇 🦝 🦨 🦡 🦦 🌸 🌹 🌺 🌻 🌼 🌷 🌱 🌲 🌳 🌴 🌵 🍀 🍁 🍂 🍃"
+        )),
+        EmojiSection(title: "食物與飲料", emojis: emojiList(
+            "🍏 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🫐 🍈 🍒 🍑 🥭 🍍 🥥 🥝 🍅 🍆 🥑 🥦 🥬 🥒 🌶️ 🫑 🌽 🥕 🫒 🧄 🧅 🥔 🍠 🥐 🥯 🍞 🥖 🥨 🧀 🥚 🍳 🧈 🥞 🧇 🥓 🥩 🍗 🍖 🌭 🍔 🍟 🍕 🥪 🥙 🌮 🌯 🥗 🥘 🍝 🍜 🍲 🍛 🍣 🍱 🥟 🍤 🍙 🍚 🍘 🍥 🥠 🥮 🍢 🍡 🍧 🍨 🍦 🥧 🧁 🍰 🎂 🍮 🍭 🍬 🍫 🍿 🍩 🍪 🌰 🥜 🍯 🥛 ☕️ 🫖 🍵 🧃 🥤 🧋 🍺 🍻 🥂 🍷 🍸 🍹 🍾"
+        )),
+        EmojiSection(title: "活動與旅行", emojis: emojiList(
+            "⚽️ 🏀 🏈 ⚾️ 🥎 🎾 🏐 🏉 🥏 🎱 🪀 🏓 🏸 🏒 🏑 🥍 🏏 🥅 ⛳️ 🪁 🏹 🎣 🤿 🥊 🥋 🎽 🛹 🛼 🛷 ⛸️ 🥌 🎿 ⛷️ 🏂 🪂 🏋️ 🤸 ⛹️ 🤺 🤾 🏌️ 🏄 🚣 🏊 🚴 🧗 🎪 🎭 🎨 🎬 🎤 🎧 🎼 🎹 🥁 🎷 🎺 🎸 🎻 🎲 ♟️ 🎯 🎳 🎮 🧩 🚗 🚕 🚌 🚎 🏎️ 🚓 🚑 🚒 🚐 🛻 🚚 🚜 🛵 🏍️ 🚲 ✈️ 🚀 🚁 🚤 ⛵️ 🚢 🚆 🚇 🗺️ 🗿 🗽 🗼 🏰 🎡 🎢 🎠 ⛲️ 🏖️ 🏝️ 🏕️ ⛺️ 🌋 🗻"
+        )),
+        EmojiSection(title: "物件與符號", emojis: emojiList(
+            "⌚️ 📱 💻 ⌨️ 🖥️ 🖨️ 🖱️ 📷 📸 📹 🎥 📞 ☎️ 📺 📻 🎙️ ⏰ ⌛️ 🔋 💡 🔦 🕯️ 🧯 💸 💵 💰 💳 💎 ⚖️ 🧰 🔧 🔨 🛠️ ⛏️ 🪛 ⚙️ 🧱 🧲 🔮 📿 🧿 💈 ⚗️ 🔭 🔬 💊 💉 🩹 🩺 🚪 🪑 🛏️ 🛋️ 🚿 🛁 🧴 🧹 🧺 🧻 🧼 🪥 🧽 🔑 🗝️ 🧸 🎁 🎈 🎀 🎊 🎉 🪅 ✉️ 📩 📦 📌 📍 📎 ✂️ 🖊️ ✏️ 📝 📚 🔒 🔓 🔔 🎵 ✅ ❌ ❓ ❗️ 💯 🔥 ✨ ⭐️ 🌟 💫 ⚡️ ☀️ 🌙 🌈 ☁️ ❄️ ☔️"
+        )),
+    ]
+
+    private static func emojiList(_ value: String) -> [String] {
+        value.split(separator: " ").map(String.init)
+    }
+
+    @Environment(\.dismiss) private var dismiss
+    let moment: Moment
+    @ObservedObject var model: MomentModel
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 20) {
+                    ForEach(Self.sections) { section in
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text(section.title)
+                                .font(.headline)
+                            LazyVGrid(
+                                columns: Array(repeating: GridItem(.flexible()), count: 7),
+                                spacing: 12
+                            ) {
+                                ForEach(Array(section.emojis.enumerated()), id: \.offset) { _, emoji in
+                                    Button {
+                                        dismiss()
+                                        Task {
+                                            await model.respond(to: moment, with: .text(emoji))
+                                        }
+                                    } label: {
+                                        Text(emoji)
+                                            .font(.title2)
+                                            .frame(maxWidth: .infinity, minHeight: 36)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .accessibilityLabel(emoji)
+                                    .accessibilityIdentifier("custom-moment-emoji-\(emoji)")
+                                    .disabled(model.activeInteractionMomentIDs.contains(moment.id))
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("選擇 Emoji")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("關閉") { dismiss() }
+                }
+            }
+        }
+        .accessibilityIdentifier("moment-emoji-picker")
     }
 }
 

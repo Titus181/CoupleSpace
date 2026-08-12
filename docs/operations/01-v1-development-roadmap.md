@@ -99,6 +99,20 @@ last_updated: 2026-08-12
 - 首輪雙機人工驗證通過名稱可見性、私人稱呼 owner-only、雙向狀態、Realtime、選擇性 Moment、狀態修改不改寫 Moment、清除與強制結束恢復。驗證同時發現既有 Moment／回應／回答仍使用固定「你／對方」文案，不會隨名稱更新；修正改為依參與者 user UUID 動態解析目前顯示名稱與私人稱呼，未設定時使用「我／伴侶」，不修改歷史資料本身。修正版安裝兩支真機後，修改本人名稱、修改私人伴侶稱呼、owner-only 差異與清空後 fallback 四項複驗均通過。帳號設定另為兩個名稱各提供獨立、立即儲存的清除按鈕，清除其中一項不改動另一項；聚焦 UI regression 完成儲存、舊歷史換名、逐項清除與 fallback 全流程，1/1 通過，最新版部署兩支真機後兩個清除操作亦完成人工確認。
 - G6A 尚未完成：checked-in 文件尚無名稱／此刻狀態的伴侶分開訪談與可點擊原型通過紀錄；受控實際過期與登出／重新登入恢復若尚未執行也須補齊。上述 gate 完成前不得把 W7 標示為已完成。
 
+### G7 本機候選證據（2026-08-12，尚未完成）
+
+- 正式「對話」分頁已由空狀態替換為基本一對一文字聊天：最多 4,000 字、本人／伴侶左右區分、每則訊息時間、送出後遠端重讀、Realtime 收斂，以及底部分頁未讀數；介面不提供已讀標記、已讀時間或伴侶觀看狀態。
+- 正式 data service 直接重用 migration 008 的 `shared_items` message contract 與 `write_shared_message` stable client UUID 冪等邊界，不建立第二份聊天表。migration 019 只新增 owner-only `conversation_read_states` 與 unread／mark-read RPC；游標以伺服器 `created_at + client_id` 決定順序，只前進不倒退，伴侶與第三人不可讀取。
+- 本機 Supabase 已由空資料庫依序套用 migrations 001–019；完整 18 files／251 pgTAP tests 與 local `extensions`／`public` schema lint 通過。新增 cases 涵蓋雙方未讀計數、部分／完整已讀、游標不倒退、第三人拒絕、owner-only RLS 與同帳號跨裝置 Realtime publication。
+- iPhone Simulator target build 通過；最終完整 iPhone scheme 記錄 96 個測試定義、動態 launch matrix 展開後 99 次 executions，0 failure、0 skip，其中完整 `AppSkeletonTests` 為 20/20，聊天與核心導覽聚焦 UI cases 為 2/2。傳送中／成功／失敗的產品狀態、正式持久 Outbox、離線重連、可靠重試與順序恢復保留給 W9，未在 W8 候選中提前實作。
+- migration 019 已部署 Supabase 測試專案；remote migration history 顯示 local／remote 001–019 一致，第二次 linked dry-run 回報 up-to-date，linked `extensions`／`public` schema lint 無錯誤。首次 push 在明確顯示套用 019 後卡在 CLI 收尾，獨立 migration history 已確認交易完成，未重送 migration；停止該收尾程序後的 dry-run 與 lint 均正常完成。
+- 首輪雙機聊天驗證通過雙向文字、Realtime、未讀數、訊息時間、無已讀標記與強制結束恢復；同時發現輸入框取得焦點後系統鍵盤遮住底部分頁，畫面沒有自然的收鍵盤方式。修正讓聊天列表支援向下拖曳及點擊訊息區收起鍵盤，不額外加入鍵盤工具列按鈕；聚焦 UI regression 覆蓋輸入中點訊息收鍵盤後切回「今天」。
+- 雙機複驗已確認點擊訊息區與向下拖曳均可收起鍵盤，且底部三個分頁恢復切換；G7 基本文字聊天的資料、同步、未讀、時間、無已讀標記、恢復與鍵盤互動 gate 均通過。W7 的人工 gate 仍獨立保持進行中，不因 W8 完成而視為通過。
+- W9 首個體感切片開始處理按下傳送後約 0.5 秒才顯示訊息：改為立即加入本機訊息，短暫同步成功時不增加狀態文案，失敗才保留「傳送失敗」與重試入口。內部仍區分傳送中、已同步與失敗，避免把失敗訊息當作成功。此切片尚不是正式持久 Outbox；跨 App 重啟保留、離線自動重送、FIFO 與順序恢復仍須後續證據。
+- 真機回報直式截圖在 Moment 卡片的固定 220pt `scaledToFill` 圖框中遭上下裁切；圖片顯示改為依原始長寬比自動決定高度的 `scaledToFit`，不裁切直式、橫式或方形照片。
+- Moment 回應保留六個單鍵快速 Emoji，最右側新增 `+`；點擊後直接升起 App 內建的分類 Emoji 網格，點一個即送出並關閉，不再要求聚焦文字欄位或切換系統鍵盤。自訂 Emoji 沿用既有短回應同步契約；清單由 App 版本維護，新版 Unicode Emoji 需隨版本補充。
+- Emoji 面板真機回報選擇後仍約等待 0.5 秒；原因是 client 先等待建立 RPC，再重抓完整 Moment 時間線，完成後才關閉面板。修正改為點擊即關閉面板並樂觀加入該 Emoji，伺服器回覆後只校正單筆回應，不再進行第二次完整讀取；失敗則撤回暫存回應並恢復既有錯誤提示。
+
 ## 關鍵里程碑
 
 ### M0：技術方案可行（W1）

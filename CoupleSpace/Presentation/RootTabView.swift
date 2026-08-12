@@ -5,6 +5,7 @@ struct RootTabView: View {
     @State private var selection = PrimarySection.defaultSelection
     @StateObject private var momentModel: MomentModel
     @StateObject private var togetherNowModel: TogetherNowModel
+    @StateObject private var conversationModel: ConversationModel
     let accountUserToken: String?
     let accountStatusMessage: String?
     let relationshipToken: String?
@@ -36,6 +37,14 @@ struct RootTabView: View {
             _togetherNowModel = StateObject(
                 wrappedValue: TogetherNowModel(
                     service: SupabaseTogetherNowService(
+                        client: technicalValidationClient,
+                        relationshipID: relationshipID
+                    )
+                )
+            )
+            _conversationModel = StateObject(
+                wrappedValue: ConversationModel(
+                    service: SupabaseConversationService(
                         client: technicalValidationClient,
                         relationshipID: relationshipID
                     )
@@ -98,6 +107,26 @@ struct RootTabView: View {
             _togetherNowModel = StateObject(
                 wrappedValue: TogetherNowModel(service: InMemoryTogetherNowService())
             )
+            let seededMessages: [ChatMessage]
+            if arguments.contains("--ui-testing-partner-message") {
+                seededMessages = [ChatMessage(
+                    id: UUID(uuidString: "D4000000-0000-0000-0000-000000000001")!,
+                    senderUserID: uiTestPartnerID,
+                    body: "晚點一起吃飯嗎？",
+                    createdAt: .now
+                )]
+            } else {
+                seededMessages = []
+            }
+            _conversationModel = StateObject(
+                wrappedValue: ConversationModel(
+                    service: InMemoryConversationService(
+                        currentUserID: uiTestUserID,
+                        messages: seededMessages,
+                        unreadCount: seededMessages.count
+                    )
+                )
+            )
         }
     }
 
@@ -108,8 +137,9 @@ struct RootTabView: View {
             }
 
             Tab("對話", systemImage: "bubble.left.and.bubble.right", value: PrimarySection.conversation) {
-                ConversationView()
+                ConversationView(model: conversationModel)
             }
+            .badge(conversationModel.unreadCount)
 
             Tab("我們", systemImage: "person.2", value: PrimarySection.us) {
                 UsView(
@@ -127,27 +157,20 @@ struct RootTabView: View {
         .task {
             await momentModel.start()
             await togetherNowModel.start()
+            await conversationModel.start()
+        }
+        .onChange(of: selection) { _, selection in
+            Task {
+                await conversationModel.setConversationVisible(selection == .conversation)
+            }
         }
         .onDisappear {
             Task {
                 await momentModel.stop()
                 await togetherNowModel.stop()
+                await conversationModel.stop()
             }
         }
-    }
-}
-
-private struct ConversationView: View {
-    var body: some View {
-        NavigationStack {
-            ContentUnavailableView(
-                "兩人的對話",
-                systemImage: "bubble.left.and.bubble.right",
-                description: Text("配對後，日常對話會留在這裡。")
-            )
-            .navigationTitle("對話")
-        }
-        .accessibilityIdentifier("conversation-screen")
     }
 }
 

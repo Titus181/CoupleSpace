@@ -14,6 +14,7 @@ final class MomentModel: ObservableObject {
     private let service: MomentRemoteServing
     private var hasStarted = false
     private var pendingResponseAttempts: [UUID: (draft: MomentResponseDraft, clientID: UUID)] = [:]
+    private var optimisticResponses: [UUID: MomentResponse] = [:]
     private var pendingAnswerAttempts: [UUID: (answer: String, clientID: UUID)] = [:]
     private var pendingQuestionAttempt: (draft: MomentQuestionDraft, momentID: UUID, answerID: UUID)?
 
@@ -80,6 +81,7 @@ final class MomentModel: ObservableObject {
         defer { isLoading = false }
         do {
             moments = try await service.fetchMoments()
+            mergeOptimisticResponses()
             statusMessage = nil
             await loadMissingPhotos()
         } catch {
@@ -140,7 +142,10 @@ final class MomentModel: ObservableObject {
 
     @discardableResult
     func respond(to moment: Moment, with draft: MomentResponseDraft) async -> Bool {
-        guard !activeInteractionMomentIDs.contains(moment.id) else { return false }
+        guard !activeInteractionMomentIDs.contains(moment.id),
+              let currentUserID,
+              let content = responseContent(for: draft)
+        else { return false }
         activeInteractionMomentIDs.insert(moment.id)
         defer { activeInteractionMomentIDs.remove(moment.id) }
 
@@ -151,17 +156,28 @@ final class MomentModel: ObservableObject {
             attempt = (draft, UUID())
             pendingResponseAttempts[moment.id] = attempt
         }
+        let optimisticResponse = MomentResponse(
+            id: attempt.clientID,
+            responderUserID: currentUserID,
+            content: content,
+            createdAt: .now
+        )
+        optimisticResponses[moment.id] = optimisticResponse
+        replaceResponse(in: moment.id, with: optimisticResponse)
         do {
-            _ = try await service.createResponse(
+            let response = try await service.createResponse(
                 to: moment.id,
                 draft: draft,
                 clientID: attempt.clientID
             )
             pendingResponseAttempts[moment.id] = nil
-            await refresh()
+            optimisticResponses[moment.id] = nil
+            replaceResponse(in: moment.id, with: response)
             statusMessage = "已回應這個 Moment。"
             return true
         } catch {
+            optimisticResponses[moment.id] = nil
+            removeResponse(id: attempt.clientID, from: moment.id)
             statusMessage = "回應尚未送出，請確認連線後再試。"
             return false
         }
@@ -204,6 +220,36 @@ final class MomentModel: ObservableObject {
         for moment in moments where photoDataByMomentID[moment.id] == nil {
             guard case .photo = moment.content else { continue }
             await loadPhoto(moment)
+        }
+    }
+
+    private func responseContent(for draft: MomentResponseDraft) -> MomentResponseContent? {
+        switch draft {
+        case let .emoji(emoji):
+            return .emoji(emoji)
+        case let .text(value):
+            guard let value = MomentResponsePolicy.normalizedText(value) else { return nil }
+            return .text(value)
+        }
+    }
+
+    private func replaceResponse(in momentID: UUID, with response: MomentResponse) {
+        guard let index = moments.firstIndex(where: { $0.id == momentID }) else { return }
+        moments[index].responses.removeAll { $0.id == response.id }
+        moments[index].responses.append(response)
+    }
+
+    private func removeResponse(id: UUID, from momentID: UUID) {
+        guard let index = moments.firstIndex(where: { $0.id == momentID }) else { return }
+        moments[index].responses.removeAll { $0.id == id }
+    }
+
+    private func mergeOptimisticResponses() {
+        for (momentID, response) in optimisticResponses {
+            guard let index = moments.firstIndex(where: { $0.id == momentID }),
+                  !moments[index].responses.contains(where: { $0.id == response.id })
+            else { continue }
+            moments[index].responses.append(response)
         }
     }
 
