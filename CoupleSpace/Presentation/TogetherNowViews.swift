@@ -22,14 +22,14 @@ struct TogetherNowSectionView: View {
             } else if let snapshot = model.snapshot {
                 HStack(alignment: .top, spacing: 12) {
                     statusCard(
-                        label: snapshot.currentUserLabel,
-                        status: snapshot.currentStatus,
-                        isCurrentUser: true
-                    )
-                    statusCard(
                         label: snapshot.partnerLabel,
                         status: snapshot.partnerStatus,
                         isCurrentUser: false
+                    )
+                    statusCard(
+                        label: snapshot.currentUserLabel,
+                        status: snapshot.currentStatus,
+                        isCurrentUser: true
                     )
                 }
             } else {

@@ -107,8 +107,13 @@ final class CoupleSpaceUITests: XCTestCase {
         app.launchArguments = ["--ui-testing"]
         app.launch()
 
+        let partnerStatusCard = app.staticTexts
+            .matching(identifier: "partner-status-card")
+            .firstMatch
         let currentStatusCard = app.descendants(matching: .any)["current-user-status-card"]
+        XCTAssertTrue(partnerStatusCard.waitForExistence(timeout: 3))
         XCTAssertTrue(currentStatusCard.waitForExistence(timeout: 3))
+        XCTAssertLessThan(partnerStatusCard.frame.midX, currentStatusCard.frame.midX)
         currentStatusCard.tap()
         XCTAssertTrue(app.navigationBars["更新此刻狀態"].waitForExistence(timeout: 1))
         XCTAssertEqual(app.switches["save-status-as-moment"].value as? String, "0")
