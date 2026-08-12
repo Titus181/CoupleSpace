@@ -7,11 +7,15 @@ final class MomentModel: ObservableObject {
     @Published private(set) var photoDataByMomentID: [UUID: Data] = [:]
     @Published private(set) var isLoading = false
     @Published private(set) var isSaving = false
+    @Published private(set) var activeInteractionMomentIDs: Set<UUID> = []
     @Published private(set) var statusMessage: String?
     @Published private(set) var currentUserID: UUID?
 
     private let service: MomentRemoteServing
     private var hasStarted = false
+    private var pendingResponseAttempts: [UUID: (draft: MomentResponseDraft, clientID: UUID)] = [:]
+    private var pendingAnswerAttempts: [UUID: (answer: String, clientID: UUID)] = [:]
+    private var pendingQuestionAttempt: (draft: MomentQuestionDraft, momentID: UUID, answerID: UUID)?
 
     init(service: MomentRemoteServing) {
         self.service = service
@@ -38,6 +42,25 @@ final class MomentModel: ObservableObject {
     func authorLabel(for moment: Moment) -> String {
         guard let currentUserID else { return "留下者未確認" }
         return moment.creatorUserID == currentUserID ? "你留下的" : "對方留下的"
+    }
+
+    func response(for moment: Moment) -> MomentResponse? {
+        moment.responses.first
+    }
+
+    func responseLabel(for response: MomentResponse) -> String {
+        guard let currentUserID else { return "回應者未確認" }
+        return response.responderUserID == currentUserID ? "你的回應" : "對方的回應"
+    }
+
+    func currentUserHasAnswered(_ moment: Moment) -> Bool {
+        guard let currentUserID else { return false }
+        return moment.questionAnswers.contains { $0.answererUserID == currentUserID }
+    }
+
+    func answerLabel(for answer: MomentQuestionAnswer) -> String {
+        guard let currentUserID else { return "留下者未確認" }
+        return answer.answererUserID == currentUserID ? "你的回答" : "對方的回答"
     }
 
     func stop() async {
@@ -74,6 +97,99 @@ final class MomentModel: ObservableObject {
             return true
         } catch {
             statusMessage = "Moment 尚未送出，請確認連線後再試。"
+            return false
+        }
+    }
+
+    @discardableResult
+    func createQuestion(_ draft: MomentQuestionDraft) async -> Bool {
+        guard !isSaving else { return false }
+        isSaving = true
+        defer { isSaving = false }
+
+        let attempt: (draft: MomentQuestionDraft, momentID: UUID, answerID: UUID)
+        if let pendingQuestionAttempt, pendingQuestionAttempt.draft == draft {
+            attempt = pendingQuestionAttempt
+        } else {
+            attempt = (draft, UUID(), UUID())
+            pendingQuestionAttempt = attempt
+        }
+
+        do {
+            let moment = try await service.createQuestion(
+                draft,
+                momentClientID: attempt.momentID,
+                answerClientID: attempt.answerID
+            )
+            moments.removeAll { $0.id == moment.id }
+            moments.insert(moment, at: 0)
+            pendingQuestionAttempt = nil
+            statusMessage = "題目已留在你們的共同時間線。"
+            return true
+        } catch {
+            statusMessage = "題目尚未送出，請確認連線後再試。"
+            return false
+        }
+    }
+
+    @discardableResult
+    func respond(to moment: Moment, with draft: MomentResponseDraft) async -> Bool {
+        guard !activeInteractionMomentIDs.contains(moment.id) else { return false }
+        activeInteractionMomentIDs.insert(moment.id)
+        defer { activeInteractionMomentIDs.remove(moment.id) }
+
+        let attempt: (draft: MomentResponseDraft, clientID: UUID)
+        if let pending = pendingResponseAttempts[moment.id], pending.draft == draft {
+            attempt = pending
+        } else {
+            attempt = (draft, UUID())
+            pendingResponseAttempts[moment.id] = attempt
+        }
+        do {
+            _ = try await service.createResponse(
+                to: moment.id,
+                draft: draft,
+                clientID: attempt.clientID
+            )
+            pendingResponseAttempts[moment.id] = nil
+            await refresh()
+            statusMessage = "已回應這個 Moment。"
+            return true
+        } catch {
+            statusMessage = "回應尚未送出，請確認連線後再試。"
+            return false
+        }
+    }
+
+    @discardableResult
+    func answer(_ moment: Moment, text: String) async -> Bool {
+        guard !activeInteractionMomentIDs.contains(moment.id) else { return false }
+        activeInteractionMomentIDs.insert(moment.id)
+        defer { activeInteractionMomentIDs.remove(moment.id) }
+
+        guard let normalizedAnswer = MomentQuestionPolicy.normalizedAnswer(text) else {
+            statusMessage = "回答內容不完整。"
+            return false
+        }
+        let attempt: (answer: String, clientID: UUID)
+        if let pending = pendingAnswerAttempts[moment.id], pending.answer == normalizedAnswer {
+            attempt = pending
+        } else {
+            attempt = (normalizedAnswer, UUID())
+            pendingAnswerAttempts[moment.id] = attempt
+        }
+        do {
+            _ = try await service.answerQuestion(
+                momentID: moment.id,
+                answer: normalizedAnswer,
+                clientID: attempt.clientID
+            )
+            pendingAnswerAttempts[moment.id] = nil
+            await refresh()
+            statusMessage = "回答已送出；雙方完成後會一起揭曉。"
+            return true
+        } catch {
+            statusMessage = "回答尚未送出，請確認連線後再試。"
             return false
         }
     }

@@ -34,7 +34,10 @@ struct RootTabView: View {
             )
         } else {
             let service: InMemoryMomentService
-            if ProcessInfo.processInfo.arguments.contains("--ui-testing-photo-moment"),
+            let arguments = ProcessInfo.processInfo.arguments
+            let uiTestUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
+            let uiTestPartnerID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D2")!
+            if arguments.contains("--ui-testing-photo-moment"),
                let photoData = Data(base64Encoded:
                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
                ) {
@@ -47,6 +50,35 @@ struct RootTabView: View {
                         createdAt: .now
                     )],
                     photoDataByMomentID: [momentID: photoData]
+                )
+            } else if arguments.contains("--ui-testing-partner-moment") {
+                service = InMemoryMomentService(
+                    userID: uiTestUserID,
+                    moments: [Moment(
+                        id: UUID(uuidString: "D1000000-0000-0000-0000-000000000001")!,
+                        creatorUserID: uiTestPartnerID,
+                        content: .text("今天也辛苦了"),
+                        createdAt: .now
+                    )]
+                )
+            } else if arguments.contains("--ui-testing-partner-question") {
+                service = InMemoryMomentService(
+                    userID: uiTestUserID,
+                    moments: [Moment(
+                        id: UUID(uuidString: "D1000000-0000-0000-0000-000000000002")!,
+                        creatorUserID: uiTestPartnerID,
+                        content: .question(MomentQuestion(
+                            key: "recent_small_happiness",
+                            prompt: "最近有哪件小事讓你感到幸福？"
+                        )),
+                        createdAt: .now,
+                        questionAnswers: [MomentQuestionAnswer(
+                            id: UUID(uuidString: "D3000000-0000-0000-0000-000000000001")!,
+                            answererUserID: uiTestPartnerID,
+                            content: "下班一起吃飯",
+                            createdAt: .now
+                        )]
+                    )]
                 )
             } else {
                 service = InMemoryMomentService()

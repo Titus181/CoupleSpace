@@ -58,6 +58,35 @@ struct AppSkeletonTests {
         ])
     }
 
+    @Test func momentInteractionPoliciesKeepResponsesShortAndQuestionsFixed() {
+        #expect(MomentResponsePolicy.normalizedText("  抱抱你  ") == "抱抱你")
+        #expect(MomentResponsePolicy.normalizedText("   \n") == nil)
+        #expect(MomentResponsePolicy.normalizedText(
+            String(repeating: "a", count: MomentResponsePolicy.maximumTextLength + 1)
+        ) == nil)
+        #expect(MomentQuestionPolicy.normalizedAnswer("  下班一起吃飯  ") == "下班一起吃飯")
+        #expect(MomentQuestionPrompt.accepted.map(\.id) == [
+            "understand_today",
+            "recent_small_happiness",
+            "together_this_week",
+            "unsaid_recently",
+        ])
+
+        let first = UUID()
+        let second = UUID()
+        let question = Moment(
+            id: UUID(),
+            creatorUserID: first,
+            content: .question(MomentQuestion(key: "understand_today", prompt: "題目")),
+            createdAt: .now,
+            questionAnswers: [
+                MomentQuestionAnswer(id: UUID(), answererUserID: first, content: "A", createdAt: .now),
+                MomentQuestionAnswer(id: UUID(), answererUserID: second, content: "B", createdAt: .now),
+            ]
+        )
+        #expect(question.isComplete)
+    }
+
     @MainActor
     @Test func momentModelLoadsCreatesAndRefreshesFromRemoteChanges() async throws {
         let first = Moment(
@@ -92,6 +121,102 @@ struct AppSkeletonTests {
 
         await model.stop()
         #expect(!service.isObserving)
+    }
+
+    @MainActor
+    @Test func momentModelCompletesPartnerResponseAndJointQuestionReveal() async throws {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let partnerUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B2")!
+        let partnerMoment = Moment(
+            id: UUID(uuidString: "B1000000-0000-0000-0000-000000000011")!,
+            creatorUserID: partnerUserID,
+            content: .text("今天也辛苦了"),
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let questionMoment = Moment(
+            id: UUID(uuidString: "B1000000-0000-0000-0000-000000000012")!,
+            creatorUserID: partnerUserID,
+            content: .question(MomentQuestion(
+                key: "recent_small_happiness",
+                prompt: "最近有哪件小事讓你感到幸福？"
+            )),
+            createdAt: Date(timeIntervalSince1970: 200),
+            questionAnswers: [MomentQuestionAnswer(
+                id: UUID(),
+                answererUserID: partnerUserID,
+                content: "伴侶的隱藏回答",
+                createdAt: Date(timeIntervalSince1970: 200)
+            )]
+        )
+        let service = MomentRemoteServiceFake(moments: [questionMoment, partnerMoment])
+        let model = MomentModel(service: service)
+        await model.start()
+
+        #expect(!model.currentUserHasAnswered(questionMoment))
+        #expect(await model.respond(to: partnerMoment, with: .emoji(.hug)))
+        let refreshedPartnerMoment = try #require(model.moments.first { $0.id == partnerMoment.id })
+        #expect(refreshedPartnerMoment.isComplete)
+        #expect(model.response(for: refreshedPartnerMoment)?.content == .emoji(.hug))
+
+        #expect(await model.answer(questionMoment, text: "有人陪我吃飯"))
+        let revealedQuestion = try #require(model.moments.first { $0.id == questionMoment.id })
+        #expect(revealedQuestion.isComplete)
+        #expect(revealedQuestion.questionAnswers.count == 2)
+        #expect(model.currentUserHasAnswered(revealedQuestion))
+
+        let draft = MomentQuestionDraft(
+            questionKey: "understand_today",
+            answer: "希望你知道我有點累"
+        )
+        #expect(await model.createQuestion(draft))
+        #expect(model.moments.first?.creatorUserID == currentUserID)
+        #expect(model.currentUserHasAnswered(try #require(model.moments.first)))
+    }
+
+    @MainActor
+    @Test func momentInteractionRetriesReuseStableClientIdentities() async throws {
+        let partnerUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B2")!
+        let partnerMoment = Moment(
+            id: UUID(),
+            creatorUserID: partnerUserID,
+            content: .text("今天也辛苦了"),
+            createdAt: .now
+        )
+        let partnerQuestion = Moment(
+            id: UUID(),
+            creatorUserID: partnerUserID,
+            content: .question(MomentQuestion(key: "understand_today", prompt: "題目")),
+            createdAt: .now,
+            questionAnswers: [MomentQuestionAnswer(
+                id: UUID(),
+                answererUserID: partnerUserID,
+                content: "隱藏回答",
+                createdAt: .now
+            )]
+        )
+        let service = MomentRemoteServiceFake(moments: [partnerQuestion, partnerMoment])
+        let model = MomentModel(service: service)
+        await model.start()
+
+        service.responseFailuresRemaining = 1
+        #expect(await model.respond(to: partnerMoment, with: .emoji(.heart)) == false)
+        #expect(await model.respond(to: partnerMoment, with: .emoji(.heart)))
+        #expect(service.responseClientIDs.count == 2)
+        #expect(service.responseClientIDs[0] == service.responseClientIDs[1])
+
+        service.answerFailuresRemaining = 1
+        #expect(await model.answer(partnerQuestion, text: "希望你理解我") == false)
+        #expect(await model.answer(partnerQuestion, text: "希望你理解我"))
+        #expect(service.answerClientIDs.count == 2)
+        #expect(service.answerClientIDs[0] == service.answerClientIDs[1])
+
+        let draft = MomentQuestionDraft(questionKey: "understand_today", answer: "有點累")
+        service.questionFailuresRemaining = 1
+        #expect(await model.createQuestion(draft) == false)
+        #expect(await model.createQuestion(draft))
+        #expect(service.questionAttemptIDs.count == 2)
+        #expect(service.questionAttemptIDs[0].0 == service.questionAttemptIDs[1].0)
+        #expect(service.questionAttemptIDs[0].1 == service.questionAttemptIDs[1].1)
     }
 
     @Test func authenticationStateDistinguishesRestoreCancelFailureAndSignOut() {
@@ -294,6 +419,12 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
     private let userID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
     var moments: [Moment]
     var createdDrafts: [MomentDraft] = []
+    var responseClientIDs: [UUID] = []
+    var answerClientIDs: [UUID] = []
+    var questionAttemptIDs: [(UUID, UUID)] = []
+    var responseFailuresRemaining = 0
+    var answerFailuresRemaining = 0
+    var questionFailuresRemaining = 0
     var isObserving = false
     private var onChange: (@MainActor () async -> Void)?
 
@@ -322,6 +453,79 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
         )
         moments.insert(moment, at: 0)
         return moment
+    }
+
+    func createQuestion(
+        _ draft: MomentQuestionDraft,
+        momentClientID: UUID,
+        answerClientID: UUID
+    ) async throws -> Moment {
+        questionAttemptIDs.append((momentClientID, answerClientID))
+        if questionFailuresRemaining > 0 {
+            questionFailuresRemaining -= 1
+            throw CancellationError()
+        }
+        let prompt = try #require(MomentQuestionPrompt.accepted.first { $0.id == draft.questionKey })
+        let answer = try #require(MomentQuestionPolicy.normalizedAnswer(draft.answer))
+        let moment = Moment(
+            id: momentClientID,
+            creatorUserID: userID,
+            content: .question(MomentQuestion(key: prompt.id, prompt: prompt.prompt)),
+            createdAt: Date(timeIntervalSince1970: 400),
+            questionAnswers: [MomentQuestionAnswer(
+                id: answerClientID,
+                answererUserID: userID,
+                content: answer,
+                createdAt: Date(timeIntervalSince1970: 400)
+            )]
+        )
+        moments.insert(moment, at: 0)
+        return moment
+    }
+
+    func createResponse(
+        to momentID: UUID,
+        draft: MomentResponseDraft,
+        clientID: UUID
+    ) async throws -> MomentResponse {
+        responseClientIDs.append(clientID)
+        if responseFailuresRemaining > 0 {
+            responseFailuresRemaining -= 1
+            throw CancellationError()
+        }
+        let index = try #require(moments.firstIndex { $0.id == momentID })
+        let content: MomentResponseContent
+        switch draft {
+        case let .emoji(emoji): content = .emoji(emoji)
+        case let .text(value): content = .text(try #require(MomentResponsePolicy.normalizedText(value)))
+        }
+        let response = MomentResponse(
+            id: clientID,
+            responderUserID: userID,
+            content: content,
+            createdAt: Date(timeIntervalSince1970: 300)
+        )
+        moments[index].responses.append(response)
+        return response
+    }
+
+    func answerQuestion(momentID: UUID, answer: String, clientID: UUID) async throws
+        -> MomentQuestionAnswer
+    {
+        answerClientIDs.append(clientID)
+        if answerFailuresRemaining > 0 {
+            answerFailuresRemaining -= 1
+            throw CancellationError()
+        }
+        let index = try #require(moments.firstIndex { $0.id == momentID })
+        let questionAnswer = MomentQuestionAnswer(
+            id: clientID,
+            answererUserID: userID,
+            content: try #require(MomentQuestionPolicy.normalizedAnswer(answer)),
+            createdAt: Date(timeIntervalSince1970: 300)
+        )
+        moments[index].questionAnswers.append(questionAnswer)
+        return questionAnswer
     }
 
     func photoData(for momentID: UUID) async throws -> Data { Data() }

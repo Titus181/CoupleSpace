@@ -87,6 +87,83 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testRespondsToPartnerMomentWithEmoji() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-partner-moment"]
+        app.launch()
+
+        let hugButton = app.buttons["moment-emoji-hug"]
+        XCTAssertTrue(hugButton.waitForExistence(timeout: 3))
+        hugButton.tap()
+        XCTAssertTrue(app.staticTexts["你的回應"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
+    func testRespondsToPartnerMomentWithShortText() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-partner-moment"]
+        app.launch()
+
+        let responseButton = app.buttons["回一句"]
+        if !responseButton.waitForExistence(timeout: 1) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(responseButton.waitForExistence(timeout: 3))
+        responseButton.tap()
+        let editor = app.textViews["moment-response-text"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 1))
+        editor.tap()
+        editor.typeText("抱抱你，晚點一起休息")
+        app.buttons["save-moment-response"].tap()
+
+        XCTAssertTrue(app.staticTexts["抱抱你，晚點一起休息"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
+    func testAnswersPartnerQuestionAndRevealsBothAnswers() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-partner-question"]
+        app.launch()
+
+        let answerButton = app.buttons["回答這一題"]
+        if !answerButton.waitForExistence(timeout: 1) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(answerButton.waitForExistence(timeout: 3))
+        answerButton.tap()
+
+        let editor = app.textViews["partner-question-answer-text"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 1))
+        editor.tap()
+        editor.typeText("有人陪我吃飯")
+        app.buttons["save-question-answer"].tap()
+
+        app.swipeUp()
+        XCTAssertTrue(app.staticTexts["下班一起吃飯"].exists)
+        XCTAssertTrue(app.staticTexts["有人陪我吃飯"].exists)
+    }
+
+    @MainActor
+    func testCreatesQuestionMomentAndWaitsForJointReveal() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+
+        XCTAssertTrue(app.buttons["create-question-moment"].waitForExistence(timeout: 3))
+        app.buttons["create-question-moment"].tap()
+        let editor = app.textViews["question-answer-text"]
+        XCTAssertTrue(editor.waitForExistence(timeout: 1))
+        editor.tap()
+        editor.typeText("希望你知道我今天有點累")
+        app.buttons["save-question-moment"].tap()
+
+        app.swipeUp()
+        XCTAssertTrue(
+            app.staticTexts["回答已送出，等對方有空時一起揭曉。"].waitForExistence(timeout: 2)
+        )
+    }
+
+    @MainActor
     func testAccountSettingsUsesAnAlertAndKeepsW1ValidationToolsReachable() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]

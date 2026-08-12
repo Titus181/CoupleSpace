@@ -5,6 +5,7 @@ import UIKit
 struct TodayMomentView: View {
     @ObservedObject var model: MomentModel
     @State private var isCreatingMoment = false
+    @State private var isCreatingQuestion = false
 
     var body: some View {
         NavigationStack {
@@ -28,6 +29,17 @@ struct TodayMomentView: View {
                     .controlSize(.large)
                     .accessibilityIdentifier("create-moment")
 
+                    Button {
+                        isCreatingQuestion = true
+                    } label: {
+                        Label("我們的一題", systemImage: "questionmark.bubble")
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 4)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .accessibilityIdentifier("create-question-moment")
+
                     if model.isLoading && model.moments.isEmpty {
                         ProgressView("正在更新你們的此刻…")
                             .frame(maxWidth: .infinity, minHeight: 220)
@@ -38,7 +50,8 @@ struct TodayMomentView: View {
                             MomentCard(
                                 moment: latest,
                                 photoData: model.photoDataByMomentID[latest.id],
-                                authorLabel: model.authorLabel(for: latest)
+                                authorLabel: model.authorLabel(for: latest),
+                                model: model
                             )
                         }
                     } else {
@@ -65,6 +78,9 @@ struct TodayMomentView: View {
             .sheet(isPresented: $isCreatingMoment) {
                 MomentComposerView(model: model)
             }
+            .sheet(isPresented: $isCreatingQuestion) {
+                QuestionMomentComposerView(model: model)
+            }
         }
         .accessibilityIdentifier("today-screen")
     }
@@ -90,7 +106,8 @@ struct MomentTimelineView: View {
                             MomentCard(
                                 moment: moment,
                                 photoData: model.photoDataByMomentID[moment.id],
-                                authorLabel: model.authorLabel(for: moment)
+                                authorLabel: model.authorLabel(for: moment),
+                                model: model
                             )
                         }
                     }
@@ -107,6 +124,9 @@ struct MomentCard: View {
     let moment: Moment
     let photoData: Data?
     let authorLabel: String
+    @ObservedObject var model: MomentModel
+    @State private var isWritingResponse = false
+    @State private var isAnsweringQuestion = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -135,6 +155,14 @@ struct MomentCard: View {
                     }
                     .frame(height: 180)
                 }
+            case let .question(question):
+                VStack(alignment: .leading, spacing: 8) {
+                    Label("我們的一題", systemImage: "questionmark.bubble.fill")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tint)
+                    Text(question.prompt)
+                        .font(.title3.weight(.semibold))
+                }
             }
 
             HStack(spacing: 6) {
@@ -146,11 +174,102 @@ struct MomentCard: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+
+            interactionContent
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
         .accessibilityIdentifier("moment-card")
+        .sheet(isPresented: $isWritingResponse) {
+            MomentTextResponseView(moment: moment, model: model)
+        }
+        .sheet(isPresented: $isAnsweringQuestion) {
+            MomentQuestionAnswerView(moment: moment, model: model)
+        }
+    }
+
+    @ViewBuilder
+    private var interactionContent: some View {
+        switch moment.content {
+        case .question:
+            questionInteraction
+        case .mood, .text, .photo:
+            standardInteraction
+        }
+    }
+
+    @ViewBuilder
+    private var standardInteraction: some View {
+        if let response = model.response(for: moment) {
+            Divider()
+            VStack(alignment: .leading, spacing: 4) {
+                Text(model.responseLabel(for: response))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                switch response.content {
+                case let .emoji(emoji):
+                    Text(emoji.symbol)
+                        .font(.title2)
+                        .accessibilityLabel(emoji.accessibilityLabel)
+                case let .text(text):
+                    Text(text)
+                }
+            }
+            .accessibilityIdentifier("moment-response")
+        } else if let currentUserID = model.currentUserID,
+                  currentUserID != moment.creatorUserID
+        {
+            Divider()
+            Text("回應這一刻")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 8) {
+                ForEach(MomentEmoji.allCases, id: \.self) { emoji in
+                    Button {
+                        Task { await model.respond(to: moment, with: .emoji(emoji)) }
+                    } label: {
+                        Text(emoji.symbol)
+                            .font(.title3)
+                            .frame(maxWidth: .infinity, minHeight: 36)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(emoji.accessibilityLabel)
+                    .accessibilityIdentifier("moment-emoji-\(emoji.rawValue)")
+                    .disabled(model.activeInteractionMomentIDs.contains(moment.id))
+                }
+            }
+            Button("回一句") { isWritingResponse = true }
+                .font(.subheadline.weight(.semibold))
+                .accessibilityIdentifier("write-moment-response")
+        }
+    }
+
+    @ViewBuilder
+    private var questionInteraction: some View {
+        Divider()
+        if moment.isComplete {
+            VStack(alignment: .leading, spacing: 12) {
+                ForEach(moment.questionAnswers) { answer in
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(model.answerLabel(for: answer))
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Text(answer.content)
+                    }
+                }
+            }
+            .accessibilityIdentifier("question-reveal")
+        } else if model.currentUserHasAnswered(moment) {
+            Label("回答已送出，等對方有空時一起揭曉。", systemImage: "lock")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .accessibilityIdentifier("question-waiting")
+        } else {
+            Button("回答這一題") { isAnsweringQuestion = true }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("answer-moment-question")
+        }
     }
 }
 
@@ -248,7 +367,7 @@ private struct MomentComposerView: View {
                 }
 
                 Section {
-                    Text("Moment 會立即進入你們的共同時間線；回應功能會在下一個切片加入。")
+                    Text("Moment 會立即進入你們的共同時間線，伴侶可以用 Emoji 或一句話回應。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -290,5 +409,180 @@ private struct MomentComposerView: View {
             }
         }
         .accessibilityIdentifier("moment-composer")
+    }
+}
+
+private struct QuestionMomentComposerView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var model: MomentModel
+    @State private var selectedQuestion = MomentQuestionPrompt.accepted[0]
+    @State private var answer = ""
+
+    private var draft: MomentQuestionDraft? {
+        guard MomentQuestionPolicy.normalizedAnswer(answer) != nil else { return nil }
+        return MomentQuestionDraft(questionKey: selectedQuestion.id, answer: answer)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("選一題") {
+                    Picker("題目", selection: $selectedQuestion) {
+                        ForEach(MomentQuestionPrompt.accepted) { question in
+                            Text(question.prompt).tag(question)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .labelsHidden()
+                }
+
+                Section("你的回答") {
+                    TextEditor(text: $answer)
+                        .frame(minHeight: 140)
+                        .accessibilityIdentifier("question-answer-text")
+                    Text("\(answer.count)/\(MomentQuestionPolicy.maximumAnswerLength)")
+                        .font(.caption)
+                        .foregroundStyle(
+                            answer.count > MomentQuestionPolicy.maximumAnswerLength ? .red : .secondary
+                        )
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+
+                Section {
+                    Label("你的回答會先鎖住；伴侶回答後才一起揭曉。", systemImage: "lock")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("我們的一題")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("送出") {
+                        guard let draft else { return }
+                        Task {
+                            if await model.createQuestion(draft) {
+                                dismiss()
+                            }
+                        }
+                    }
+                    .disabled(draft == nil || model.isSaving)
+                    .accessibilityIdentifier("save-question-moment")
+                }
+            }
+        }
+        .accessibilityIdentifier("question-moment-composer")
+    }
+}
+
+private struct MomentTextResponseView: View {
+    @Environment(\.dismiss) private var dismiss
+    let moment: Moment
+    @ObservedObject var model: MomentModel
+    @State private var text = ""
+
+    private var normalizedText: String? {
+        MomentResponsePolicy.normalizedText(text)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("回一句") {
+                    TextEditor(text: $text)
+                        .frame(minHeight: 120)
+                        .accessibilityIdentifier("moment-response-text")
+                    Text("\(text.count)/\(MomentResponsePolicy.maximumTextLength)")
+                        .font(.caption)
+                        .foregroundStyle(
+                            text.count > MomentResponsePolicy.maximumTextLength ? .red : .secondary
+                        )
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+            }
+            .navigationTitle("回應 Moment")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("送出") {
+                        guard let normalizedText else { return }
+                        Task {
+                            if await model.respond(to: moment, with: .text(normalizedText)) {
+                                dismiss()
+                            }
+                        }
+                    }
+                    .disabled(normalizedText == nil || model.activeInteractionMomentIDs.contains(moment.id))
+                    .accessibilityIdentifier("save-moment-response")
+                }
+            }
+        }
+    }
+}
+
+private struct MomentQuestionAnswerView: View {
+    @Environment(\.dismiss) private var dismiss
+    let moment: Moment
+    @ObservedObject var model: MomentModel
+    @State private var answer = ""
+
+    private var normalizedAnswer: String? {
+        MomentQuestionPolicy.normalizedAnswer(answer)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if case let .question(question) = moment.content {
+                    Section("我們的一題") {
+                        Text(question.prompt)
+                            .font(.headline)
+                    }
+                }
+                Section("你的回答") {
+                    TextEditor(text: $answer)
+                        .frame(minHeight: 140)
+                        .accessibilityIdentifier("partner-question-answer-text")
+                    Text("\(answer.count)/\(MomentQuestionPolicy.maximumAnswerLength)")
+                        .font(.caption)
+                        .foregroundStyle(
+                            answer.count > MomentQuestionPolicy.maximumAnswerLength ? .red : .secondary
+                        )
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                }
+                Section {
+                    Label("送出後，兩人的回答會一起揭曉。", systemImage: "sparkles")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("回答這一題")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("送出") {
+                        guard let normalizedAnswer else { return }
+                        Task {
+                            if await model.answer(moment, text: normalizedAnswer) {
+                                dismiss()
+                            }
+                        }
+                    }
+                    .disabled(
+                        normalizedAnswer == nil || model.activeInteractionMomentIDs.contains(moment.id)
+                    )
+                    .accessibilityIdentifier("save-question-answer")
+                }
+            }
+        }
     }
 }
