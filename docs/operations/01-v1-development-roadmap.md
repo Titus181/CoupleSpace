@@ -42,7 +42,7 @@ last_updated: 2026-08-12
 | W4，8/24–8/30 | **G4 邀請與一對一配對（已完成）** | A 可邀請 B；B 接受後雙方看到同一段伴侶關係；一人只能有一個有效伴侶；邀請可拒絕、失效與重試 |
 | W5，8/31–9/6 | **G5 第一個 Moment 垂直切片（已完成）** | 可建立心情、短句或照片 Moment；另一支手機能同步看到；Moment 自動進入共同時間線 |
 | W6，9/7–9/13 | **G6 Moment 雙向互動（已完成）** | 支援 Emoji、短文字回應及固定題庫版「我們的一題」；雙方互動後形成完整 Moment |
-| W7，9/14–9/20 | **G6A 名稱與此刻狀態垂直切片** | G6 後先通過分開訪談與可點擊原型；本人可設定伴侶可見顯示名稱及 owner-only 伴侶稱呼；雙方可跨裝置看到本人主動設定、具期限的固定或自訂狀態，過期結果一致；只有明確選擇才同時建立 Moment，不提供在線、最後上線、觀看紀錄或完整動態牆 |
+| W7，9/14–9/20 | **G6A 名稱與此刻狀態垂直切片（已完成）** | 本人可設定伴侶可見顯示名稱及 owner-only 伴侶稱呼；雙方可跨裝置看到本人主動設定、具期限的固定或自訂狀態，過期結果一致；同一帳號重新登入後可恢復名稱、私人稱呼與尚未過期狀態；只有明確選擇才同時建立 Moment，不提供在線、最後上線、觀看紀錄或完整動態牆 |
 | W8，9/21–9/27 | **G7 基本文字聊天** | 一對一文字訊息可跨裝置同步；顯示訊息時間與未讀數；不顯示已讀狀態 |
 | W9，9/28–10/4 | **G8 可靠傳送機制** | 訊息具有傳送中、成功、失敗與重試狀態；離線重連後不遺失、不重複，順序可預期 |
 | W10，10/5–10/11 | **G9 聊天首版完整範圍** | 支援聊天照片、Emoji 回應；長按訊息可收藏為 Moment，並能從 Moment 回到相關對話 |
@@ -89,15 +89,17 @@ last_updated: 2026-08-12
 - migration 017 已部署 Supabase 測試專案；remote migration 001–017 一致，linked `extensions`／`public` schema lint 無錯誤，再次 dry-run 顯示無待部署 migration。
 - 兩支真實 iPhone 已通過雙向 Emoji／短文字回應、第一份答案在伴侶回答前不可見、第二份回答後雙方共同揭曉、Realtime 收斂及強制結束後恢復；G6 與 M1 正式完成。
 
-### G6A 本機候選證據（2026-08-12，尚未完成）
+### G6A 完成證據（2026-08-12）
 
 - `現在的我們` 已加入「今天」頂部：本人狀態卡可編輯，伴侶卡只讀；帳號設定可維護本人顯示名稱與 owner-only 私人伴侶稱呼。固定狀態、自訂 40 字短句、1 小時／4 小時／建立者當地今晚／手動清除均有 domain 規則；單純更新不建立歷史或推播，只有明確開啟「也留成 Moment」才建立獨立 Moment。
 - migration 018 新增帳號層 `user_profiles`、owner-only `relationship_partner_aliases` 與每位成員單筆 `current_relationship_statuses`。名稱與狀態只能由本人 RPC 寫入；active partner 可讀顯示名稱與未過期狀態，私人稱呼、第三人及 closing relationship 均由 RLS 隔離。狀態過期使用 server time；狀態＋Moment 在同一 transaction 內完成，stable client UUID 重試不重複，後續狀態更新不改寫既有 Moment。
 - 本機 Supabase 已由空資料庫依序套用 migrations 001–018；完整 17 files／232 pgTAP tests 與 local `extensions`／`public` schema lint 通過。
-- 歷史名稱改為動態解析後，以隔離 DerivedData 串行重跑完整 iPhone scheme：79 個 unit tests、13 個一般 UI tests及四組 launch matrix 共 96 次 test executions 全數通過，0 failure、0 skip；`.xcresult` 記錄 93 個測試定義，動態 launch 參數展開後為 96 次執行。Xcode 26.5 仍輸出既有 LLDB `DebuggerVersionStore.StoreError`／`no debugger version` 警告，但 runner 完整進入 `xctest` 並產生成功結果。
+- W7 關閉前以全新 DerivedData 串行重跑完整 iPhone scheme：83 個 unit tests、15 個一般 UI tests及四組 launch matrix 共 102 次 test executions 全數通過，0 failure、0 skip；`.xcresult` 記錄 99 個測試定義，動態 launch 參數展開後為 102 次執行。Xcode 26.5 仍輸出既有 LLDB `DebuggerVersionStore.StoreError`／`no debugger version` 警告，但 runner 完整進入 `xctest`、產生結果並以 exit 0 結束。
 - migration 018 已部署 Supabase 測試專案；remote migration 001–018 一致，再次 dry-run 顯示無待部署 migration，linked `extensions`／`public` schema lint 無錯誤。部署後 CLI 的本機 migration catalog 快取曾因 `pg-delta` 2.5 秒連線逾時輸出警告，但遠端 migration list、第二次 dry-run 與 linked lint 均直接確認 migration 已成功落地。相同 development build 已成功安裝並啟動於兩支 iOS 26.6 測試 iPhone，既有 App data 保留。
 - 首輪雙機人工驗證通過名稱可見性、私人稱呼 owner-only、雙向狀態、Realtime、選擇性 Moment、狀態修改不改寫 Moment、清除與強制結束恢復。驗證同時發現既有 Moment／回應／回答仍使用固定「你／對方」文案，不會隨名稱更新；修正改為依參與者 user UUID 動態解析目前顯示名稱與私人稱呼，未設定時使用「我／伴侶」，不修改歷史資料本身。修正版安裝兩支真機後，修改本人名稱、修改私人伴侶稱呼、owner-only 差異與清空後 fallback 四項複驗均通過。帳號設定另為兩個名稱各提供獨立、立即儲存的清除按鈕，清除其中一項不改動另一項；聚焦 UI regression 完成儲存、舊歷史換名、逐項清除與 fallback 全流程，1/1 通過，最新版部署兩支真機後兩個清除操作亦完成人工確認。
-- G6A 尚未完成：checked-in 文件尚無名稱／此刻狀態的伴侶分開訪談與可點擊原型通過紀錄；受控實際過期與登出／重新登入恢復若尚未執行也須補齊。上述 gate 完成前不得把 W7 標示為已完成。
+- 自動化另覆蓋狀態到期後由本機排程清除，以及重新建立 model 後由遠端恢復名稱、私人稱呼與未過期狀態；`AppSkeletonTests` 22/22 通過。名稱／此刻狀態的伴侶訪談與可點擊原型由產品研究另行處理，不列入開發 roadmap，也不阻擋 G6A 工程完成。
+- 兩支 iOS 26.6 真實 iPhone 先同步顯示一小時狀態，再由授權的測試專案單筆更新將仍未過期的 `expires_at` 縮短為伺服器時間後 30 秒；兩支 App 均在不重開、不手動重整下，依 Realtime 收到的新期限自行排程並於到期後回到「尚未設定」。直接把期限改到過去會使資料立即被 RLS 隱藏、無法等效驗證 Realtime 排程，因此不列為完成證據。
+- 兩支真機分別以各自原 Apple 帳號逐一登出及重新登入，另一支保持登入。雙方重新登入後帳號識別碼前綴、原 relationship、本人顯示名稱、owner-only 私人伴侶稱呼與手動清除狀態均由遠端 SSOT 恢復，不需重新配對；G6A／W7 正式完成。
 
 ### G7 本機候選證據（2026-08-12，尚未完成）
 
@@ -107,7 +109,7 @@ last_updated: 2026-08-12
 - iPhone Simulator target build 通過；最終完整 iPhone scheme 記錄 96 個測試定義、動態 launch matrix 展開後 99 次 executions，0 failure、0 skip，其中完整 `AppSkeletonTests` 為 20/20，聊天與核心導覽聚焦 UI cases 為 2/2。傳送中／成功／失敗的產品狀態、正式持久 Outbox、離線重連、可靠重試與順序恢復保留給 W9，未在 W8 候選中提前實作。
 - migration 019 已部署 Supabase 測試專案；remote migration history 顯示 local／remote 001–019 一致，第二次 linked dry-run 回報 up-to-date，linked `extensions`／`public` schema lint 無錯誤。首次 push 在明確顯示套用 019 後卡在 CLI 收尾，獨立 migration history 已確認交易完成，未重送 migration；停止該收尾程序後的 dry-run 與 lint 均正常完成。
 - 首輪雙機聊天驗證通過雙向文字、Realtime、未讀數、訊息時間、無已讀標記與強制結束恢復；同時發現輸入框取得焦點後系統鍵盤遮住底部分頁，畫面沒有自然的收鍵盤方式。修正讓聊天列表支援向下拖曳及點擊訊息區收起鍵盤，不額外加入鍵盤工具列按鈕；聚焦 UI regression 覆蓋輸入中點訊息收鍵盤後切回「今天」。
-- 雙機複驗已確認點擊訊息區與向下拖曳均可收起鍵盤，且底部三個分頁恢復切換；G7 基本文字聊天的資料、同步、未讀、時間、無已讀標記、恢復與鍵盤互動 gate 均通過。W7 的人工 gate 仍獨立保持進行中，不因 W8 完成而視為通過。
+- 雙機複驗已確認點擊訊息區與向下拖曳均可收起鍵盤，且底部三個分頁恢復切換；G7 基本文字聊天的資料、同步、未讀、時間、無已讀標記、恢復與鍵盤互動 gate 均通過。W7 的真機過期與重新登入 gate 已另行完成，不以 W8 證據替代。
 - W9 首個體感切片開始處理按下傳送後約 0.5 秒才顯示訊息：改為立即加入本機訊息，短暫同步成功時不增加狀態文案，失敗才保留「傳送失敗」與重試入口。內部仍區分傳送中、已同步與失敗，避免把失敗訊息當作成功。此切片尚不是正式持久 Outbox；跨 App 重啟保留、離線自動重送、FIFO 與順序恢復仍須後續證據。
 - 真機回報直式截圖在 Moment 卡片的固定 220pt `scaledToFill` 圖框中遭上下裁切；圖片顯示改為依原始長寬比自動決定高度的 `scaledToFit`，不裁切直式、橫式或方形照片。
 - Moment 回應保留六個單鍵快速 Emoji，最右側新增 `+`；點擊後直接升起 App 內建的分類 Emoji 網格，點一個即送出並關閉，不再要求聚焦文字欄位或切換系統鍵盤。自訂 Emoji 沿用既有短回應同步契約；清單由 App 版本維護，新版 Unicode Emoji 需隨版本補充。
@@ -201,7 +203,7 @@ PD-020 已關閉「有意義雙向互動」的定義與資料最小化方向：�
 - W1–W4：訪談 10 對種子客群情侶，伴侶分開訪談。
 - W1–W3：以可點擊原型驗證 `建立 Moment → 邀請 → 回應／共同揭曉 → 對話 → 收藏 → 時間線`。
 - W1–W3：同步驗證 `建立共同約定 → 專屬討論 → 活動後建立 Moment → 返回原約定`，確認資訊集中但不分散日常對話。
-- G6 後、G6A 實作前：以伴侶分開訪談及可點擊原型驗證 `設定名稱／稱呼 → 設定具期限狀態 → 伴侶看見 → 過期 → 選擇性留成 Moment`，先排除在線監控、持續更新壓力與動態牆洗版風險。
+- 名稱／稱呼與此刻狀態的伴侶分開訪談及可點擊原型由產品研究另行規劃，不作為 G6A 開發排程或工程完成 gate。
 - W4 前：確認第一個 Moment 的預設內容與邀請文案，避免在配對流程中臨時決策。
 - G16：以兩帳號、兩支真實 iPhone 執行 3–7 天熟人圈 TestFlight 煙霧測試，不把此階段當作公開獲客或長期留存研究。
 - G17：正式上架後執行一個月繁中上市活動，以伴侶對追蹤雙人啟用、雙向互動、W1／W4 留存、Plus Launch Pass 使用、品質、成本與自願訂閱。

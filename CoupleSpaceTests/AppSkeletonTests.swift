@@ -420,6 +420,60 @@ struct AppSkeletonTests {
         #expect(model.snapshot?.currentStatus == nil)
     }
 
+    @MainActor
+    @Test func togetherNowAutomaticallyRemovesStatusAtExpiration() async throws {
+        let currentUserID = UUID()
+        let partnerUserID = UUID()
+        let status = CurrentRelationshipStatus(
+            userID: currentUserID,
+            content: .fixed(.busy),
+            expiration: .oneHour,
+            expiresAt: Date().addingTimeInterval(0.05),
+            updatedAt: .now
+        )
+        let service = TogetherNowRemoteServiceFake(snapshot: TogetherNowSnapshot(
+            currentUserID: currentUserID,
+            partnerUserID: partnerUserID,
+            currentDisplayName: nil,
+            partnerDisplayName: nil,
+            privatePartnerName: nil,
+            currentStatus: status,
+            partnerStatus: nil
+        ))
+        let model = TogetherNowModel(service: service)
+
+        await model.start()
+        #expect(model.snapshot?.currentStatus != nil)
+        try await Task.sleep(for: .milliseconds(250))
+        #expect(model.snapshot?.currentStatus == nil)
+        await model.stop()
+    }
+
+    @MainActor
+    @Test func togetherNowRestoresRemoteNamesAndActiveStatusAfterModelRecreation() async {
+        let service = TogetherNowRemoteServiceFake(snapshot: .preview)
+        let firstModel = TogetherNowModel(service: service)
+        await firstModel.start()
+
+        #expect(await firstModel.saveNames(
+            displayName: "小日",
+            privatePartnerName: "小月亮"
+        ))
+        #expect(await firstModel.saveStatus(CurrentStatusDraft(
+            content: .fixed(.thinkingOfYou),
+            expiration: .manual,
+            savesAsMoment: false
+        )))
+        await firstModel.stop()
+
+        let restoredModel = TogetherNowModel(service: service)
+        await restoredModel.start()
+        #expect(restoredModel.snapshot?.currentDisplayName == "小日")
+        #expect(restoredModel.snapshot?.privatePartnerName == "小月亮")
+        #expect(restoredModel.snapshot?.currentStatus?.content == .fixed(.thinkingOfYou))
+        await restoredModel.stop()
+    }
+
     @Test func authenticationStateDistinguishesRestoreCancelFailureAndSignOut() {
         if case .checking = AuthenticationState.checking.phase {} else {
             Issue.record("The initial authentication state should restore the session first.")
