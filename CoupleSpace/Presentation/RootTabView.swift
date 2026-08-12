@@ -4,6 +4,7 @@ import SwiftUI
 struct RootTabView: View {
     @State private var selection = PrimarySection.defaultSelection
     @StateObject private var momentModel: MomentModel
+    @StateObject private var togetherNowModel: TogetherNowModel
     let accountUserToken: String?
     let accountStatusMessage: String?
     let relationshipToken: String?
@@ -27,6 +28,14 @@ struct RootTabView: View {
             _momentModel = StateObject(
                 wrappedValue: MomentModel(
                     service: SupabaseMomentService(
+                        client: technicalValidationClient,
+                        relationshipID: relationshipID
+                    )
+                )
+            )
+            _togetherNowModel = StateObject(
+                wrappedValue: TogetherNowModel(
+                    service: SupabaseTogetherNowService(
                         client: technicalValidationClient,
                         relationshipID: relationshipID
                     )
@@ -86,13 +95,16 @@ struct RootTabView: View {
             _momentModel = StateObject(
                 wrappedValue: MomentModel(service: service)
             )
+            _togetherNowModel = StateObject(
+                wrappedValue: TogetherNowModel(service: InMemoryTogetherNowService())
+            )
         }
     }
 
     var body: some View {
         TabView(selection: $selection) {
             Tab("今天", systemImage: "sun.max", value: PrimarySection.today) {
-                TodayMomentView(model: momentModel)
+                TodayMomentView(model: momentModel, togetherNowModel: togetherNowModel)
             }
 
             Tab("對話", systemImage: "bubble.left.and.bubble.right", value: PrimarySection.conversation) {
@@ -102,6 +114,7 @@ struct RootTabView: View {
             Tab("我們", systemImage: "person.2", value: PrimarySection.us) {
                 UsView(
                     momentModel: momentModel,
+                    togetherNowModel: togetherNowModel,
                     accountUserToken: accountUserToken,
                     accountStatusMessage: accountStatusMessage,
                     relationshipToken: relationshipToken,
@@ -111,9 +124,15 @@ struct RootTabView: View {
             }
         }
         .tint(.accentColor)
-        .task { await momentModel.start() }
+        .task {
+            await momentModel.start()
+            await togetherNowModel.start()
+        }
         .onDisappear {
-            Task { await momentModel.stop() }
+            Task {
+                await momentModel.stop()
+                await togetherNowModel.stop()
+            }
         }
     }
 }
@@ -135,6 +154,7 @@ private struct ConversationView: View {
 private struct UsView: View {
     @State private var isShowingAccountSettings = false
     @ObservedObject var momentModel: MomentModel
+    @ObservedObject var togetherNowModel: TogetherNowModel
     let accountUserToken: String?
     let accountStatusMessage: String?
     let relationshipToken: String?
@@ -144,7 +164,7 @@ private struct UsView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                MomentTimelineView(model: momentModel)
+                MomentTimelineView(model: momentModel, togetherNowModel: togetherNowModel)
                 if let accountStatusMessage {
                     Text(accountStatusMessage)
                         .font(.footnote)
@@ -167,6 +187,7 @@ private struct UsView: View {
             }
             .sheet(isPresented: $isShowingAccountSettings) {
                 AccountSettingsView(
+                    togetherNowModel: togetherNowModel,
                     userToken: accountUserToken,
                     statusMessage: accountStatusMessage,
                     relationshipToken: relationshipToken,
@@ -183,6 +204,7 @@ private struct AccountSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isConfirmingSignOut = false
     @State private var isShowingTechnicalValidation = false
+    @ObservedObject var togetherNowModel: TogetherNowModel
     let userToken: String?
     let statusMessage: String?
     let relationshipToken: String?
@@ -192,6 +214,8 @@ private struct AccountSettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                RelationshipNamesSettingsView(model: togetherNowModel)
+
                 Section("帳號") {
                     LabeledContent("登入方式", value: "Apple")
                     LabeledContent("帳號識別碼", value: userToken ?? "無法取得")
@@ -215,6 +239,13 @@ private struct AccountSettingsView: View {
                     Section("狀態") {
                         Text(statusMessage)
                             .accessibilityIdentifier("account-status")
+                    }
+                }
+
+                if let togetherNowStatus = togetherNowModel.statusMessage {
+                    Section("現在的我們") {
+                        Text(togetherNowStatus)
+                            .accessibilityIdentifier("together-now-status")
                     }
                 }
 

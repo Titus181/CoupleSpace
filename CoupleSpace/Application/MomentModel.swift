@@ -39,18 +39,22 @@ final class MomentModel: ObservableObject {
         }
     }
 
-    func authorLabel(for moment: Moment) -> String {
+    func authorLabel(for moment: Moment, names: TogetherNowSnapshot?) -> String {
         guard let currentUserID else { return "留下者未確認" }
-        return moment.creatorUserID == currentUserID ? "你留下的" : "對方留下的"
+        let label = names?.participantLabel(for: moment.creatorUserID)
+            ?? (moment.creatorUserID == currentUserID ? "我" : "伴侶")
+        return "\(label)留下的"
     }
 
     func response(for moment: Moment) -> MomentResponse? {
         moment.responses.first
     }
 
-    func responseLabel(for response: MomentResponse) -> String {
+    func responseLabel(for response: MomentResponse, names: TogetherNowSnapshot?) -> String {
         guard let currentUserID else { return "回應者未確認" }
-        return response.responderUserID == currentUserID ? "你的回應" : "對方的回應"
+        let label = names?.participantPossessiveLabel(for: response.responderUserID)
+            ?? (response.responderUserID == currentUserID ? "我的" : "伴侶的")
+        return "\(label)回應"
     }
 
     func currentUserHasAnswered(_ moment: Moment) -> Bool {
@@ -58,9 +62,11 @@ final class MomentModel: ObservableObject {
         return moment.questionAnswers.contains { $0.answererUserID == currentUserID }
     }
 
-    func answerLabel(for answer: MomentQuestionAnswer) -> String {
+    func answerLabel(for answer: MomentQuestionAnswer, names: TogetherNowSnapshot?) -> String {
         guard let currentUserID else { return "留下者未確認" }
-        return answer.answererUserID == currentUserID ? "你的回答" : "對方的回答"
+        let label = names?.participantPossessiveLabel(for: answer.answererUserID)
+            ?? (answer.answererUserID == currentUserID ? "我的" : "伴侶的")
+        return "\(label)回答"
     }
 
     func stop() async {

@@ -98,10 +98,10 @@ struct AppSkeletonTests {
         let service = MomentRemoteServiceFake(moments: [first])
         let model = MomentModel(service: service)
 
-        #expect(model.authorLabel(for: first) == "留下者未確認")
+        #expect(model.authorLabel(for: first, names: nil) == "留下者未確認")
         await model.start()
         #expect(model.moments == [first])
-        #expect(model.authorLabel(for: first) == "你留下的")
+        #expect(model.authorLabel(for: first, names: nil) == "我留下的")
         #expect(service.isObserving)
 
         #expect(await model.create(.text("  今天看到漂亮的天空  ")))
@@ -117,7 +117,19 @@ struct AppSkeletonTests {
         service.moments.insert(partnerMoment, at: 0)
         await service.sendChange()
         #expect(model.moments.first == partnerMoment)
-        #expect(model.authorLabel(for: partnerMoment) == "對方留下的")
+        #expect(model.authorLabel(for: partnerMoment, names: nil) == "伴侶留下的")
+
+        let names = TogetherNowSnapshot(
+            currentUserID: first.creatorUserID,
+            partnerUserID: partnerMoment.creatorUserID,
+            currentDisplayName: "小日",
+            partnerDisplayName: "小月",
+            privatePartnerName: "月亮",
+            currentStatus: nil,
+            partnerStatus: nil
+        )
+        #expect(model.authorLabel(for: first, names: names) == "小日留下的")
+        #expect(model.authorLabel(for: partnerMoment, names: names) == "月亮留下的")
 
         await model.stop()
         #expect(!service.isObserving)
@@ -217,6 +229,114 @@ struct AppSkeletonTests {
         #expect(service.questionAttemptIDs.count == 2)
         #expect(service.questionAttemptIDs[0].0 == service.questionAttemptIDs[1].0)
         #expect(service.questionAttemptIDs[0].1 == service.questionAttemptIDs[1].1)
+    }
+
+    @Test func togetherNowPoliciesKeepNamesPrivateAndExpirationAbsolute() throws {
+        #expect(TogetherNowTextPolicy.normalizedOptionalName("  小日  ") == "小日")
+        #expect(TogetherNowTextPolicy.isValidOptionalNameInput("   "))
+        #expect(TogetherNowTextPolicy.normalizedOptionalName(
+            String(repeating: "a", count: TogetherNowTextPolicy.maximumNameLength + 1)
+        ) == nil)
+        #expect(TogetherNowTextPolicy.normalizedCustomStatus("  今天需要一點空間  ") == "今天需要一點空間")
+
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(identifier: "Asia/Taipei"))
+        let now = try #require(ISO8601DateFormatter().date(from: "2026-08-12T14:30:00Z"))
+        let tonight = try #require(CurrentStatusExpiration.tonight.tonightExpiresAt(
+            from: now,
+            calendar: calendar
+        ))
+        #expect(ISO8601DateFormatter().string(from: tonight) == "2026-08-12T16:00:00Z")
+
+        let currentUserID = UUID()
+        let partnerUserID = UUID()
+        let snapshot = TogetherNowSnapshot(
+            currentUserID: currentUserID,
+            partnerUserID: partnerUserID,
+            currentDisplayName: "小日",
+            partnerDisplayName: "小月",
+            privatePartnerName: "月亮",
+            currentStatus: nil,
+            partnerStatus: nil
+        )
+        #expect(snapshot.currentUserLabel == "小日")
+        #expect(snapshot.partnerLabel == "月亮")
+        #expect(snapshot.participantPossessiveLabel(for: currentUserID) == "小日的")
+        #expect(snapshot.participantPossessiveLabel(for: partnerUserID) == "月亮的")
+
+        let unnamed = TogetherNowSnapshot(
+            currentUserID: currentUserID,
+            partnerUserID: partnerUserID,
+            currentDisplayName: nil,
+            partnerDisplayName: nil,
+            privatePartnerName: nil,
+            currentStatus: nil,
+            partnerStatus: nil
+        )
+        #expect(unnamed.currentUserLabel == "我")
+        #expect(unnamed.partnerLabel == "伴侶")
+        #expect(unnamed.participantPossessiveLabel(for: currentUserID) == "我的")
+        #expect(unnamed.participantPossessiveLabel(for: partnerUserID) == "伴侶的")
+    }
+
+    @MainActor
+    @Test func togetherNowModelLoadsNamesAndFiltersExpiredStatus() async {
+        let currentUserID = UUID()
+        let partnerUserID = UUID()
+        let referenceDate = Date(timeIntervalSince1970: 2_000_000_000)
+        let expiredPartnerStatus = CurrentRelationshipStatus(
+            userID: partnerUserID,
+            content: .fixed(.tired),
+            expiration: .oneHour,
+            expiresAt: referenceDate.addingTimeInterval(-1),
+            updatedAt: referenceDate.addingTimeInterval(-3_600)
+        )
+        let service = TogetherNowRemoteServiceFake(snapshot: TogetherNowSnapshot(
+            currentUserID: currentUserID,
+            partnerUserID: partnerUserID,
+            currentDisplayName: nil,
+            partnerDisplayName: "小月",
+            privatePartnerName: "月亮",
+            currentStatus: nil,
+            partnerStatus: expiredPartnerStatus
+        ))
+        let model = TogetherNowModel(service: service, now: { referenceDate })
+
+        await model.start()
+        #expect(model.snapshot?.currentUserLabel == "我")
+        #expect(model.snapshot?.partnerLabel == "月亮")
+        #expect(model.snapshot?.partnerStatus == nil)
+        #expect(service.isObserving)
+
+        #expect(await model.saveNames(displayName: "  小日  ", privatePartnerName: "  小月亮  "))
+        #expect(service.savedNames.first?.0 == "小日")
+        #expect(service.savedNames.first?.1 == "小月亮")
+
+        await model.stop()
+        #expect(!service.isObserving)
+    }
+
+    @MainActor
+    @Test func togetherNowMomentRetryKeepsOneStableIdentity() async {
+        let service = TogetherNowRemoteServiceFake(snapshot: .preview)
+        let model = TogetherNowModel(service: service)
+        await model.start()
+        let draft = CurrentStatusDraft(
+            content: .fixed(.thinkingOfYou),
+            expiration: .fourHours,
+            savesAsMoment: true
+        )
+
+        service.statusFailuresRemaining = 1
+        #expect(await model.saveStatus(draft) == false)
+        #expect(await model.saveStatus(draft))
+        #expect(service.statusMomentIDs.count == 2)
+        #expect(service.statusMomentIDs[0] == service.statusMomentIDs[1])
+        #expect(service.statusMomentIDs[0] != nil)
+        #expect(model.snapshot?.currentStatus?.content == .fixed(.thinkingOfYou))
+
+        #expect(await model.clearStatus())
+        #expect(model.snapshot?.currentStatus == nil)
     }
 
     @Test func authenticationStateDistinguishesRestoreCancelFailureAndSignOut() {
@@ -412,6 +532,90 @@ private final class SuspendedPairingRemoteServiceFake: PairingRemoteServing {
     func declineInvitation(token: UUID) async throws {}
 
     func cancelInvitation() async throws {}
+}
+
+@MainActor
+private final class TogetherNowRemoteServiceFake: TogetherNowRemoteServing {
+    var snapshot: TogetherNowSnapshot
+    var savedNames: [(String?, String?)] = []
+    var statusMomentIDs: [UUID?] = []
+    var statusFailuresRemaining = 0
+    var isObserving = false
+    private var onChange: (@MainActor () async -> Void)?
+
+    init(snapshot: TogetherNowSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    func fetchSnapshot() async throws -> TogetherNowSnapshot { snapshot }
+
+    func updateNames(displayName: String?, privatePartnerName: String?) async throws {
+        savedNames.append((displayName, privatePartnerName))
+        snapshot = TogetherNowSnapshot(
+            currentUserID: snapshot.currentUserID,
+            partnerUserID: snapshot.partnerUserID,
+            currentDisplayName: displayName,
+            partnerDisplayName: snapshot.partnerDisplayName,
+            privatePartnerName: privatePartnerName,
+            currentStatus: snapshot.currentStatus,
+            partnerStatus: snapshot.partnerStatus
+        )
+    }
+
+    func setStatus(
+        _ draft: CurrentStatusDraft,
+        tonightExpiresAt: Date?,
+        momentClientID: UUID?
+    ) async throws -> CurrentRelationshipStatus {
+        statusMomentIDs.append(momentClientID)
+        if statusFailuresRemaining > 0 {
+            statusFailuresRemaining -= 1
+            throw TestServiceError.expected
+        }
+        let status = CurrentRelationshipStatus(
+            userID: snapshot.currentUserID,
+            content: draft.content,
+            expiration: draft.expiration,
+            expiresAt: draft.expiration == .manual ? nil : Date().addingTimeInterval(3_600),
+            updatedAt: .now
+        )
+        snapshot = TogetherNowSnapshot(
+            currentUserID: snapshot.currentUserID,
+            partnerUserID: snapshot.partnerUserID,
+            currentDisplayName: snapshot.currentDisplayName,
+            partnerDisplayName: snapshot.partnerDisplayName,
+            privatePartnerName: snapshot.privatePartnerName,
+            currentStatus: status,
+            partnerStatus: snapshot.partnerStatus
+        )
+        return status
+    }
+
+    func clearStatus() async throws {
+        snapshot = TogetherNowSnapshot(
+            currentUserID: snapshot.currentUserID,
+            partnerUserID: snapshot.partnerUserID,
+            currentDisplayName: snapshot.currentDisplayName,
+            partnerDisplayName: snapshot.partnerDisplayName,
+            privatePartnerName: snapshot.privatePartnerName,
+            currentStatus: nil,
+            partnerStatus: snapshot.partnerStatus
+        )
+    }
+
+    func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
+        isObserving = true
+        self.onChange = onChange
+    }
+
+    func stopObservingChanges() async {
+        isObserving = false
+        onChange = nil
+    }
+}
+
+private enum TestServiceError: Error {
+    case expected
 }
 
 @MainActor

@@ -55,8 +55,13 @@ final class CoupleSpaceUITests: XCTestCase {
         app.launchArguments = ["--ui-testing"]
         app.launch()
 
-        XCTAssertTrue(app.buttons["create-moment"].waitForExistence(timeout: 3))
-        app.buttons["create-moment"].tap()
+        let createMomentButton = app.buttons["create-moment"]
+        XCTAssertTrue(createMomentButton.waitForExistence(timeout: 3))
+        if !createMomentButton.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(createMomentButton.isHittable)
+        createMomentButton.tap()
         XCTAssertTrue(app.descendants(matching: .any)["moment-composer"].waitForExistence(timeout: 1))
 
         app.buttons["一句話"].tap()
@@ -70,6 +75,78 @@ final class CoupleSpaceUITests: XCTestCase {
         app.tabBars.buttons["我們"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["moment-timeline"].waitForExistence(timeout: 1))
         XCTAssertTrue(app.staticTexts["今天看到漂亮的天空"].exists)
+    }
+
+    @MainActor
+    func testSetsAndClearsCurrentStatusWithoutCreatingHistoryByDefault() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+
+        let currentStatusCard = app.descendants(matching: .any)["current-user-status-card"]
+        XCTAssertTrue(currentStatusCard.waitForExistence(timeout: 3))
+        currentStatusCard.tap()
+        XCTAssertTrue(app.navigationBars["更新此刻狀態"].waitForExistence(timeout: 1))
+        XCTAssertEqual(app.switches["save-status-as-moment"].value as? String, "0")
+        app.buttons["save-current-status"].tap()
+
+        XCTAssertTrue(app.staticTexts["忙一下，晚點聊"].waitForExistence(timeout: 2))
+        app.descendants(matching: .any)["current-user-status-card"].tap()
+        XCTAssertTrue(app.buttons["clear-current-status"].waitForExistence(timeout: 1))
+        app.buttons["clear-current-status"].tap()
+        XCTAssertTrue(app.staticTexts["尚未設定"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
+    func testSavesDisplayNameAndPrivatePartnerNameFromAccountSettings() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-partner-moment"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["伴侶留下的"].waitForExistence(timeout: 3))
+
+        app.tabBars.buttons["我們"].tap()
+        app.buttons["account-settings"].tap()
+
+        let displayName = app.textFields["display-name-input"]
+        XCTAssertTrue(displayName.waitForExistence(timeout: 1))
+        displayName.tap()
+        displayName.typeText("小日")
+        let partnerName = app.textFields["private-partner-name-input"]
+        partnerName.tap()
+        partnerName.typeText("小月亮")
+        app.buttons["save-relationship-names"].tap()
+
+        XCTAssertTrue(app.staticTexts["稱呼已更新。"].waitForExistence(timeout: 2))
+        app.buttons["完成"].tap()
+        app.tabBars.buttons["今天"].tap()
+        XCTAssertTrue(app.staticTexts["小日"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["小月亮"].exists)
+        XCTAssertTrue(
+            app.staticTexts["小月亮留下的"].exists,
+            "Existing Moment history should immediately use the current private partner name."
+        )
+
+        app.tabBars.buttons["我們"].tap()
+        app.buttons["account-settings"].tap()
+        XCTAssertTrue(app.buttons["clear-display-name"].waitForExistence(timeout: 1))
+        app.buttons["clear-display-name"].tap()
+        expectation(
+            for: NSPredicate(format: "isEnabled == true"),
+            evaluatedWith: app.buttons["clear-private-partner-name"]
+        )
+        waitForExpectations(timeout: 2)
+        XCTAssertEqual(partnerName.value as? String, "小月亮")
+        app.buttons["clear-private-partner-name"].tap()
+
+        app.buttons["完成"].tap()
+        app.tabBars.buttons["今天"].tap()
+        XCTAssertTrue(app.staticTexts["我"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["伴侶"].exists)
+        XCTAssertTrue(
+            app.staticTexts["伴侶留下的"].exists,
+            "Clearing each saved name should restore the history fallback labels."
+        )
     }
 
     @MainActor
@@ -95,7 +172,7 @@ final class CoupleSpaceUITests: XCTestCase {
         let hugButton = app.buttons["moment-emoji-hug"]
         XCTAssertTrue(hugButton.waitForExistence(timeout: 3))
         hugButton.tap()
-        XCTAssertTrue(app.staticTexts["你的回應"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["我的回應"].waitForExistence(timeout: 2))
     }
 
     @MainActor
@@ -134,7 +211,9 @@ final class CoupleSpaceUITests: XCTestCase {
 
         let editor = app.textViews["partner-question-answer-text"]
         XCTAssertTrue(editor.waitForExistence(timeout: 1))
+        XCTAssertTrue(editor.isHittable)
         editor.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
         editor.typeText("有人陪我吃飯")
         app.buttons["save-question-answer"].tap()
 

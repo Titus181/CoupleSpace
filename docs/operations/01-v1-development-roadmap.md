@@ -89,6 +89,16 @@ last_updated: 2026-08-12
 - migration 017 已部署 Supabase 測試專案；remote migration 001–017 一致，linked `extensions`／`public` schema lint 無錯誤，再次 dry-run 顯示無待部署 migration。
 - 兩支真實 iPhone 已通過雙向 Emoji／短文字回應、第一份答案在伴侶回答前不可見、第二份回答後雙方共同揭曉、Realtime 收斂及強制結束後恢復；G6 與 M1 正式完成。
 
+### G6A 本機候選證據（2026-08-12，尚未完成）
+
+- `現在的我們` 已加入「今天」頂部：本人狀態卡可編輯，伴侶卡只讀；帳號設定可維護本人顯示名稱與 owner-only 私人伴侶稱呼。固定狀態、自訂 40 字短句、1 小時／4 小時／建立者當地今晚／手動清除均有 domain 規則；單純更新不建立歷史或推播，只有明確開啟「也留成 Moment」才建立獨立 Moment。
+- migration 018 新增帳號層 `user_profiles`、owner-only `relationship_partner_aliases` 與每位成員單筆 `current_relationship_statuses`。名稱與狀態只能由本人 RPC 寫入；active partner 可讀顯示名稱與未過期狀態，私人稱呼、第三人及 closing relationship 均由 RLS 隔離。狀態過期使用 server time；狀態＋Moment 在同一 transaction 內完成，stable client UUID 重試不重複，後續狀態更新不改寫既有 Moment。
+- 本機 Supabase 已由空資料庫依序套用 migrations 001–018；完整 17 files／232 pgTAP tests 與 local `extensions`／`public` schema lint 通過。
+- 歷史名稱改為動態解析後，以隔離 DerivedData 串行重跑完整 iPhone scheme：79 個 unit tests、13 個一般 UI tests及四組 launch matrix 共 96 次 test executions 全數通過，0 failure、0 skip；`.xcresult` 記錄 93 個測試定義，動態 launch 參數展開後為 96 次執行。Xcode 26.5 仍輸出既有 LLDB `DebuggerVersionStore.StoreError`／`no debugger version` 警告，但 runner 完整進入 `xctest` 並產生成功結果。
+- migration 018 已部署 Supabase 測試專案；remote migration 001–018 一致，再次 dry-run 顯示無待部署 migration，linked `extensions`／`public` schema lint 無錯誤。部署後 CLI 的本機 migration catalog 快取曾因 `pg-delta` 2.5 秒連線逾時輸出警告，但遠端 migration list、第二次 dry-run 與 linked lint 均直接確認 migration 已成功落地。相同 development build 已成功安裝並啟動於兩支 iOS 26.6 測試 iPhone，既有 App data 保留。
+- 首輪雙機人工驗證通過名稱可見性、私人稱呼 owner-only、雙向狀態、Realtime、選擇性 Moment、狀態修改不改寫 Moment、清除與強制結束恢復。驗證同時發現既有 Moment／回應／回答仍使用固定「你／對方」文案，不會隨名稱更新；修正改為依參與者 user UUID 動態解析目前顯示名稱與私人稱呼，未設定時使用「我／伴侶」，不修改歷史資料本身。修正版安裝兩支真機後，修改本人名稱、修改私人伴侶稱呼、owner-only 差異與清空後 fallback 四項複驗均通過。帳號設定另為兩個名稱各提供獨立、立即儲存的清除按鈕，清除其中一項不改動另一項；聚焦 UI regression 完成儲存、舊歷史換名、逐項清除與 fallback 全流程，1/1 通過，最新版部署兩支真機後兩個清除操作亦完成人工確認。
+- G6A 尚未完成：checked-in 文件尚無名稱／此刻狀態的伴侶分開訪談與可點擊原型通過紀錄；受控實際過期與登出／重新登入恢復若尚未執行也須補齊。上述 gate 完成前不得把 W7 標示為已完成。
+
 ## 關鍵里程碑
 
 ### M0：技術方案可行（W1）

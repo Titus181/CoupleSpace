@@ -4,6 +4,7 @@ import UIKit
 
 struct TodayMomentView: View {
     @ObservedObject var model: MomentModel
+    @ObservedObject var togetherNowModel: TogetherNowModel
     @State private var isCreatingMoment = false
     @State private var isCreatingQuestion = false
 
@@ -17,6 +18,8 @@ struct TodayMomentView: View {
                         Text("把零碎日常，慢慢變成我們的生活。")
                             .foregroundStyle(.secondary)
                     }
+
+                    TogetherNowSectionView(model: togetherNowModel)
 
                     Button {
                         isCreatingMoment = true
@@ -50,7 +53,11 @@ struct TodayMomentView: View {
                             MomentCard(
                                 moment: latest,
                                 photoData: model.photoDataByMomentID[latest.id],
-                                authorLabel: model.authorLabel(for: latest),
+                                authorLabel: model.authorLabel(
+                                    for: latest,
+                                    names: togetherNowModel.snapshot
+                                ),
+                                names: togetherNowModel.snapshot,
                                 model: model
                             )
                         }
@@ -88,6 +95,7 @@ struct TodayMomentView: View {
 
 struct MomentTimelineView: View {
     @ObservedObject var model: MomentModel
+    @ObservedObject var togetherNowModel: TogetherNowModel
 
     var body: some View {
         Group {
@@ -106,7 +114,11 @@ struct MomentTimelineView: View {
                             MomentCard(
                                 moment: moment,
                                 photoData: model.photoDataByMomentID[moment.id],
-                                authorLabel: model.authorLabel(for: moment),
+                                authorLabel: model.authorLabel(
+                                    for: moment,
+                                    names: togetherNowModel.snapshot
+                                ),
+                                names: togetherNowModel.snapshot,
                                 model: model
                             )
                         }
@@ -124,6 +136,7 @@ struct MomentCard: View {
     let moment: Moment
     let photoData: Data?
     let authorLabel: String
+    let names: TogetherNowSnapshot?
     @ObservedObject var model: MomentModel
     @State private var isWritingResponse = false
     @State private var isAnsweringQuestion = false
@@ -204,7 +217,7 @@ struct MomentCard: View {
         if let response = model.response(for: moment) {
             Divider()
             VStack(alignment: .leading, spacing: 4) {
-                Text(model.responseLabel(for: response))
+                Text(model.responseLabel(for: response, names: names))
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 switch response.content {
@@ -252,7 +265,7 @@ struct MomentCard: View {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(moment.questionAnswers) { answer in
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(model.answerLabel(for: answer))
+                        Text(model.answerLabel(for: answer, names: names))
                             .font(.caption.weight(.semibold))
                             .foregroundStyle(.secondary)
                         Text(answer.content)
