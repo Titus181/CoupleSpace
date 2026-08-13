@@ -80,6 +80,8 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 - 私密訊息、照片、Moment 內容與伴侶關係屬敏感資料。
 - 完整內容由受 relationship RLS 保護的 Supabase 產品資料與私有 Storage 保存，作為跨裝置同步、重新安裝恢復、共同歷史、匯出與個人封存的來源；分析資料不是備份來源。
 - 手機遺失、損壞或換機後的恢復只依賴已成功同步的遠端產品資料與 Private Storage，不依賴原裝置 cache；聊天正文、server timestamp、照片、Moment、共同約定、討論、時間線與本人個人封存必須能由新裝置重新取得。只存在遺失裝置 Outbox 的未同步內容不屬於可恢復資料。
+- 新裝置恢復採漸進式讀取：先取得 Supabase session、relationship／membership、名稱與仍有效狀態，再取得最近聊天與 Moment；較舊歷史使用穩定 server timestamp＋client UUID 游標分頁，媒體依可見範圍下載。完整歷史可恢復不代表每次啟動一次載入全部資料，任何單頁或單一 object 失敗須可獨立重試。
+- 裝置 session 管理與產品資料生命週期分離：撤銷遺失裝置只終止該裝置後續授權，不解除 relationship、不刪除共同內容或 owner-only 個人封存；實際 session inventory、撤銷與再驗證設計須由 Supabase Auth 能力及真機測試關閉。
 - 通知預設只帶最小路由資訊；鎖定畫面不得預設揭露內容。
 - 分析只記錄產品驗證所需的 relationship、interaction／內容參照、表面與參與種類、participant 與時間，不複製訊息文字、照片、Emoji 值或回答內容。
 - production 內容不得提供日常任意瀏覽；必要的 break-glass 維運存取採最小權限、指定原因、限時與 audit log。內容研究須由 relationship 兩位伴侶分別明確同意且可撤回，不得作為功能或權益條件。
@@ -91,6 +93,7 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 
 - Supabase 維持唯一遠端系統紀錄；不為供應商事故或成本焦慮預建 CloudKit／Supabase 雙寫。替代方案必須先有真實瓶頸與遷移證據。
 - 資料庫備份與 Storage object 保護是兩個獨立控制；正式上市前須分別定義復原方式並演練，不能把資料庫備份視為照片備份。
+- Database restore 與 Storage restore 必須對準同一恢復點，並以 object identity、byte size／checksum 及產品引用清單核對 metadata 與實體檔案；使用者匯出、分析事件、本機 cache 與 Supabase Database backup 都不能單獨取代 Storage object 備份。
 - Realtime 只提示變更，client 經 RLS 重讀；離線操作留在持久 outbox，避免短暫事故造成資料遺失或重複送出。
 - 照片依 PD-019 在裝置端產生適合共同回顧的版本，不保存相機原檔。確切 display／thumbnail 規格須由畫質、載入、Storage 與 egress 實測決定。
 - 照片依 PD-022 不按時間自動到期；配額或方案降級只阻止新增，不刪除既有內容。active relationship 及 owner-only 個人封存持續保存，直到使用者明確刪除；最後一份封存引用刪除後才由既有 GC 清理 Storage object。

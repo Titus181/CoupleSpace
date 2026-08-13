@@ -1,7 +1,7 @@
 ---
 title: 上市、客服與版本發布營運
 status: active
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # 上市、客服與版本發布營運
@@ -157,8 +157,12 @@ helpdesk 保留原文與回覆；產品 backlog 只保留去識別摘要、canon
 
 CoupleSpace 的恢復承諾以遠端 SSOT 為準。使用者遺失或損壞原手機、換機或重新安裝後，以同一帳號完成驗證，即可恢復本人有權存取的完整共同歷史；不能要求仍持有舊手機、由裝置對裝置搬移或重新配對。
 
+- App 以「同步」而非「手動備份」描述日常狀態。「我們 → 設定 → 資料與恢復」至少顯示整體是否已同步、待送項目數、最近成功同步時間及同一 Apple 帳號換機說明；不可用「已備份」掩蓋仍只在本機的 Outbox 或尚未 finalization 的照片。
 - 恢復範圍至少包含 active／archived relationship、membership、聊天正文與 server timestamp、照片 metadata 與 Private Storage object、Moment／回應、共同約定／專屬討論、共同時間線、未讀／排序所需狀態，以及本人個人封存。
 - server timestamp、穩定 client UUID、內容引用與 Storage object identity 必須維持，避免恢復後重複、錯序、斷裂或 Moment 無法返回原對話／約定。
+- 新機先恢復 session、relationship、名稱與仍有效狀態，再呈現最近聊天與 Moment；舊歷史採穩定游標分頁，照片依可見範圍下載。介面須分資料類型顯示恢復中、完成與可重試狀態，單一失敗不得清空已恢復內容或要求整包重來。
+- 帳號設定提供目前登入裝置與「登出其他裝置」；撤銷遺失手機 session 不得解除配對、刪除共同資料或封存。若 Supabase Auth 無法提供可信裝置清單，須先定義受伺服器驗證的 device-session registry，不以 client 自報資料作撤銷授權來源。
+- 基本換機／重裝恢復不屬於 Plus 權益；方案降級或退訂可限制新增高成本媒體，但不能讓既有已同步內容失去恢復能力。
 - 上市前須以第二支已清除本機狀態的真實 iPhone 演練：同一帳號登入後重新取得 relationship，逐類核對數量、正文、照片可讀性、時間、順序與關聯，再執行重新安裝回歸。資料庫與 Storage restore drill 另須證明供應商／營運事故後仍能恢復兩者一致版本。
 - 只有伺服器已接受並可由另一裝置重新讀取的內容才算已同步。仍在本機 Outbox、尚未完成遠端 metadata finalization 或上傳的內容，若裝置永久遺失就可能無法恢復；介面不得以模糊的成功狀態隱藏此限制。
 - 正式用戶的完整內容只作 App 功能、同步、恢復、匯出、封存、安全與經授權支援之用。一般產品分析不讀取或複製正文、照片或回答；必要的 break-glass 維運存取須最小權限、指定原因、限時並留下 audit log。
@@ -179,7 +183,11 @@ CoupleSpace 的恢復承諾以遠端 SSOT 為準。使用者遺失或損壞原�
 - [Apple：Release a version update in phases](https://developer.apple.com/help/app-store-connect/update-your-app/release-a-version-update-in-phases)
 - [Supabase：Pricing](https://supabase.com/pricing)
 - [Supabase：Database backups](https://supabase.com/docs/guides/platform/backups)
+- [Supabase：Download Storage objects](https://supabase.com/docs/guides/storage/management/download-objects)
 - [Supabase：Production checklist](https://supabase.com/docs/guides/deployment/going-into-prod)
 - [Supabase：Storage scaling](https://supabase.com/docs/guides/storage/production/scaling)
 - [Supabase：Smart CDN](https://supabase.com/docs/guides/storage/cdn/smart-cdn)
 - [Plain：Pricing](https://www.plain.com/pricing)
+- [LINE：以行動條碼移動帳號](https://help.line.me/line/?contentId=20023519&lang=zh-Hant)
+- [LINE：標準備份與進階備份差異](https://help.line.me/line/smartphone?contentId=20023473&lang=zh-Hant)
+- [LINE：進階備份](https://help.line.me/line/smartphone?contentId=200000425&lang=zh-Hant)
