@@ -229,10 +229,20 @@ PD-020 已關閉「有意義雙向互動」的定義與資料最小化方向：�
 - 以繁中 canonical copy 維護 `zh-Hant`、`zh-Hans`、`en`、`ja`，完成關鍵流程、複數、截斷、日期與權限文案 QA。
 - 四語 App Store metadata、版本說明與基本幫助內容；首輪付費投放與持續市場內容只做繁中。
 - App 內單一「幫助與意見」入口、可查詢的案件欄位、隱私同意與不承諾回覆時間的確認文案。
-- 資料庫與 Storage 分開的 restore drill、成本與容量警報、狀態頁、降級模式及單人事故 runbook。
+- 依 TD-003 與[一人營運災難復原規格](../architecture/01-disaster-recovery.md)完成 production PITR、供應商外加密 Database／Storage 備份、recovery manifest、deletion journal、dead-man alert、signed service manifest、獨立狀態頁、降級模式與 emergency operations kit。
+- 在另一 region／核准替代環境完成 D4 冷重建 drill；Database、Storage、設定與刪除 journal 對準同一 recovery point，通過 counts、checksum、reference integrity、RLS、第三人隔離及清空本機狀態真機恢復。初始 6 小時 RPO／8 小時 RTO 只作內部候選，須記錄實測且不得先轉成公開 SLA。
 - 適合共同回顧的照片顯示版／縮圖規格與真機畫質、流量、容量驗證；不宣稱原始畫質備份。
 - App Store 版本說明、App 內更新中心、重大事故狀態頁三層公告流程，以及 phased release／回滾檢查表。
 
 若 TestFlight build 提供「支持開發者」流程，只能使用 StoreKit／Sandbox 驗證，不向測試者實際收款。G18 上市首月決策後若決定在 App Store 正式供應版本啟用，必須與訂閱及其他 StoreKit 工作共同排序，並完成當時適用的商品價格、審查說明、交易、取消、失敗與退款驗證。
 
 詳細規格見[上市、客服與版本發布營運](03-launch-support-and-release.md)。
+
+## 災難復原交付順序
+
+本工作不改變 W10–W14 核心產品切片的內容，但屬 G15／G17 阻擋 gate，不得因功能排程延誤而省略：
+
+1. **G15 前 production-like 基礎：** 外部 encrypted DB／Storage backup、manifest、freshness alert、synthetic restore、App `read_only／recovery` 行為及一致版本 restore drill。
+2. **G16 煙霧測試期間：** 使用 TestFlight 真實升級、換機／重裝、Outbox 與事故 mode 驗證操作文案及不需重新配對；不對測試者宣稱尚未演練的 RPO／RTO。
+3. **G17 公開前 production 關閉：** paid production／PITR、不可變外部副本、deletion journal、signed manifest、另一 region 冷重建、status page、break-glass 及 release evidence 全部通過。
+4. **公開後營運：** 每月 synthetic restore、每季 production-backup 隔離 restore；schema、Storage、Auth、encryption、delete／unpair、backup 或 endpoint 有變更的正式版本重跑受影響 drill。

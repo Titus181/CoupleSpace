@@ -99,8 +99,9 @@ Watch、macOS、visionOS、Widget、訂閱、公開社群與 AI 關係分析不�
 - 照片依 PD-022 不按時間自動到期；配額或方案降級只阻止新增，不刪除既有內容。active relationship 及 owner-only 個人封存持續保存，直到使用者明確刪除；最後一份封存引用刪除後才由既有 GC 清理 Storage object。
 - 每週監控 p95 latency、錯誤率、DB／連線、Realtime、outbox age、Storage、origin／cached egress，以及每個活躍伴侶對的直接成本。
 - 不對外承諾固定人工事故回覆或復原時間；以自動警報、狀態頁、降級模式、runbook、憑證復原與定期 restore drill 降低單人營運風險。
+- TD-003 接受一人可營運的冷備援：Supabase production 是唯一可寫主站；以受管 PITR、供應商外加密 Database／Storage 副本、recovery manifest、deletion journal、signed service manifest 與人工冷重建處理 region／vendor 事故。不得因文件已接受而宣稱 production 備份、切換或 RPO／RTO 已完成。
 
-完整客服、版本公告、成本情境與上市 gate 見[上市、客服與版本發布營運](operations/03-launch-support-and-release.md)。
+完整災難復原架構、事故模式與 runbook 見[一人營運災難復原規格](architecture/01-disaster-recovery.md)；客服、版本公告、成本情境與上市 gate 見[上市、客服與版本發布營運](operations/03-launch-support-and-release.md)。
 
 ## 測試接縫
 

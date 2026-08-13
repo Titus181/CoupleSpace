@@ -21,6 +21,7 @@
 
 ## Database／Storage restore drill
 
+- 本清單只驗證換機／重裝後的產品恢復體驗；完整雲端事故、刪除重播、signed manifest 與異區冷重建另依 [`DR-001`](disaster-recovery.md) 執行。
 - 從同一恢復點還原 database 與 Storage，依 object identity、byte size／checksum 與產品引用清單核對 metadata、實體 object 與引用一致。
 - 記錄可恢復範圍、資料時間點與無法恢復的缺口；「備份功能已啟用」不算通過。
 

@@ -114,9 +114,14 @@ helpdesk 保留原文與回覆；產品 backlog 只保留去識別摘要、canon
 - Supabase 是唯一遠端 SSOT；不建立 CloudKit 雙寫作為備援。
 - Postgres constraint、RLS、RPC 與穩定 client UUID 保證授權及冪等；Realtime 只提示變更，client 重新經 RLS 讀取。
 - 離線操作使用持久 outbox；事故時允許內容保留在裝置並顯示待送／失敗，不假裝已送達。
-- 資料庫 PITR／備份不等於 Storage object 備份。公開付費前必須分別完成資料庫及照片復原演練，記錄實際可恢復範圍。
+- 資料庫 PITR／備份不等於 Storage object 備份。公開付費前必須完成指定 recovery point 的 Database、Storage、設定及刪除 journal 一致還原，記錄實際 RPO、RTO、缺口與完整性結果。
+- 正式公開目標使用 Supabase paid production、Small compute、7-day PITR 與 custom domain；供應商外另保存 client-side encrypted Database logical dump、Storage object version、recovery manifest 與 deletion tombstone。實際採購、credentials 與 production 部署仍須明確人類授權。
+- 初始內部候選為 Database 每 6 小時、Storage 每 1 小時、deletion journal 每 15 分鐘外送，一致 RPO 6 小時及 D4 異區冷重建 RTO 8 小時；這些在連續 restore drill 達標前不是現有能力或公開 SLA。
+- App 以 `normal／degraded／read_only／recovery` 降級；一致性未知時停止不具可靠持久 Outbox 的寫入。跨區切換由人類決策，不作 active-active、自動 promotion、雙向合併或自動 failback。
 - 單人模式不公開承諾固定事故回覆或復原時間；以自動警報、狀態頁、降級模式、runbook、密碼管理器、離線 recovery codes 與緊急帳號恢復降低風險。
-- 每週檢查 p95 latency、錯誤率、CPU／memory／DB size、連線、Realtime、Function、outbox age、Storage、egress 與異常成本斜率。
+- 每週檢查 p95 latency、錯誤率、CPU／memory／DB size、連線、Realtime、Function、outbox age、Storage、egress、備份 freshness、manifest／checksum、最近 restore drill 與異常成本斜率。排程以獨立 dead-man heartbeat 驗證，沒有失敗通知不等於備份成功。
+
+詳細架構、目的端帳號隔離、保存政策、signed service manifest、tombstone、D3／D4 runbook、演練與 break-glass 以[一人營運災難復原規格](../architecture/01-disaster-recovery.md)為準。
 
 ## 雲端成本與照片政策
 
@@ -139,7 +144,8 @@ helpdesk 保留原文與回覆；產品 backlog 只保留去識別摘要、canon
 - 不承諾客服回覆時間；公開文案與 App 行為一致。
 - 照片畫質適合共同回顧，且產品與商店文案未暗示原始畫質備份。
 - 資料庫與 Storage restore drill、弱網／離線、兩支真機、推播隱私、匯出、刪除與解除配對 gate 通過。
-- 成本警報、事故 runbook、phased release、暫停發布與降級流程完成。
+- production PITR、供應商外加密不可變備份、recovery manifest、deletion journal、dead-man alert、獨立狀態頁、signed service manifest、事故 runbook、emergency operations kit、phased release、暫停發布與降級流程完成。
+- D4 drill 已在另一 region／核准替代環境從零重建，通過 counts、checksum、引用、RLS、刪除重播及清空本機狀態真機驗證；備份或 drill freshness 超過核准阻擋線時不得正式發布。
 
 ## TestFlight 轉正式版的資料延續
 
@@ -183,7 +189,10 @@ CoupleSpace 的恢復承諾以遠端 SSOT 為準。使用者遺失或損壞原�
 - [Apple：Release a version update in phases](https://developer.apple.com/help/app-store-connect/update-your-app/release-a-version-update-in-phases)
 - [Supabase：Pricing](https://supabase.com/pricing)
 - [Supabase：Database backups](https://supabase.com/docs/guides/platform/backups)
+- [Supabase：Restore to a new project](https://supabase.com/docs/guides/platform/clone-project)
 - [Supabase：Download Storage objects](https://supabase.com/docs/guides/storage/management/download-objects)
+- [Supabase：S3 compatibility](https://supabase.com/docs/guides/storage/s3/compatibility)
+- [Supabase：Custom domains](https://supabase.com/docs/guides/platform/custom-domains)
 - [Supabase：Production checklist](https://supabase.com/docs/guides/deployment/going-into-prod)
 - [Supabase：Storage scaling](https://supabase.com/docs/guides/storage/production/scaling)
 - [Supabase：Smart CDN](https://supabase.com/docs/guides/storage/cdn/smart-cdn)
@@ -191,3 +200,5 @@ CoupleSpace 的恢復承諾以遠端 SSOT 為準。使用者遺失或損壞原�
 - [LINE：以行動條碼移動帳號](https://help.line.me/line/?contentId=20023519&lang=zh-Hant)
 - [LINE：標準備份與進階備份差異](https://help.line.me/line/smartphone?contentId=20023473&lang=zh-Hant)
 - [LINE：進階備份](https://help.line.me/line/smartphone?contentId=200000425&lang=zh-Hant)
+- [Backblaze：Object Lock](https://www.backblaze.com/docs/cloud-storage-object-lock)
+- [Backblaze：B2 Pricing](https://www.backblaze.com/cloud-storage/pricing)

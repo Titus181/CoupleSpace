@@ -21,6 +21,8 @@
 - iPhone B／iOS：
 - Apple 身分：兩個不同測試身分／其他（說明）
 - Backend：local／staging／production-like
+- Source／target region：
+- DR mode／service manifest version：
 
 ## 自動化證據
 
@@ -41,10 +43,21 @@
 | NETWORK-001 |  |  |  |  |
 | PUSH-002 |  |  |  |  |
 | UPGRADE-001 |  |  |  |  |
+| DR-001 |  |  |  |  |
 | LIFECYCLE-001 |  |  |  |  |
 | LOCK-001 |  |  |  |  |
 
 ## 發布判定
+
+### 災難復原證據（Gate C／D 適用時）
+
+- Recovery point／Database artifact／Storage manifest／deletion journal sequence：
+- Schema／backup workflow version：
+- Database／Storage／journal last successful time：
+- Counts／checksum／reference／RLS 結果：
+- Signed manifest／read-only／recovery 結果：
+- 實測資料缺口／RPO／RTO：
+- 暫時 restore 環境清理結果：
 
 - 未通過／未執行項目：
 - `NOT_APPLICABLE` 理由：

@@ -1,6 +1,6 @@
 ---
 status: active
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # CoupleSpace 版本發布閘門
@@ -30,6 +30,7 @@ last_updated: 2026-08-12
 - 從空本機資料庫依 migrations 重建，完整 pgTAP 與 local schema lint 通過。
 - linked／staging migration history 與 schema lint 通過；任何部署仍需明確授權。
 - 以舊 build 建立資料與本機待送項目，再安裝 release candidate，確認升級、重登與恢復不重複、不錯序、不遺失。
+- `DR-001` 的 production-like encrypted Database／Storage backup、recovery manifest、freshness alert、synthetic restore，以及 App `read_only／recovery` 行為通過；未部署 production 付費能力時須明確記為 G17 尚待 gate，不得假裝正式 DR 已完成。
 - 記錄 `.xcresult` 的 executions、failure、skip 與 exit status，不只記錄命令成功。
 - 產生一份 `release-record-template.md` 的版本副本，未驗證項目不得留白。
 
@@ -38,7 +39,8 @@ last_updated: 2026-08-12
 Gate C 全部通過後，還必須完成：
 
 - Production 相符環境的 push、StoreKit、entitlement、語系與權限提示驗證。
-- Database 與 Storage 的一致版本備份／還原演練。
+- Production PITR、供應商外加密不可變 Database／Storage 備份、recovery manifest、deletion journal 與 dead-man freshness 監控可用。
+- `DR-001` 在另一 region／核准替代環境完成 Database、Storage、Auth／Functions／設定與刪除 journal 的一致 recovery point 冷重建；counts、checksum、引用、RLS、第三人隔離、signed manifest 及清空本機狀態真機恢復全部通過。
 - Phased release、監控、狀態頁、暫停發布、降級與回復方案可用。
 - 所有 Critical／High release gate 為 PASS；沒有以 WAIVED、歷史結果或「不適用」掩蓋尚未實作的必要能力。
 - 發布 commit、build、schema version、App Store version 與證據可互相追溯。
@@ -52,6 +54,7 @@ Gate C 全部通過後，還必須完成：
 - RLS、身分、配對、刪除、封存或解除配對結果不一致。
 - 必要測試 failure、skip、未執行或結果早於最後行為變更。
 - Migration 不能由舊 schema 安全升級，或沒有 forward／recovery 計畫。
+- 最新完整 recovery point 超過核准 RPO、tombstone journal 有缺段、restore drill freshness 過期，或 incident mode／signed manifest 無法安全阻止寫入與版本倒退。
 - Flaky test 只能靠重跑才通過。
 - Release candidate 與實際準備發布的 commit／build 不一致。
 
@@ -69,4 +72,4 @@ Gate C 全部通過後，還必須完成：
 - 每個完整切片／合併：Gate B。
 - 每個 TestFlight build：Gate C 中與 build 及 changed risk 相關的人工項目，加上全部自動化測試。
 - 每個正式公開版本：Gate C＋Gate D 全部適用項目。
-- 備份還原、低磁碟、大型封存及事故 runbook 可依固定週期演練，但正式版本若改到相關 schema／Storage／流程，必須在該版本重新執行。
+- Synthetic restore 每月至少一次，production-backup 隔離 restore 每季至少一次；備份／drill freshness 超過 `docs/architecture/01-disaster-recovery.md` 的阻擋線不得正式發布。正式版本若改到 schema、Storage、Auth、encryption、delete／unpair、backup 或 endpoint 流程，必須在該版本重新執行受影響 drill。

@@ -92,3 +92,35 @@ last_updated: 2026-08-13
 - 首輪雙真機弱網驗收另要求：隊首失敗時所有被阻塞訊息均須顯示可重試；網路恢復須重建 Realtime subscription 並在 drain 後重讀，執行中的 refresh 不得丟棄新事件。離線冷啟動可使用既有 user-scoped relationship 唯讀快照通過導覽 gate，但不可據此授權寫入。
 - 2026-08-13 針對雙真機影片揭露的離線輸入靜默消失、既有聊天誤顯示為空白與啟動等待問題，新增本機 enqueue 語意、最近對話快照、配對快照優先恢復、平行模型啟動及對應 regression。全新完整 iPhone scheme 記錄 110 個測試定義、動態 launch matrix 展開後 113 次 executions，0 failure、0 skip；完整本機 gate 另含 18 files／251 pgTAP、schema lint、5 個 APNs tests、Harness 與 diff hygiene，均通過。
 - 2026-08-13 最終雙真機複驗通過三分頁離線冷啟動快照、前景 Realtime，以及離線期間新增內容在恢復網路後自動補齊且不需重啟。commit `6c0f4e3` 的最終完整 Gate B 記錄 113 個測試定義、動態 launch matrix 展開後 116 次通過，0 failure、0 skip；18 files／251 pgTAP、schema lint、5 個 APNs tests、Harness 與 diff hygiene 亦通過。G8／W9 正式完成。
+
+### TD-003：雲端災難復原採受管主站、供應商外加密冷備份與人工冷重建
+
+- **狀態：** accepted
+- **日期：** 2026-08-13
+- **決策：** Supabase production 保持唯一可寫遠端 SSOT；database 以受管 PITR 加上供應商外 encrypted logical dump 保護，Private Storage objects 另作供應商外增量與不可變版本保護。重大 region／control-plane／vendor 事故由人類選擇 recovery point，在另一 region 或核准替代環境冷重建單一新主站，不自動 promotion、failback 或雙向合併。
+
+#### 技術不變量
+
+- Database backup／PITR 只保護 database 與 Storage metadata，不得視為實際 object backup。
+- 每個可用 recovery point 均須有 manifest，綁定 database artifact、schema version、Storage object identity／bytes／checksum 與 deletion journal sequence。
+- 還原以 Database 引用集合為準；缺少任何被引用 object、checksum mismatch、tombstone 斷裂、RLS／Auth 無法重建或 reference integrity 失敗時保持隔離。
+- App 透過離線 private key 簽署、內嵌 public key 驗證的最小 service manifest 取得 endpoint、publishable key、事故 mode 與 status URL；manifest 不承載秘密或一般產品 feature flags。
+- 事故模式為 `normal／degraded／read_only／recovery`。一致性未知時停止不具可靠持久 Outbox 的寫入；舊主站失去 production 寫入權後不得自動復權。
+- 刪除、解除配對、archive delete、account delete 與 GC 以最小化 append-only tombstone 外送，舊備份還原後先重播再開放使用者存取。
+- 自動排程須由獨立 dead-man freshness 監控；沒有失敗通知不能推論備份成功。
+
+#### 初始操作目標
+
+- Database logical dump 每 6 小時、Storage incremental copy 每 1 小時、deletion journal 最遲每 15 分鐘外送。
+- 備份不可變保護 14 天、日常 recovery retention 35 天為上線候選；正式設定與隱私文案須在法規、供應商及 restore drill 核對後定案。
+- 一致 recovery point 的初始內部 RPO 候選為 6 小時，D4 冷重建 RTO 候選為 8 小時；這些數字只有在實際資料量連續演練達標後才能視為能力，且不自動成為公開 SLA。
+- 每月以 synthetic data 完整還原；每季以 production encrypted backup 在隔離環境還原並以 counts、hash、constraint、RLS 與真機恢復驗證。相關 schema、Storage、Auth、encryption、delete／unpair、backup 或 endpoint 變更的正式版本須重跑受影響 drill。
+
+#### 拒絕的替代方案
+
+- **CloudKit／Supabase 雙寫：拒絕。** 會把授權、排序、刪除、封存與衝突處理擴大成兩套 production SSOT，超過一人可靠營運能力。
+- **Read Replica 作完整 DR：拒絕。** 唯讀非同步 database replica 不等於 Auth、Storage、Realtime、Functions 與設定的可寫災備環境。
+- **自架 Supabase：拒絕。** 將 HA、patch、監控、備份與災難復原責任轉回單人，沒有抵銷風險的現有需求。
+- **自動跨區切換：拒絕。** 在資料一致性與失敗範圍未知時可能製造雙主分叉；早期產品以明確唯讀及人工冷重建為較安全取捨。
+
+完整操作規格與尚未完成證據見[一人營運災難復原規格](../architecture/01-disaster-recovery.md)。

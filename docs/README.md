@@ -1,7 +1,7 @@
 ---
 title: CoupleSpace 產品文件索引
 status: active
-last_updated: 2026-08-11
+last_updated: 2026-08-13
 ---
 
 # CoupleSpace 產品文件
@@ -32,9 +32,10 @@ last_updated: 2026-08-11
 8. [第一版開發路線圖](operations/01-v1-development-roadmap.md)
 9. [產品決策紀錄](decisions/product-decisions.md)
 10. [技術決策紀錄](decisions/technical-decisions.md)
-11. [品牌識別與角色宇宙](design/01-brand-identity.md)
-12. [iPhone 核心畫面與功能佈局概念](design/02-iphone-core-screen-concepts.md)
-13. [上市、客服與版本發布營運](operations/03-launch-support-and-release.md)
+11. [一人營運災難復原規格](architecture/01-disaster-recovery.md)
+12. [品牌識別與角色宇宙](design/01-brand-identity.md)
+13. [iPhone 核心畫面與功能佈局概念](design/02-iphone-core-screen-concepts.md)
+14. [上市、客服與版本發布營運](operations/03-launch-support-and-release.md)
 
 ## 文件維護原則
 
