@@ -1,7 +1,7 @@
 ---
 title: 第一版開發路線圖
 status: active
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # 第一版開發路線圖
@@ -44,7 +44,7 @@ last_updated: 2026-08-12
 | W6，9/7–9/13 | **G6 Moment 雙向互動（已完成）** | 支援 Emoji、短文字回應及固定題庫版「我們的一題」；雙方互動後形成完整 Moment |
 | W7，9/14–9/20 | **G6A 名稱與此刻狀態垂直切片（已完成）** | 本人可設定伴侶可見顯示名稱及 owner-only 伴侶稱呼；雙方可跨裝置看到本人主動設定、具期限的固定或自訂狀態，過期結果一致；同一帳號重新登入後可恢復名稱、私人稱呼與尚未過期狀態；只有明確選擇才同時建立 Moment，不提供在線、最後上線、觀看紀錄或完整動態牆 |
 | W8，9/21–9/27 | **G7 基本文字聊天（已完成）** | 一對一文字訊息可跨裝置同步；顯示訊息時間與未讀數；不顯示已讀狀態 |
-| W9，9/28–10/4 | **G8 可靠傳送機制** | 訊息具有傳送中、成功、失敗與重試狀態；離線重連後不遺失、不重複，順序可預期 |
+| W9，9/28–10/4 | **G8 可靠傳送機制（已完成）** | 訊息具有傳送中、成功、失敗與重試狀態；離線重連後不遺失、不重複，順序可預期 |
 | W10，10/5–10/11 | **G9 聊天首版完整範圍** | 支援聊天照片、Emoji 回應；長按訊息可收藏為 Moment，並能從 Moment 回到相關對話 |
 | W11，10/12–10/18 | **G10 基本共同約定與專屬討論** | 可由長按訊息確認、輸入列「＋」、今天或共同日程建立同一筆基本共同約定；主對話卡片、近期列表、月曆、詳情與通知同步同一狀態且重試不重複；雙方可進入同一個專屬討論，活動後可挑選內容建立相關 Moment，且不建立第二套訊息系統 |
 | W12，10/19–10/25 | **G11「我們」與基本回顧** | 共同時間線不只依序無限堆疊，須按月份分組並支援日期／月份快速跳轉及最小內容類型篩選；使用正確顯示名稱／私人稱呼標示參與者與建立時間；可查看過往約定並返回相關討論；基本每週回顧採規則式彙整，不使用 AI |
@@ -111,10 +111,11 @@ last_updated: 2026-08-12
 - 首輪雙機聊天驗證通過雙向文字、Realtime、未讀數、訊息時間、無已讀標記與強制結束恢復；同時發現輸入框取得焦點後系統鍵盤遮住底部分頁，畫面沒有自然的收鍵盤方式。修正讓聊天列表支援向下拖曳及點擊訊息區收起鍵盤，不額外加入鍵盤工具列按鈕；聚焦 UI regression 覆蓋輸入中點訊息收鍵盤後切回「今天」。
 - 雙機複驗已確認點擊訊息區與向下拖曳均可收起鍵盤，且底部三個分頁恢復切換；G7 基本文字聊天的資料、同步、未讀、時間、無已讀標記、恢復與鍵盤互動 gate 均通過。W7 的真機過期與重新登入 gate 已另行完成，不以 W8 證據替代；G7／W8 正式完成。
 - W9 首個體感切片先處理按下傳送後約 0.5 秒才顯示訊息：改為立即加入本機訊息，短暫同步成功時不增加狀態文案，失敗保留「傳送失敗」與重試入口。現已把該流程接入 TD-002 的正式文字訊息持久 Outbox：寫入成功後才顯示、依 user＋relationship scope 保存、單一 FIFO drain、stable UUID 冪等重送，並在冷啟動／登入、回到前景與前景離線→連線時採立即、1 秒、4 秒、最多三次的有限恢復；登出或畫面結束後停止後續 drain。
-- W9 affected unit tests 已覆蓋跨 store recreation、scope 隔離、FIFO、有限退避、同一 drain 期間連續訊息，以及「遠端已收件但本機 acknowledgement 失敗」後重送不重複；失敗訊息 UI regression 通過。全新 DerivedData 的完整 iPhone scheme 記錄 104 個測試定義、動態 launch matrix 展開後 107 次 executions，0 failure、0 skip；完整本機 gate 的 18 files／251 pgTAP、schema lint、5 個 APNs tests、Harness 與 diff hygiene 亦通過。兩支真實 iPhone 的離線建立、force-quit、重連、順序與唯一送達仍待執行，因此 G8／W9 保持開發中。
-- 首輪雙真機弱網驗收發現三項阻斷：FIFO 隊首失敗後尾端仍顯示傳送中；恢復網路雖能自動送出，但對方需重啟 App 才重讀；離線啟動會恢復帳號設定 modal。修正現把所有被失敗隊首阻塞的訊息一致標示為可重試，Realtime refresh 不再丟棄讀取中抵達的事件，前景／網路恢復會重建 subscription、drain 後再重讀；已登入、已配對者離線冷啟動則只以 user-scoped 唯讀 relationship snapshot 回到三分頁主畫面，顯示離線提示並重設帳號設定 sheet，寫入仍須通過遠端授權。修正版的離線啟動、三分頁與帳號設定聚焦 UI regressions 已通過；全新完整本機 gate 記錄 107 個測試定義、動態 launch matrix 展開後 110 次 executions，0 failure、0 skip，18 files／251 pgTAP、schema lint、5 個 APNs tests、Harness 與 diff hygiene 亦通過。兩支真機的修正版弱網複驗仍待執行，因此 G8／W9 保持開發中。
+- W9 affected unit tests 已覆蓋跨 store recreation、scope 隔離、FIFO、有限退避、同一 drain 期間連續訊息，以及「遠端已收件但本機 acknowledgement 失敗」後重送不重複；失敗訊息 UI regression 通過。全新 DerivedData 的完整 iPhone scheme 記錄 104 個測試定義、動態 launch matrix 展開後 107 次 executions，0 failure、0 skip；完整本機 gate 的 18 files／251 pgTAP、schema lint、5 個 APNs tests、Harness 與 diff hygiene 亦通過。此階段兩支真實 iPhone 的離線建立、force-quit、重連、順序與唯一送達尚待執行，因此當時 G8／W9 保持開發中。
+- 首輪雙真機弱網驗收發現三項阻斷：FIFO 隊首失敗後尾端仍顯示傳送中；恢復網路雖能自動送出，但對方需重啟 App 才重讀；離線啟動會恢復帳號設定 modal。修正現把所有被失敗隊首阻塞的訊息一致標示為可重試，Realtime refresh 不再丟棄讀取中抵達的事件，前景／網路恢復會重建 subscription、drain 後再重讀；已登入、已配對者離線冷啟動則只以 user-scoped 唯讀 relationship snapshot 回到三分頁主畫面，顯示離線提示並重設帳號設定 sheet，寫入仍須通過遠端授權。修正版的離線啟動、三分頁與帳號設定聚焦 UI regressions 已通過；全新完整本機 gate 記錄 107 個測試定義、動態 launch matrix 展開後 110 次 executions，0 failure、0 skip，18 files／251 pgTAP、schema lint、5 個 APNs tests、Harness 與 diff hygiene 亦通過。此階段兩支真機的修正版弱網複驗尚待執行，因此當時 G8／W9 保持開發中。
 - 「今天」離線冷啟動現會先顯示同一 user＋relationship 上次成功讀取的 Moment、Moment 照片、雙方稱呼與目前狀態，不再等待遠端失敗後才留下空白或載入畫面；狀態快照仍會依目前時間排除已過期內容。回到前景或前景離線→連線會平行刷新 Moment、現在的我們與聊天，並由 Supabase RLS 結果校正。快照在成功登出、遠端確認沒有 active relationship 或 relationship identity 改變時清除；本切片只提供離線唯讀顯示，不加入離線建立或修改 Moment／狀態。
-- 次輪雙真機影片確認三分頁、離線提示與不恢復帳號設定已生效，但另揭露離線按傳送後輸入清空且未進 Outbox、既有聊天被誤畫成全新空白，以及 pairing／Moment／狀態串行網路等待阻塞聊天初始化。修正現把完整登入 user UUID 直接交給 user＋relationship scoped 本機聊天 store，輸入框只在 enqueue 成功後清空；最近 200 則已同步文字作為裝置顯示快照，與待送 Outbox 合併後再由遠端 RLS 校正，成功登出或遠端確認 relationship 失效／改變時清除。Pairing 先恢復唯讀快照、主畫面的三個模型平行啟動。影片情境的離線傳送 UI regression、快照容量／scope、遠端失敗仍顯示歷史及配對快照優先恢復 unit tests 已通過；2026-08-13 全新完整本機 gate 記錄 110 個測試定義、113 次 executions、0 failure、0 skip，18 files／251 pgTAP、schema lint、5 個 APNs tests、Harness 與 diff hygiene 亦通過。兩支真機仍須複驗，因此 G8／W9 保持開發中。
+- 次輪雙真機影片確認三分頁、離線提示與不恢復帳號設定已生效，但另揭露離線按傳送後輸入清空且未進 Outbox、既有聊天被誤畫成全新空白，以及 pairing／Moment／狀態串行網路等待阻塞聊天初始化。修正現把完整登入 user UUID 直接交給 user＋relationship scoped 本機聊天 store，輸入框只在 enqueue 成功後清空；最近 200 則已同步文字作為裝置顯示快照，與待送 Outbox 合併後再由遠端 RLS 校正，成功登出或遠端確認 relationship 失效／改變時清除。Pairing 先恢復唯讀快照、主畫面的三個模型平行啟動。影片情境的離線傳送 UI regression、快照容量／scope、遠端失敗仍顯示歷史及配對快照優先恢復 unit tests 已通過；2026-08-13 全新完整本機 gate 記錄 110 個測試定義、113 次 executions、0 failure、0 skip，18 files／251 pgTAP、schema lint、5 個 APNs tests、Harness 與 diff hygiene 亦通過。此階段兩支真機尚待複驗，因此當時 G8／W9 保持開發中。
+- 最終雙真機複驗確認：有快照後離線強制結束並重開，`今天／對話／我們` 三分頁均保留歷史畫面；接收方 App 保持開啟時，另一支手機新增 Moment 與文字訊息會即時顯示；接收方離線期間新增的 Moment 與文字訊息，恢復網路後會自動補齊，不需重啟 App。最終 commit `6c0f4e3` 的完整 Gate B 於 2026-08-13 通過：`.xcresult` 記錄 113 個測試定義、動態 launch matrix 展開後 116 次通過，0 failure、0 skip；18 files／251 pgTAP、local schema lint、5 個 APNs tests、Harness v0.2.1 與 diff hygiene 亦通過。離線輸入、跨啟動 Outbox、FIFO、stable UUID 去重、有限重試、Realtime 重連、對話／Today 唯讀快照及 RLS 校正完成兩支真機閉環；G8／W9 正式完成。聊天照片、訊息 Emoji 回應及收藏為 Moment 仍屬 W10。
 - 真機回報直式截圖在 Moment 卡片的固定 220pt `scaledToFill` 圖框中遭上下裁切；圖片顯示改為依原始長寬比自動決定高度的 `scaledToFit`，不裁切直式、橫式或方形照片。
 - Moment 回應保留六個單鍵快速 Emoji，最右側新增 `+`；點擊後直接升起 App 內建的分類 Emoji 網格，點一個即送出並關閉，不再要求聚焦文字欄位或切換系統鍵盤。自訂 Emoji 沿用既有短回應同步契約；清單由 App 版本維護，新版 Unicode Emoji 需隨版本補充。
 - Emoji 面板真機回報選擇後仍約等待 0.5 秒；原因是 client 先等待建立 RPC，再重抓完整 Moment 時間線，完成後才關閉面板。修正改為點擊即關閉面板並樂觀加入該 Emoji，伺服器回覆後只校正單筆回應，不再進行第二次完整讀取；失敗則撤回暫存回應並恢復既有錯誤提示。

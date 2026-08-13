@@ -91,4 +91,4 @@ last_updated: 2026-08-13
 - 本機 unit tests 已覆蓋跨 store recreation 的 FIFO、user／relationship 隔離、有限退避、同一 drain 期間連續送出、最近對話快照的容量與 scope，以及伺服器已收件但本機 acknowledgement 失敗後以同一 UUID 重送不重複。
 - 首輪雙真機弱網驗收另要求：隊首失敗時所有被阻塞訊息均須顯示可重試；網路恢復須重建 Realtime subscription 並在 drain 後重讀，執行中的 refresh 不得丟棄新事件。離線冷啟動可使用既有 user-scoped relationship 唯讀快照通過導覽 gate，但不可據此授權寫入。
 - 2026-08-13 針對雙真機影片揭露的離線輸入靜默消失、既有聊天誤顯示為空白與啟動等待問題，新增本機 enqueue 語意、最近對話快照、配對快照優先恢復、平行模型啟動及對應 regression。全新完整 iPhone scheme 記錄 110 個測試定義、動態 launch matrix 展開後 113 次 executions，0 failure、0 skip；完整本機 gate 另含 18 files／251 pgTAP、schema lint、5 個 APNs tests、Harness 與 diff hygiene，均通過。
-- 在兩真機 gate 通過前，G8／W9 維持開發中，不因技術決策 accepted 或本機測試通過而標示完成。
+- 2026-08-13 最終雙真機複驗通過三分頁離線冷啟動快照、前景 Realtime，以及離線期間新增內容在恢復網路後自動補齊且不需重啟。commit `6c0f4e3` 的最終完整 Gate B 記錄 113 個測試定義、動態 launch matrix 展開後 116 次通過，0 failure、0 skip；18 files／251 pgTAP、schema lint、5 個 APNs tests、Harness 與 diff hygiene 亦通過。G8／W9 正式完成。
