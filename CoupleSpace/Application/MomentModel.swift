@@ -30,6 +30,10 @@ final class MomentModel: ObservableObject {
         } catch {
             statusMessage = "無法確認 Moment 留下者，請稍後再試。"
         }
+        if let cached = service.cachedMoments() {
+            moments = cached
+            loadCachedPhotos()
+        }
         await refresh()
         do {
             try await service.startObservingChanges { [weak self] in
@@ -220,6 +224,15 @@ final class MomentModel: ObservableObject {
         for moment in moments where photoDataByMomentID[moment.id] == nil {
             guard case .photo = moment.content else { continue }
             await loadPhoto(moment)
+        }
+    }
+
+    private func loadCachedPhotos() {
+        for moment in moments {
+            guard case .photo = moment.content,
+                  let data = service.cachedPhotoData(for: moment.id)
+            else { continue }
+            photoDataByMomentID[moment.id] = data
         }
     }
 

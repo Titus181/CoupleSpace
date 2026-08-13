@@ -55,6 +55,168 @@ struct AppSkeletonTests {
         ) == nil)
     }
 
+    @Test func conversationOutboxPersistsFIFOAndIsolatesAccountsAndRelationships() throws {
+        let suiteName = "ConversationOutboxTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = ConversationOutboxStore(defaults: defaults)
+        let userID = UUID()
+        let relationshipID = UUID()
+        let firstID = UUID()
+        let secondID = UUID()
+        var queue = ConversationOutboxQueue()
+        try queue.enqueue(ConversationOutboxEntry(
+            userID: userID,
+            relationshipID: relationshipID,
+            clientID: firstID,
+            body: "第一則",
+            localCreatedAt: Date(timeIntervalSince1970: 100),
+            attemptCount: 0
+        ))
+        try queue.enqueue(ConversationOutboxEntry(
+            userID: userID,
+            relationshipID: relationshipID,
+            clientID: secondID,
+            body: "第二則",
+            localCreatedAt: Date(timeIntervalSince1970: 101),
+            attemptCount: 0
+        ))
+        try store.save(queue, userID: userID, relationshipID: relationshipID)
+
+        var restored = try store.load(userID: userID, relationshipID: relationshipID)
+        #expect(restored.entries.map(\.clientID) == [firstID, secondID])
+        #expect(restored.beginFirstAttempt()?.clientID == firstID)
+        #expect(restored.entries.first?.attemptCount == 1)
+        #expect(restored.messages.allSatisfy { $0.deliveryState == .failed })
+        try restored.acknowledgeFirst(clientID: firstID)
+        try store.save(restored, userID: userID, relationshipID: relationshipID)
+        #expect(try store.load(userID: userID, relationshipID: relationshipID).entries.map(\.clientID) == [secondID])
+        #expect(try store.load(userID: UUID(), relationshipID: relationshipID).isEmpty)
+        #expect(try store.load(userID: userID, relationshipID: UUID()).isEmpty)
+        store.clearAll(userID: userID)
+        #expect(try store.load(userID: userID, relationshipID: relationshipID).isEmpty)
+    }
+
+    @Test func conversationSnapshotPersistsRecentSyncedMessagesAndIsolatesScope() throws {
+        let suiteName = "ConversationSnapshotTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = ConversationSnapshotStore(defaults: defaults)
+        let userID = UUID()
+        let relationshipID = UUID()
+        let messages = (0..<(ConversationLocalSnapshotPolicy.maximumMessageCount + 1)).map { index in
+            ChatMessage(
+                id: UUID(),
+                senderUserID: userID,
+                body: "訊息 \(index)",
+                createdAt: Date(timeIntervalSince1970: TimeInterval(index))
+            )
+        }
+        try store.save(
+            ConversationSnapshot(currentUserID: userID, messages: messages, unreadCount: 3),
+            userID: userID,
+            relationshipID: relationshipID
+        )
+
+        let loaded = try store.load(userID: userID, relationshipID: relationshipID)
+        let restored = try #require(loaded)
+        #expect(restored.messages.count == ConversationLocalSnapshotPolicy.maximumMessageCount)
+        #expect(restored.messages.first?.body == "訊息 1")
+        #expect(restored.messages.last?.body == "訊息 200")
+        #expect(restored.unreadCount == 3)
+        #expect(try store.load(userID: UUID(), relationshipID: relationshipID) == nil)
+        #expect(try store.load(userID: userID, relationshipID: UUID()) == nil)
+
+        store.clearAll(userID: userID)
+        #expect(try store.load(userID: userID, relationshipID: relationshipID) == nil)
+    }
+
+    @Test func todaySnapshotPersistsMomentsStatusAndPhotoWithinAccountRelationshipScope() throws {
+        let suiteName = "TodaySnapshotTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let photoRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TodaySnapshotTests.\(UUID().uuidString)", isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: photoRootURL)
+        }
+        let store = TodaySnapshotStore(defaults: defaults, photoRootURL: photoRootURL)
+        let userID = UUID()
+        let relationshipID = UUID()
+        let partnerUserID = UUID()
+        let momentID = UUID()
+        let moment = Moment(
+            id: momentID,
+            creatorUserID: partnerUserID,
+            content: .question(MomentQuestion(key: "understand_today", prompt: "題目")),
+            createdAt: Date(timeIntervalSince1970: 100),
+            responses: [MomentResponse(
+                id: UUID(),
+                responderUserID: userID,
+                content: .emoji(.heart),
+                createdAt: Date(timeIntervalSince1970: 101)
+            )],
+            questionAnswers: [MomentQuestionAnswer(
+                id: UUID(),
+                answererUserID: partnerUserID,
+                content: "今天有點累",
+                createdAt: Date(timeIntervalSince1970: 102)
+            )]
+        )
+        let status = CurrentRelationshipStatus(
+            userID: partnerUserID,
+            content: .custom("晚點想聊聊"),
+            expiration: .manual,
+            expiresAt: nil,
+            updatedAt: Date(timeIntervalSince1970: 103)
+        )
+        let togetherNow = TogetherNowSnapshot(
+            currentUserID: userID,
+            partnerUserID: partnerUserID,
+            currentDisplayName: "小日",
+            partnerDisplayName: "小月",
+            privatePartnerName: "月亮",
+            currentStatus: nil,
+            partnerStatus: status
+        )
+        let photoData = Data([0x01, 0x02, 0x03])
+
+        try store.saveMoments([moment], userID: userID, relationshipID: relationshipID)
+        try store.saveTogetherNow(togetherNow, userID: userID, relationshipID: relationshipID)
+        try store.savePhoto(
+            photoData,
+            userID: userID,
+            relationshipID: relationshipID,
+            momentID: momentID
+        )
+
+        #expect(try store.loadMoments(userID: userID, relationshipID: relationshipID) == [moment])
+        #expect(try store.loadTogetherNow(userID: userID, relationshipID: relationshipID) == togetherNow)
+        #expect(try store.loadPhoto(
+            userID: userID,
+            relationshipID: relationshipID,
+            momentID: momentID
+        ) == photoData)
+        #expect(try store.loadMoments(userID: UUID(), relationshipID: relationshipID) == nil)
+        #expect(try store.loadTogetherNow(userID: userID, relationshipID: UUID()) == nil)
+
+        store.clearAll(userID: userID)
+        #expect(try store.loadMoments(userID: userID, relationshipID: relationshipID) == nil)
+        #expect(try store.loadTogetherNow(userID: userID, relationshipID: relationshipID) == nil)
+        #expect(try store.loadPhoto(
+            userID: userID,
+            relationshipID: relationshipID,
+            momentID: momentID
+        ) == nil)
+    }
+
+    @Test func conversationRecoveryRetryUsesTheAcceptedBoundedBackoff() {
+        #expect(ConversationRecoveryRetryPolicy.maximumAttempts == 3)
+        #expect(ConversationRecoveryRetryPolicy.delayNanoseconds(afterAttempt: 1) == 1_000_000_000)
+        #expect(ConversationRecoveryRetryPolicy.delayNanoseconds(afterAttempt: 2) == 4_000_000_000)
+        #expect(ConversationRecoveryRetryPolicy.delayNanoseconds(afterAttempt: 3) == nil)
+    }
+
     @MainActor
     @Test func conversationModelTracksUnreadVisibilityAndStableSendRetries() async throws {
         let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
@@ -87,11 +249,13 @@ struct AppSkeletonTests {
         #expect(model.messages.last?.body == "立即顯示")
         #expect(model.messages.last?.deliveryState == .sending)
         #expect(await slowSend.value)
+        await model.waitForScheduledDelivery()
         #expect(model.messages.last?.deliveryState == .synced)
 
         service.sendDelay = .zero
         service.sendFailuresRemaining = 1
-        #expect(await model.send("  我很好  ") == false)
+        #expect(await model.send("  我很好  "))
+        await model.waitForScheduledDelivery()
         #expect(model.messages.last?.body == "我很好")
         #expect(model.messages.last?.deliveryState == .failed)
         let failedMessageID = try #require(model.messages.last?.id)
@@ -116,6 +280,127 @@ struct AppSkeletonTests {
 
         await model.stop()
         #expect(!service.isObserving)
+    }
+
+    @MainActor
+    @Test func conversationModelDrainsMessagesInFIFOWhileTheFirstSendIsInFlight() async throws {
+        let currentUserID = UUID()
+        let service = ConversationRemoteServiceFake(
+            currentUserID: currentUserID,
+            messages: [],
+            unreadCount: 0
+        )
+        let model = ConversationModel(service: service)
+        await model.start()
+
+        service.sendDelay = .milliseconds(200)
+        let first = Task { await model.send("第一則") }
+        try await Task.sleep(for: .milliseconds(30))
+        let second = Task { await model.send("第二則") }
+
+        #expect(await second.value)
+        #expect(await first.value)
+        await model.waitForScheduledDelivery()
+        #expect(service.sentBodies == ["第一則", "第二則"])
+        #expect(model.messages.map(\.body) == ["第一則", "第二則"])
+        #expect(model.messages.allSatisfy { $0.deliveryState == .synced })
+    }
+
+    @MainActor
+    @Test func conversationModelMarksEveryMessageBlockedByAFailedFIFOHeadAsRetryable() async {
+        let service = ConversationRemoteServiceFake(
+            currentUserID: UUID(),
+            messages: [],
+            unreadCount: 0
+        )
+        let model = ConversationModel(service: service)
+        await model.start()
+        service.sendFailuresRemaining = 10
+
+        #expect(await model.send("第一則"))
+        #expect(await model.send("第二則"))
+        #expect(await model.send("第三則"))
+        await model.waitForScheduledDelivery()
+        #expect(model.messages.map(\.body) == ["第一則", "第二則", "第三則"])
+        #expect(model.messages.allSatisfy { $0.deliveryState == .failed })
+    }
+
+    @MainActor
+    @Test func conversationModelCoalescesRealtimeRefreshAndReconnectsDuringRecovery() async throws {
+        let currentUserID = UUID()
+        let partnerUserID = UUID()
+        let service = ConversationRemoteServiceFake(
+            currentUserID: currentUserID,
+            messages: [],
+            unreadCount: 0
+        )
+        let model = ConversationModel(service: service)
+        await model.start()
+        #expect(service.startObservingCallCount == 1)
+
+        service.fetchDelay = .milliseconds(120)
+        let firstRefresh = Task { await model.refresh() }
+        try await Task.sleep(for: .milliseconds(20))
+        service.messages.append(ChatMessage(
+            id: UUID(),
+            senderUserID: partnerUserID,
+            body: "恢復後立即看見",
+            createdAt: .now
+        ))
+        await service.sendChange()
+        await firstRefresh.value
+        #expect(model.messages.map(\.body) == ["恢復後立即看見"])
+
+        service.fetchDelay = .zero
+        await model.recoverPendingMessages()
+        #expect(service.startObservingCallCount == 2)
+    }
+
+    @MainActor
+    @Test func conversationModelRetriesLostAcknowledgementWithoutDuplicatingRemoteMessage() async throws {
+        let service = ConversationRemoteServiceFake(
+            currentUserID: UUID(),
+            messages: [],
+            unreadCount: 0
+        )
+        let model = ConversationModel(service: service)
+        await model.start()
+        service.acknowledgementFailuresRemaining = 1
+
+        #expect(await model.send("只保留一則"))
+        await model.waitForScheduledDelivery()
+        let failedID = try #require(model.messages.last?.id)
+        #expect(model.messages.last?.deliveryState == .failed)
+        #expect(service.messages.count == 1)
+
+        await model.retryMessage(id: failedID)
+        #expect(service.sentClientIDs == [failedID, failedID])
+        #expect(service.messages.count == 1)
+        #expect(model.messages.last?.deliveryState == .synced)
+    }
+
+
+    @MainActor
+    @Test func conversationModelShowsCachedHistoryWhenRemoteRefreshFails() async {
+        let currentUserID = UUID()
+        let cachedMessage = ChatMessage(
+            id: UUID(),
+            senderUserID: currentUserID,
+            body: "離線仍看得到",
+            createdAt: .now
+        )
+        let service = ConversationRemoteServiceFake(
+            currentUserID: currentUserID,
+            messages: [cachedMessage],
+            unreadCount: 0
+        )
+        service.fetchFailuresRemaining = 1
+        let model = ConversationModel(service: service)
+
+        await model.start()
+
+        #expect(model.messages == [cachedMessage])
+        #expect(model.currentUserID == currentUserID)
     }
 
     @Test func momentDraftNormalizesShortTextAndRejectsInvalidContent() {
@@ -208,6 +493,31 @@ struct AppSkeletonTests {
 
         await model.stop()
         #expect(!service.isObserving)
+    }
+
+    @MainActor
+    @Test func momentModelDisplaysCachedContentBeforeDelayedOfflineRefreshFinishes() async throws {
+        let cachedMoment = Moment(
+            id: UUID(),
+            creatorUserID: UUID(uuidString: "00000000-0000-0000-0000-0000000000B2")!,
+            content: .photo,
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let cachedPhoto = Data([0x01, 0x02])
+        let service = MomentRemoteServiceFake(moments: [])
+        service.cachedMomentsValue = [cachedMoment]
+        service.cachedPhotoDataByMomentID[cachedMoment.id] = cachedPhoto
+        service.fetchDelay = .milliseconds(200)
+        service.fetchFailuresRemaining = 1
+        let model = MomentModel(service: service)
+
+        let start = Task { await model.start() }
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(model.moments == [cachedMoment])
+        #expect(model.photoDataByMomentID[cachedMoment.id] == cachedPhoto)
+        await start.value
+        #expect(model.moments == [cachedMoment])
+        #expect(model.statusMessage != nil)
     }
 
     @MainActor
@@ -398,6 +708,23 @@ struct AppSkeletonTests {
     }
 
     @MainActor
+    @Test func togetherNowModelDisplaysCachedStatusBeforeDelayedOfflineRefreshFinishes() async throws {
+        let cached = TogetherNowSnapshot.preview
+        let service = TogetherNowRemoteServiceFake(snapshot: cached)
+        service.cachedSnapshotValue = cached
+        service.fetchDelay = .milliseconds(200)
+        service.fetchFailuresRemaining = 1
+        let model = TogetherNowModel(service: service)
+
+        let start = Task { await model.start() }
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(model.snapshot == cached)
+        await start.value
+        #expect(model.snapshot == cached)
+        #expect(model.statusMessage != nil)
+    }
+
+    @MainActor
     @Test func togetherNowMomentRetryKeepsOneStableIdentity() async {
         let service = TogetherNowRemoteServiceFake(snapshot: .preview)
         let model = TogetherNowModel(service: service)
@@ -424,12 +751,14 @@ struct AppSkeletonTests {
     @Test func togetherNowAutomaticallyRemovesStatusAtExpiration() async throws {
         let currentUserID = UUID()
         let partnerUserID = UUID()
+        let referenceDate = Date()
+        var currentDate = referenceDate
         let status = CurrentRelationshipStatus(
             userID: currentUserID,
             content: .fixed(.busy),
             expiration: .oneHour,
-            expiresAt: Date().addingTimeInterval(0.05),
-            updatedAt: .now
+            expiresAt: referenceDate.addingTimeInterval(0.05),
+            updatedAt: referenceDate
         )
         let service = TogetherNowRemoteServiceFake(snapshot: TogetherNowSnapshot(
             currentUserID: currentUserID,
@@ -440,10 +769,11 @@ struct AppSkeletonTests {
             currentStatus: status,
             partnerStatus: nil
         ))
-        let model = TogetherNowModel(service: service)
+        let model = TogetherNowModel(service: service, now: { currentDate })
 
         await model.start()
         #expect(model.snapshot?.currentStatus != nil)
+        currentDate = referenceDate.addingTimeInterval(1)
         try await Task.sleep(for: .milliseconds(250))
         #expect(model.snapshot?.currentStatus == nil)
         await model.stop()
@@ -492,6 +822,7 @@ struct AppSkeletonTests {
             Issue.record("A valid session should enter the signed-in state.")
         }
         #expect(signedIn.isSignedIn)
+        #expect(signedIn.userID == userID)
         #expect(signedIn.userToken == "aaaaaaaa")
 
         let signingOut = signedIn.signingOut()
@@ -600,6 +931,17 @@ struct AppSkeletonTests {
         #expect(model.state == .checking)
         #expect(model.isWorking == false)
     }
+
+    @MainActor
+    @Test func pairingModelRestoresCachedRelationshipBeforeRemoteRefreshCompletes() async {
+        let relationship = PairingRelationship(id: UUID(), memberCount: 2)
+        let service = SuspendedPairingRemoteServiceFake(cachedRelationship: relationship)
+        let model = PairingModel(service: service)
+
+        await model.restoreCachedRelationship(userID: UUID())
+
+        #expect(model.state == .paired(relationship))
+    }
 }
 
 @MainActor
@@ -611,9 +953,14 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
     var sentClientIDs: [UUID] = []
     var markedReadMessageIDs: [UUID] = []
     var sendFailuresRemaining = 0
+    var fetchFailuresRemaining = 0
+    var acknowledgementFailuresRemaining = 0
     var sendDelay: Duration = .zero
+    var fetchDelay: Duration = .zero
     var nextAcceptedAt = Date(timeIntervalSince1970: 200)
     var isObserving = false
+    var startObservingCallCount = 0
+    private var pendingMessages: [ChatMessage] = []
     private var onChange: (@MainActor () async -> Void)?
 
     init(currentUserID: UUID, messages: [ChatMessage], unreadCount: Int) {
@@ -622,12 +969,65 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
         self.unreadCount = unreadCount
     }
 
-    func fetchSnapshot() async throws -> ConversationSnapshot {
+    func fetchPendingSnapshot() async throws -> ConversationPendingSnapshot {
+        ConversationPendingSnapshot(currentUserID: currentUserID, messages: pendingMessages)
+    }
+
+    func fetchCachedSnapshot() async throws -> ConversationSnapshot? {
         ConversationSnapshot(
             currentUserID: currentUserID,
             messages: messages,
             unreadCount: unreadCount
         )
+    }
+
+    func persistCachedSnapshot(_ snapshot: ConversationSnapshot) async {}
+
+    func enqueueMessage(body: String, clientID: UUID, localCreatedAt: Date) async throws {
+        pendingMessages.append(ChatMessage(
+            id: clientID,
+            senderUserID: currentUserID,
+            body: body,
+            createdAt: localCreatedAt,
+            deliveryState: .sending
+        ))
+    }
+
+    func beginNextPendingMessage() async throws -> ChatMessage? {
+        pendingMessages.first.map {
+            ChatMessage(
+                id: $0.id,
+                senderUserID: $0.senderUserID,
+                body: $0.body,
+                createdAt: $0.createdAt,
+                deliveryState: .sending
+            )
+        }
+    }
+
+    func acknowledgePendingMessage(clientID: UUID) async throws {
+        if acknowledgementFailuresRemaining > 0 {
+            acknowledgementFailuresRemaining -= 1
+            throw TestServiceError.expected
+        }
+        guard pendingMessages.first?.id == clientID else {
+            throw ConversationOutboxError.unexpectedAcknowledgement
+        }
+        pendingMessages.removeFirst()
+    }
+
+    func fetchSnapshot() async throws -> ConversationSnapshot {
+        if fetchFailuresRemaining > 0 {
+            fetchFailuresRemaining -= 1
+            throw TestServiceError.expected
+        }
+        let snapshot = ConversationSnapshot(
+            currentUserID: currentUserID,
+            messages: messages,
+            unreadCount: unreadCount
+        )
+        try await Task.sleep(for: fetchDelay)
+        return snapshot
     }
 
     func sendMessage(body: String, clientID: UUID) async throws -> Date {
@@ -637,6 +1037,9 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
         if sendFailuresRemaining > 0 {
             sendFailuresRemaining -= 1
             throw TestServiceError.expected
+        }
+        if let existing = messages.first(where: { $0.id == clientID }) {
+            return existing.createdAt
         }
         let acceptedAt = nextAcceptedAt
         nextAcceptedAt = nextAcceptedAt.addingTimeInterval(1)
@@ -655,6 +1058,7 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
     }
 
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
+        startObservingCallCount += 1
         isObserving = true
         self.onChange = onChange
     }
@@ -710,7 +1114,16 @@ private final class PairingRemoteServiceFake: PairingRemoteServing {
 }
 
 private final class SuspendedPairingRemoteServiceFake: PairingRemoteServing {
+    let cachedRelationshipValue: PairingRelationship?
     var currentRelationshipContinuation: CheckedContinuation<PairingRelationship?, Never>?
+
+    init(cachedRelationship: PairingRelationship? = nil) {
+        cachedRelationshipValue = cachedRelationship
+    }
+
+    func cachedRelationship(userID: UUID) async -> PairingRelationship? {
+        cachedRelationshipValue
+    }
 
     func currentRelationship() async throws -> PairingRelationship? {
         await withCheckedContinuation { continuation in
@@ -739,6 +1152,9 @@ private final class SuspendedPairingRemoteServiceFake: PairingRemoteServing {
 @MainActor
 private final class TogetherNowRemoteServiceFake: TogetherNowRemoteServing {
     var snapshot: TogetherNowSnapshot
+    var cachedSnapshotValue: TogetherNowSnapshot?
+    var fetchDelay: Duration = .zero
+    var fetchFailuresRemaining = 0
     var savedNames: [(String?, String?)] = []
     var statusMomentIDs: [UUID?] = []
     var statusFailuresRemaining = 0
@@ -749,7 +1165,16 @@ private final class TogetherNowRemoteServiceFake: TogetherNowRemoteServing {
         self.snapshot = snapshot
     }
 
-    func fetchSnapshot() async throws -> TogetherNowSnapshot { snapshot }
+    func cachedSnapshot() -> TogetherNowSnapshot? { cachedSnapshotValue }
+
+    func fetchSnapshot() async throws -> TogetherNowSnapshot {
+        try await Task.sleep(for: fetchDelay)
+        if fetchFailuresRemaining > 0 {
+            fetchFailuresRemaining -= 1
+            throw TestServiceError.expected
+        }
+        return snapshot
+    }
 
     func updateNames(displayName: String?, privatePartnerName: String?) async throws {
         savedNames.append((displayName, privatePartnerName))
@@ -824,6 +1249,10 @@ private enum TestServiceError: Error {
 private final class MomentRemoteServiceFake: MomentRemoteServing {
     private let userID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
     var moments: [Moment]
+    var cachedMomentsValue: [Moment]?
+    var cachedPhotoDataByMomentID: [UUID: Data] = [:]
+    var fetchDelay: Duration = .zero
+    var fetchFailuresRemaining = 0
     var createdDrafts: [MomentDraft] = []
     var responseClientIDs: [UUID] = []
     var answerClientIDs: [UUID] = []
@@ -841,7 +1270,20 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
 
     func currentUserID() async throws -> UUID { userID }
 
-    func fetchMoments() async throws -> [Moment] { moments }
+    func cachedMoments() -> [Moment]? { cachedMomentsValue }
+
+    func cachedPhotoData(for momentID: UUID) -> Data? {
+        cachedPhotoDataByMomentID[momentID]
+    }
+
+    func fetchMoments() async throws -> [Moment] {
+        try await Task.sleep(for: fetchDelay)
+        if fetchFailuresRemaining > 0 {
+            fetchFailuresRemaining -= 1
+            throw TestServiceError.expected
+        }
+        return moments
+    }
 
     func createMoment(_ draft: MomentDraft, clientID: UUID) async throws -> Moment {
         createdDrafts.append(draft)

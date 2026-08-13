@@ -21,7 +21,7 @@ final class NetworkRecoveryMonitor: ObservableObject {
     @Published private(set) var state: NetworkReachabilityState = .unknown
 
     private let monitor = NWPathMonitor()
-    private let queue = DispatchQueue(label: "com.titus.CoupleSpace.w1-network-recovery")
+    private let queue = DispatchQueue(label: "com.titus.CoupleSpace.network-recovery")
     private var isStarted = false
 
     func start() {

@@ -61,21 +61,24 @@ struct AuthenticationStartPolicy {
 struct AuthenticationState {
     let phase: AuthenticationPhase
     let message: String
+    let userID: UUID?
     let userToken: String?
 
     static let checking = AuthenticationState(
         phase: .checking,
         message: "正在確認登入狀態…",
+        userID: nil,
         userToken: nil
     )
 
     static func signedOut(message: String = "使用 Apple 登入，進入只屬於你們的空間。") -> Self {
-        AuthenticationState(phase: .signedOut, message: message, userToken: nil)
+        AuthenticationState(phase: .signedOut, message: message, userID: nil, userToken: nil)
     }
 
     static let signingIn = AuthenticationState(
         phase: .signingIn,
         message: "正在登入…",
+        userID: nil,
         userToken: nil
     )
 
@@ -83,18 +86,25 @@ struct AuthenticationState {
         AuthenticationState(
             phase: .signedIn,
             message: message,
+            userID: userID,
             userToken: String(userID.uuidString.lowercased().prefix(8))
         )
     }
 
     func signingOut() -> Self {
-        AuthenticationState(phase: .signingOut, message: "正在登出…", userToken: userToken)
+        AuthenticationState(
+            phase: .signingOut,
+            message: "正在登出…",
+            userID: userID,
+            userToken: userToken
+        )
     }
 
     func restoringAfterSignOutFailure() -> Self {
         AuthenticationState(
             phase: .signedIn,
             message: "登出失敗，請稍後再試。",
+            userID: userID,
             userToken: userToken
         )
     }
@@ -135,6 +145,7 @@ final class SupabaseAppleAuthenticationModel: ObservableObject {
             state = AuthenticationState(
                 phase: .signingIn,
                 message: "等待 Apple 驗證…",
+                userID: nil,
                 userToken: nil
             )
         } catch {
@@ -186,9 +197,16 @@ final class SupabaseAppleAuthenticationModel: ObservableObject {
 
     func signOut() async {
         let signedInState = state
+        let signedInUserID = state.userID
         state = state.signingOut()
         do {
             try await client.auth.signOut()
+            if let signedInUserID {
+                ConversationOutboxStore().clearAll(userID: signedInUserID)
+                ConversationSnapshotStore().clearAll(userID: signedInUserID)
+                TodaySnapshotStore().clearAll(userID: signedInUserID)
+                RelationshipSnapshotStore().clear(userID: signedInUserID)
+            }
             apply(session: nil)
         } catch {
             state = signedInState.restoringAfterSignOutFailure()
@@ -209,6 +227,7 @@ final class SupabaseAppleAuthenticationModel: ObservableObject {
             state = AuthenticationState(
                 phase: .checking,
                 message: "正在更新登入狀態…",
+                userID: nil,
                 userToken: nil
             )
 

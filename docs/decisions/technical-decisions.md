@@ -1,7 +1,7 @@
 ---
 title: 技術決策紀錄
 status: active
-last_updated: 2026-08-11
+last_updated: 2026-08-13
 ---
 
 # 技術決策紀錄
@@ -49,7 +49,7 @@ last_updated: 2026-08-11
 - 照片的確切上市額度、顯示尺寸、壓縮品質、正式 upload queue、自動重試與清理細節；PD-019 已確認產品只需共同回顧畫質、不提供原始畫質備份，PD-021 的 30 張／1 GB 研究邊界及拒絕清理已通過 W1 遠端實測，但尚未成為永久上市規格。PD-022 已接受不按時間自動到期，並沿用 relationship／個人封存／明確刪除／最後引用 GC 的既有生命週期。
 - production／TestFlight 的 APNs token、worker、送達與鎖定畫面實測細節；development sandbox 的兩支真實 iPhone 雙向背景／終止／鎖定送達已通過。
 - 個人封存的正式匯出格式、交付方式與大型資料處理；W1 已有 version 1 JSON manifest＋UUID JPEG 資料夾候選，以及依封存照片 byte size 執行的下載前暫存容量預檢，但尚未接受為最終產品契約，也未完成大型真機與低磁碟實測。
-- outbox 的正式自動排程、長時間退避、production 網路監聽、背景執行與正式訊息長佇列上限；W1 只保留「登入、回到前景或前景中觀察到離線→連線後，active relationship 立即嘗試，失敗後以 1 秒、4 秒延遲再試，合計最多三次」的可撤換候選。此候選已通過真機 A＋Simulator B 的短暫斷線、上限停止保留、下一次前景恢復，以及前景離線→連線後自動清空且只送達一次實測。
+- Moment、共同約定、照片等其他正式內容的 outbox 排程、長時間退避、背景執行與長佇列上限；正式文字聊天的前景排程已由 TD-002 定案。
 - Firebase 作為事故備援或未來替代方案；v1 不為未採用的第二套後端預建 adapter。
 
 #### 影響
@@ -64,3 +64,31 @@ last_updated: 2026-08-11
 - **CloudKit Sharing only：否決。** 無法保證解除配對後 participant 在 owner 撤銷分享前取得不可被剝奪的個人封存。
 - **CloudKit 與 Supabase 雙寫：否決。** 沒有產品需求需要兩套共同資料來源，會新增衝突、刪除、封存與事故恢復風險。
 - **Firebase：保留但不進入 v1 spike。** 能力可行，但目前沒有足以抵銷重做已驗證 constraint、RLS、archive 與 Storage lifecycle 的證據。
+
+### TD-002：正式文字聊天採 relationship-scoped 持久 FIFO Outbox
+
+- **狀態：** accepted
+- **日期：** 2026-08-12
+- **決策：** W9 正式文字聊天在遠端寫入前，先把本文、登入 user UUID、active relationship UUID、stable client UUID 與本機建立時間寫入裝置持久 Outbox；同一 user／relationship 只以單一 drain 依 FIFO 傳送。伺服器沿用 `write_shared_message` 的 stable UUID 冪等契約與 server timestamp，client 只有在 RPC 成功且本機 acknowledgement 成功後才移除 queue entry。
+
+#### 傳送與恢復規則
+
+- UI 只在本機持久寫入成功後清空輸入框並立即顯示訊息；首次等待伺服器時為傳送中，有限重試耗盡後保留為傳送失敗並提供明確重試，遠端收件後為已同步。產品不顯示伴侶已讀狀態。
+- 冷啟動／登入、回到前景，以及 App 在前景觀察到網路由 unavailable 轉為 available 時觸發恢復；同一 model 只允許一個 drain，後續訊息加入既有 FIFO 尾端。
+- 每筆在一次恢復事件中立即嘗試，失敗後以 1 秒、4 秒延遲再試，合計最多三次；到達上限後停止並保留失敗項目，等待使用者重試或下一次恢復事件。
+- relationship scope 或登入身分改變時不會把舊 queue 送給目前伴侶；畫面結束／登出後停止後續 retry 與 queue drain。
+- response 遺失時仍以同一 client UUID 重送；伺服器既有冪等 RPC 回傳原本訊息時間，因此不建立第二則遠端訊息。
+- 已登入 user UUID 由恢復完成的 authentication state 傳入正式聊天 service，讓 user＋relationship scoped Outbox 可在沒有網路時先完成本機初始化，不等待其他遠端模型。
+- App 保存最近 200 則已同步文字作為 user＋relationship scoped 裝置顯示快照；離線時先合併快照與待送內容，恢復網路後仍以 Supabase RLS 重讀結果校正。快照不是備份，成功登出或遠端確認 relationship 已失效／改變時清除。
+
+#### 明確不包含
+
+- 不使用 background task、無限輪詢、長時間退避或推播喚醒保證；背景中的未同步內容仍誠實保留在裝置，不宣稱已備份。
+- 本決策只關閉 W9 正式純文字聊天。聊天照片、Emoji 回應與收藏為 Moment 仍屬 W10；其他內容類型須在各自垂直切片另行接入或驗證，不因共用名稱 `outbox` 自動視為完成。
+
+#### 證據與剩餘 Gate
+
+- 本機 unit tests 已覆蓋跨 store recreation 的 FIFO、user／relationship 隔離、有限退避、同一 drain 期間連續送出、最近對話快照的容量與 scope，以及伺服器已收件但本機 acknowledgement 失敗後以同一 UUID 重送不重複。
+- 首輪雙真機弱網驗收另要求：隊首失敗時所有被阻塞訊息均須顯示可重試；網路恢復須重建 Realtime subscription 並在 drain 後重讀，執行中的 refresh 不得丟棄新事件。離線冷啟動可使用既有 user-scoped relationship 唯讀快照通過導覽 gate，但不可據此授權寫入。
+- 2026-08-13 針對雙真機影片揭露的離線輸入靜默消失、既有聊天誤顯示為空白與啟動等待問題，新增本機 enqueue 語意、最近對話快照、配對快照優先恢復、平行模型啟動及對應 regression。全新完整 iPhone scheme 記錄 110 個測試定義、動態 launch matrix 展開後 113 次 executions，0 failure、0 skip；完整本機 gate 另含 18 files／251 pgTAP、schema lint、5 個 APNs tests、Harness 與 diff hygiene，均通過。
+- 在兩真機 gate 通過前，G8／W9 維持開發中，不因技術決策 accepted 或本機測試通過而標示完成。

@@ -4,6 +4,7 @@ import Supabase
 struct PairingGateView: View {
     @ObservedObject var model: PairingModel
     let supabaseClient: SupabaseClient
+    let accountUserID: UUID?
     let accountUserToken: String?
     let accountStatusMessage: String?
     let onSignOut: () -> Void
@@ -33,6 +34,7 @@ struct PairingGateView: View {
 
             case let .paired(relationship):
                 RootTabView(
+                    accountUserID: accountUserID,
                     accountUserToken: accountUserToken,
                     accountStatusMessage: accountStatusMessage,
                     relationshipID: relationship.id,

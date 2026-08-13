@@ -68,9 +68,12 @@ export async function createProviderToken(
   configuration: APNsConfiguration,
   now = new Date(),
 ): Promise<string> {
+  const sourceBytes = privateKeyBytes(configuration.privateKey);
+  const keyData = new ArrayBuffer(sourceBytes.byteLength);
+  new Uint8Array(keyData).set(sourceBytes);
   const key = await crypto.subtle.importKey(
     "pkcs8",
-    privateKeyBytes(configuration.privateKey),
+    keyData,
     { name: "ECDSA", namedCurve: "P-256" },
     false,
     ["sign"],

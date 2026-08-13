@@ -3,6 +3,7 @@ import Supabase
 
 @MainActor
 protocol TogetherNowRemoteServing: AnyObject {
+    func cachedSnapshot() -> TogetherNowSnapshot?
     func fetchSnapshot() async throws -> TogetherNowSnapshot
     func updateNames(displayName: String?, privatePartnerName: String?) async throws
     func setStatus(
@@ -13,6 +14,10 @@ protocol TogetherNowRemoteServing: AnyObject {
     func clearStatus() async throws
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws
     func stopObservingChanges() async
+}
+
+extension TogetherNowRemoteServing {
+    func cachedSnapshot() -> TogetherNowSnapshot? { nil }
 }
 
 private struct TogetherNowMembershipRow: Decodable {
@@ -127,18 +132,56 @@ private struct RelationshipIDParameter: Encodable {
 @MainActor
 final class SupabaseTogetherNowService: TogetherNowRemoteServing {
     private let client: SupabaseClient
+    private let currentUserID: UUID
     private let relationshipID: UUID
+    private let snapshotStore: TodaySnapshotStore
     private var realtimeChannel: RealtimeChannelV2?
     private var realtimeTasks: [Task<Void, Never>] = []
 
-    init(client: SupabaseClient, relationshipID: UUID) {
+    init(
+        client: SupabaseClient,
+        currentUserID: UUID,
+        relationshipID: UUID,
+        snapshotStore: TodaySnapshotStore? = nil
+    ) {
         self.client = client
+        self.currentUserID = currentUserID
         self.relationshipID = relationshipID
+        self.snapshotStore = snapshotStore ?? TodaySnapshotStore()
     }
 
     func fetchSnapshot() async throws -> TogetherNowSnapshot {
+        do {
+            let snapshot = try await fetchRemoteSnapshot()
+            try? snapshotStore.saveTogetherNow(
+                snapshot,
+                userID: currentUserID,
+                relationshipID: relationshipID
+            )
+            return snapshot
+        } catch {
+            if let cached = try? snapshotStore.loadTogetherNow(
+                userID: currentUserID,
+                relationshipID: relationshipID
+            ) {
+                return cached
+            }
+            throw error
+        }
+    }
+
+    func cachedSnapshot() -> TogetherNowSnapshot? {
+        try? snapshotStore.loadTogetherNow(
+            userID: currentUserID,
+            relationshipID: relationshipID
+        )
+    }
+
+    private func fetchRemoteSnapshot() async throws -> TogetherNowSnapshot {
         let session = try await client.auth.session
-        let currentUserID = session.user.id
+        guard session.user.id == currentUserID else {
+            throw TogetherNowServiceError.accountChanged
+        }
         let memberships: [TogetherNowMembershipRow] = try await client
             .from("relationship_members")
             .select("user_id")
@@ -287,6 +330,7 @@ private enum TogetherNowServiceError: LocalizedError {
     case invalidServerState
     case missingPartner
     case missingSavedStatus
+    case accountChanged
 
     var errorDescription: String? {
         switch self {
@@ -294,6 +338,7 @@ private enum TogetherNowServiceError: LocalizedError {
         case .invalidServerState: "無法讀取現在的我們。"
         case .missingPartner: "找不到目前的伴侶關係。"
         case .missingSavedStatus: "伺服器未回傳更新後的狀態。"
+        case .accountChanged: "目前登入帳號已變更。"
         }
     }
 }

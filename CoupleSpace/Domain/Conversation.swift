@@ -20,6 +20,10 @@ struct ConversationSnapshot: Equatable, Sendable {
     let unreadCount: Int
 }
 
+enum ConversationLocalSnapshotPolicy {
+    static let maximumMessageCount = 200
+}
+
 enum ChatTextPolicy {
     static let maximumLength = 4_000
 

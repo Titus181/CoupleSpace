@@ -1,6 +1,6 @@
 ---
 status: active
-last_updated: 2026-08-12
+last_updated: 2026-08-13
 ---
 
 # CoupleSpace 測試目錄
@@ -17,7 +17,7 @@ last_updated: 2026-08-12
 | AUTH-002 | W3 Apple 登入 | 離線仍開啟 Apple sheet、nonce 或同帳號恢復錯誤 | Unit＋真機 | `CoupleSpaceTests/CoupleSpaceTests.swift`、`CoupleSpaceTests/AppSkeletonTests.swift`、`manual/two-iphone.md` | A、B、D |
 | PAIR-001 | W1／W4 配對授權 | 第三人存取、重複 active relationship、無效邀請接受 | pgTAP／Unit | `supabase/tests/database/pairing_invitation.test.sql`、`pairing_decline.test.sql`、`pairing_cancel.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift` | A、B、D |
 | PAIR-002 | W4 配對恢復 | 同時邀請、拒絕／失效後無法重試、錯誤取消關係 | pgTAP／UI＋真機 | 同上、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
-| RLS-001 | W1–W8 私密資料邊界 | 非 relationship member 讀寫共同或個人資料 | pgTAP | `supabase/tests/database/*.test.sql` | A、B、D |
+| RLS-001 | W1–W9 私密資料邊界 | 非 relationship member 讀寫共同或個人資料 | pgTAP | `supabase/tests/database/*.test.sql` | A、B、D |
 | SYNC-001 | W1 Realtime／排序 | 重讀未經 RLS、server timestamp 排序不穩定 | pgTAP／Unit＋真機 | `shared_items_realtime.test.sql`、`CoupleSpaceTests/CoupleSpaceTests.swift`、`manual/two-iphone.md` | A、B、D |
 | OUTBOX-001 | W1 訊息／marker／照片 | 離線內容遺失、重複、錯序或錯 relationship 送出 | Unit＋真機 | `CoupleSpaceTests/CoupleSpaceTests.swift`、`manual/weak-network.md` | A、B、D |
 | PHOTO-001 | W1 照片處理 | 大圖方向錯誤、GPS 遺留、容量不足仍寫入 | Unit | `CoupleSpaceTests/CoupleSpaceTests.swift` | A、B、D |
@@ -32,9 +32,11 @@ last_updated: 2026-08-12
 | STATUS-001 | W7 名稱與私人稱呼 | 私人稱呼被伴侶讀取、清除與 fallback 錯誤 | pgTAP／Unit／UI＋真機 | `together_now.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | STATUS-002 | W7 此刻狀態 | 到期仍顯示、重建後未恢復、未選擇卻建立歷史 | pgTAP／Unit／UI＋真機 | 同上、`manual/upgrade-and-recovery.md` | A、B、D |
 | CHAT-001 | W1／W8 基本文字聊天 | 內容長度、伺服器排序、第三人存取、未讀游標倒退或外洩 | pgTAP／Unit／UI＋真機 | `text_message_contract.test.sql`、`basic_text_chat.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift` | A、B、D |
+| CHAT-002 | W9 可靠文字傳送 | 離線輸入靜默消失、待送／最近同步內容跨啟動遺失、錯 relationship、重複、錯序、無限重試或失敗狀態不可操作 | Unit／UI＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/weak-network.md` | A、B、D |
+| TODAY-001 | W9 離線 Today 顯示 | 離線冷啟動只顯示載入、Moment／照片／狀態消失、過期狀態重現、錯帳號或錯 relationship 快照外洩、重連後不校正 | Unit＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`manual/weak-network.md` | A、B、D |
 | EVAL-001 | Agent 行為 | 未讀文件、越權遠端寫入、跳過測試或洩漏私人資料 | Agent Eval／Harness | `evals/README.md`、`.harness/` | B、D |
 
-Gate A／B／D 定義見 [版本發布閘門](release-gates.md)。W8 已存在於目前 checkout，但正式持久 Outbox、離線重送、可靠重試與傳送狀態仍屬後續 W9，`CHAT-001` 不得被解讀成這些能力已完成。
+Gate A／B／D 定義見 [版本發布閘門](release-gates.md)。`CHAT-001` 只代表 W8 基本聊天；W9 的正式持久 Outbox、離線重送、可靠重試與傳送狀態由 `CHAT-002` 獨立關閉。目前程式與 affected unit tests 已落地，但兩支真實 iPhone 的 NETWORK-001 gate 未完成，不得把 G8／W9 標示為完成。
 
 ## 目前必須保留的人工證據
 
@@ -53,4 +55,4 @@ Gate A／B／D 定義見 [版本發布閘門](release-gates.md)。W8 已存在�
 - 大型真機封存、實際低磁碟與中斷續傳尚需對應 release gate。
 - App Lock 尚未因文件存在而視為已實作或通過。
 - Database／Storage restore drill 必須使用一致版本演練，不能用單純「備份已開啟」代替。
-- W9 以前不得把基本聊天測試解讀為正式離線 Outbox 與傳送狀態已完成。
+- W9 的本機自動化不得取代兩支真實 iPhone 的離線、force-quit、重連、去重與 FIFO 證據。

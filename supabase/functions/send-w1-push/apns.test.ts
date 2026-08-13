@@ -1,7 +1,7 @@
 import {
   assert,
   assertEquals,
-  assertRejects,
+  assertThrows,
 } from "jsr:@std/assert@1";
 import {
   createProviderToken,
@@ -30,8 +30,8 @@ Deno.test("generic payload contains routing metadata but no private content", ()
 });
 
 Deno.test("unsupported event kind is rejected", () => {
-  assertRejects(
-    () => Promise.resolve(genericPayload("event", "message_created")),
+  assertThrows(
+    () => genericPayload("event", "message_created"),
     Error,
     "unsupported_event_kind",
   );

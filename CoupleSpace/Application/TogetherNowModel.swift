@@ -28,6 +28,9 @@ final class TogetherNowModel: ObservableObject {
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true
+        if let cached = service.cachedSnapshot() {
+            apply(cached)
+        }
         await refresh()
         do {
             try await service.startObservingChanges { [weak self] in
@@ -51,21 +54,8 @@ final class TogetherNowModel: ObservableObject {
         defer { isLoading = false }
         do {
             let fetched = try await service.fetchSnapshot()
-            snapshot = TogetherNowSnapshot(
-                currentUserID: fetched.currentUserID,
-                partnerUserID: fetched.partnerUserID,
-                currentDisplayName: fetched.currentDisplayName,
-                partnerDisplayName: fetched.partnerDisplayName,
-                privatePartnerName: fetched.privatePartnerName,
-                currentStatus: fetched.currentStatus?.isActive(at: now()) == true
-                    ? fetched.currentStatus
-                    : nil,
-                partnerStatus: fetched.partnerStatus?.isActive(at: now()) == true
-                    ? fetched.partnerStatus
-                    : nil
-            )
+            apply(fetched)
             statusMessage = nil
-            scheduleExpirationRefresh()
         } catch {
             statusMessage = "無法更新現在的我們，請稍後再試。"
         }
@@ -179,5 +169,22 @@ final class TogetherNowModel: ObservableObject {
             guard !Task.isCancelled else { return }
             await self?.refresh()
         }
+    }
+
+    private func apply(_ fetched: TogetherNowSnapshot) {
+        snapshot = TogetherNowSnapshot(
+            currentUserID: fetched.currentUserID,
+            partnerUserID: fetched.partnerUserID,
+            currentDisplayName: fetched.currentDisplayName,
+            partnerDisplayName: fetched.partnerDisplayName,
+            privatePartnerName: fetched.privatePartnerName,
+            currentStatus: fetched.currentStatus?.isActive(at: now()) == true
+                ? fetched.currentStatus
+                : nil,
+            partnerStatus: fetched.partnerStatus?.isActive(at: now()) == true
+                ? fetched.partnerStatus
+                : nil
+        )
+        scheduleExpirationRefresh()
     }
 }

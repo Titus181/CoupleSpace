@@ -18,6 +18,7 @@ struct AuthenticationGateView: View {
                     PairingGateView(
                         model: pairingModel,
                         supabaseClient: supabaseClient,
+                        accountUserID: nil,
                         accountUserToken: nil,
                         accountStatusMessage: nil,
                         onSignOut: {}
@@ -36,6 +37,7 @@ struct AuthenticationGateView: View {
                     PairingGateView(
                         model: pairingModel,
                         supabaseClient: supabaseClient,
+                        accountUserID: authModel.state.userID,
                         accountUserToken: authModel.state.userToken,
                         accountStatusMessage: authModel.state.message == "已登入"
                             ? nil
@@ -50,9 +52,13 @@ struct AuthenticationGateView: View {
             guard !bypassesAuthentication else { return }
             await authModel.observeAuthState()
         }
-        .task(id: authModel.state.userToken) {
-            guard !bypassesAuthentication, authModel.state.isSignedIn else { return }
+        .task(id: authModel.state.userID) {
+            guard !bypassesAuthentication,
+                  authModel.state.isSignedIn,
+                  let userID = authModel.state.userID
+            else { return }
             pairingModel.resetForAuthenticatedSession()
+            await pairingModel.restoreCachedRelationship(userID: userID)
             await pairingModel.refresh()
         }
     }

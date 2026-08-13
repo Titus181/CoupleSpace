@@ -28,14 +28,14 @@ enum MomentMood: String, CaseIterable, Codable, Equatable, Sendable {
     }
 }
 
-enum MomentContent: Equatable, Sendable {
+enum MomentContent: Codable, Equatable, Sendable {
     case mood(MomentMood)
     case text(String)
     case photo
     case question(MomentQuestion)
 }
 
-struct MomentQuestion: Equatable, Sendable {
+struct MomentQuestion: Codable, Equatable, Sendable {
     let key: String
     let prompt: String
 }
@@ -71,26 +71,26 @@ enum MomentEmoji: String, CaseIterable, Codable, Equatable, Sendable {
     }
 }
 
-enum MomentResponseContent: Equatable, Sendable {
+enum MomentResponseContent: Codable, Equatable, Sendable {
     case emoji(MomentEmoji)
     case text(String)
 }
 
-struct MomentResponse: Identifiable, Equatable, Sendable {
+struct MomentResponse: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let responderUserID: UUID
     let content: MomentResponseContent
     let createdAt: Date
 }
 
-struct MomentQuestionAnswer: Identifiable, Equatable, Sendable {
+struct MomentQuestionAnswer: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let answererUserID: UUID
     let content: String
     let createdAt: Date
 }
 
-struct Moment: Identifiable, Equatable, Sendable {
+struct Moment: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let creatorUserID: UUID
     let content: MomentContent

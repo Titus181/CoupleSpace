@@ -2,10 +2,18 @@ import Supabase
 import SwiftUI
 
 struct RootTabView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var selection = PrimarySection.defaultSelection
+    @StateObject private var networkRecoveryMonitor = NetworkRecoveryMonitor()
     @StateObject private var momentModel: MomentModel
     @StateObject private var togetherNowModel: TogetherNowModel
     @StateObject private var conversationModel: ConversationModel
+
+    private var isOffline: Bool {
+        networkRecoveryMonitor.state == .unavailable
+            || ProcessInfo.processInfo.arguments.contains("--ui-testing-offline")
+    }
+
     let accountUserToken: String?
     let accountStatusMessage: String?
     let relationshipToken: String?
@@ -13,6 +21,7 @@ struct RootTabView: View {
     let onSignOut: () -> Void
 
     init(
+        accountUserID: UUID? = nil,
         accountUserToken: String? = nil,
         accountStatusMessage: String? = nil,
         relationshipID: UUID? = nil,
@@ -25,11 +34,12 @@ struct RootTabView: View {
         self.relationshipToken = relationshipToken
         self.technicalValidationClient = technicalValidationClient
         self.onSignOut = onSignOut
-        if let relationshipID, let technicalValidationClient {
+        if let accountUserID, let relationshipID, let technicalValidationClient {
             _momentModel = StateObject(
                 wrappedValue: MomentModel(
                     service: SupabaseMomentService(
                         client: technicalValidationClient,
+                        currentUserID: accountUserID,
                         relationshipID: relationshipID
                     )
                 )
@@ -38,6 +48,7 @@ struct RootTabView: View {
                 wrappedValue: TogetherNowModel(
                     service: SupabaseTogetherNowService(
                         client: technicalValidationClient,
+                        currentUserID: accountUserID,
                         relationshipID: relationshipID
                     )
                 )
@@ -46,6 +57,7 @@ struct RootTabView: View {
                 wrappedValue: ConversationModel(
                     service: SupabaseConversationService(
                         client: technicalValidationClient,
+                        currentUserID: accountUserID,
                         relationshipID: relationshipID
                     )
                 )
@@ -108,7 +120,19 @@ struct RootTabView: View {
                 wrappedValue: TogetherNowModel(service: InMemoryTogetherNowService())
             )
             let seededMessages: [ChatMessage]
-            if arguments.contains("--ui-testing-partner-message") {
+            if arguments.contains("--ui-testing-failed-message") {
+                seededMessages = ["第一則待重試", "第二則待重試", "第三則待重試"]
+                    .enumerated()
+                    .map { index, body in
+                        ChatMessage(
+                            id: UUID(uuidString: "D4000000-0000-0000-0000-00000000000\(index + 2)")!,
+                            senderUserID: uiTestUserID,
+                            body: body,
+                            createdAt: .now.addingTimeInterval(TimeInterval(index)),
+                            deliveryState: .failed
+                        )
+                    }
+            } else if arguments.contains("--ui-testing-partner-message") {
                 seededMessages = [ChatMessage(
                     id: UUID(uuidString: "D4000000-0000-0000-0000-000000000001")!,
                     senderUserID: uiTestPartnerID,
@@ -123,7 +147,8 @@ struct RootTabView: View {
                     service: InMemoryConversationService(
                         currentUserID: uiTestUserID,
                         messages: seededMessages,
-                        unreadCount: seededMessages.count
+                        unreadCount: seededMessages.count,
+                        sendFailuresRemaining: arguments.contains("--ui-testing-offline") ? .max : 0
                     )
                 )
             )
@@ -154,14 +179,51 @@ struct RootTabView: View {
             }
         }
         .tint(.accentColor)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if isOffline {
+                Label("目前為離線模式，待送內容會在恢復網路後重試。", systemImage: "wifi.slash")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(.thinMaterial)
+                    .accessibilityIdentifier("offline-status")
+            }
+        }
         .task {
-            await momentModel.start()
-            await togetherNowModel.start()
-            await conversationModel.start()
+            networkRecoveryMonitor.start()
+            async let momentStart: Void = momentModel.start()
+            async let togetherNowStart: Void = togetherNowModel.start()
+            async let conversationStart: Void = conversationModel.start()
+            _ = await (momentStart, togetherNowStart, conversationStart)
         }
         .onChange(of: selection) { _, selection in
             Task {
                 await conversationModel.setConversationVisible(selection == .conversation)
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            Task {
+                async let momentRefresh: Void = momentModel.refresh()
+                async let togetherNowRefresh: Void = togetherNowModel.refresh()
+                async let conversationRecovery: Void = conversationModel.recoverPendingMessages()
+                _ = await (momentRefresh, togetherNowRefresh, conversationRecovery)
+            }
+        }
+        .onChange(of: networkRecoveryMonitor.state) { previous, current in
+            guard scenePhase == .active,
+                  NetworkRecoveryTriggerPolicy.shouldRecover(
+                      previous: previous,
+                      current: current
+                  )
+            else { return }
+            Task {
+                async let momentRefresh: Void = momentModel.refresh()
+                async let togetherNowRefresh: Void = togetherNowModel.refresh()
+                async let conversationRecovery: Void = conversationModel.recoverPendingMessages()
+                _ = await (momentRefresh, togetherNowRefresh, conversationRecovery)
             }
         }
         .onDisappear {
@@ -220,6 +282,12 @@ private struct UsView: View {
             }
         }
         .accessibilityIdentifier("us-screen")
+        .onAppear {
+            isShowingAccountSettings = false
+        }
+        .onDisappear {
+            isShowingAccountSettings = false
+        }
     }
 }
 

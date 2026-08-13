@@ -3,6 +3,12 @@ import Supabase
 
 @MainActor
 protocol ConversationRemoteServing: AnyObject {
+    func fetchPendingSnapshot() async throws -> ConversationPendingSnapshot
+    func fetchCachedSnapshot() async throws -> ConversationSnapshot?
+    func persistCachedSnapshot(_ snapshot: ConversationSnapshot) async
+    func enqueueMessage(body: String, clientID: UUID, localCreatedAt: Date) async throws
+    func beginNextPendingMessage() async throws -> ChatMessage?
+    func acknowledgePendingMessage(clientID: UUID) async throws
     func fetchSnapshot() async throws -> ConversationSnapshot
     func sendMessage(body: String, clientID: UUID) async throws -> Date
     func markRead(through messageID: UUID) async throws
@@ -66,17 +72,84 @@ private struct MarkConversationReadParameters: Encodable {
 @MainActor
 final class SupabaseConversationService: ConversationRemoteServing {
     private let client: SupabaseClient
+    private let currentUserID: UUID
     private let relationshipID: UUID
+    private let outboxStore: ConversationOutboxStore
+    private let snapshotStore: ConversationSnapshotStore
     private var realtimeChannel: RealtimeChannelV2?
     private var realtimeTasks: [Task<Void, Never>] = []
 
-    init(client: SupabaseClient, relationshipID: UUID) {
+    init(
+        client: SupabaseClient,
+        currentUserID: UUID,
+        relationshipID: UUID,
+        outboxStore: ConversationOutboxStore = ConversationOutboxStore(),
+        snapshotStore: ConversationSnapshotStore = ConversationSnapshotStore()
+    ) {
         self.client = client
+        self.currentUserID = currentUserID
         self.relationshipID = relationshipID
+        self.outboxStore = outboxStore
+        self.snapshotStore = snapshotStore
+    }
+
+    func fetchPendingSnapshot() async throws -> ConversationPendingSnapshot {
+        let queue = try outboxStore.load(userID: currentUserID, relationshipID: relationshipID)
+        return ConversationPendingSnapshot(
+            currentUserID: currentUserID,
+            messages: queue.messages
+        )
+    }
+
+    func fetchCachedSnapshot() async throws -> ConversationSnapshot? {
+        try snapshotStore.load(userID: currentUserID, relationshipID: relationshipID)
+    }
+
+    func persistCachedSnapshot(_ snapshot: ConversationSnapshot) async {
+        guard snapshot.currentUserID == currentUserID else { return }
+        try? snapshotStore.save(snapshot, userID: currentUserID, relationshipID: relationshipID)
+    }
+
+    func enqueueMessage(body: String, clientID: UUID, localCreatedAt: Date) async throws {
+        guard let body = ChatTextPolicy.normalizedBody(body) else {
+            throw ConversationServiceError.invalidMessage
+        }
+        var queue = try outboxStore.load(userID: currentUserID, relationshipID: relationshipID)
+        try queue.enqueue(ConversationOutboxEntry(
+            userID: currentUserID,
+            relationshipID: relationshipID,
+            clientID: clientID,
+            body: body,
+            localCreatedAt: localCreatedAt,
+            attemptCount: 0
+        ))
+        try outboxStore.save(queue, userID: currentUserID, relationshipID: relationshipID)
+    }
+
+    func beginNextPendingMessage() async throws -> ChatMessage? {
+        var queue = try outboxStore.load(userID: currentUserID, relationshipID: relationshipID)
+        guard let entry = queue.beginFirstAttempt() else { return nil }
+        try outboxStore.save(queue, userID: currentUserID, relationshipID: relationshipID)
+        return ChatMessage(
+            id: entry.clientID,
+            senderUserID: entry.userID,
+            body: entry.body,
+            createdAt: entry.localCreatedAt,
+            deliveryState: .sending
+        )
+    }
+
+    func acknowledgePendingMessage(clientID: UUID) async throws {
+        var queue = try outboxStore.load(userID: currentUserID, relationshipID: relationshipID)
+        try queue.acknowledgeFirst(clientID: clientID)
+        try outboxStore.save(queue, userID: currentUserID, relationshipID: relationshipID)
     }
 
     func fetchSnapshot() async throws -> ConversationSnapshot {
         let session = try await client.auth.session
+        guard session.user.id == currentUserID else {
+            throw ConversationServiceError.unexpectedAuthenticatedUser
+        }
         let rows: [ChatMessageRow] = try await client
             .from("shared_items")
             .select("client_id,creator_user_id,text_content,created_at")
@@ -93,11 +166,13 @@ final class SupabaseConversationService: ConversationRemoteServing {
             )
             .execute()
             .value
-        return ConversationSnapshot(
+        let snapshot = ConversationSnapshot(
             currentUserID: session.user.id,
             messages: rows.map(\.message),
             unreadCount: unreadCount
         )
+        try snapshotStore.save(snapshot, userID: currentUserID, relationshipID: relationshipID)
+        return snapshot
     }
 
     func sendMessage(body: String, clientID: UUID) async throws -> Date {
@@ -173,8 +248,16 @@ final class SupabaseConversationService: ConversationRemoteServing {
 
 private enum ConversationServiceError: LocalizedError {
     case invalidMessage
+    case unexpectedAuthenticatedUser
 
-    var errorDescription: String? { "訊息內容不完整。" }
+    var errorDescription: String? {
+        switch self {
+        case .invalidMessage:
+            "訊息內容不完整。"
+        case .unexpectedAuthenticatedUser:
+            "登入身分已變更。"
+        }
+    }
 }
 
 @MainActor
@@ -182,15 +265,65 @@ final class InMemoryConversationService: ConversationRemoteServing {
     private let currentUserID: UUID
     private var messages: [ChatMessage]
     private var unreadCount: Int
+    private var pendingMessages: [ChatMessage] = []
+    private var sendFailuresRemaining: Int
 
     init(
         currentUserID: UUID = UUID(),
         messages: [ChatMessage] = [],
-        unreadCount: Int = 0
+        unreadCount: Int = 0,
+        sendFailuresRemaining: Int = 0
     ) {
         self.currentUserID = currentUserID
         self.messages = messages
         self.unreadCount = unreadCount
+        self.sendFailuresRemaining = sendFailuresRemaining
+    }
+
+    func fetchPendingSnapshot() async throws -> ConversationPendingSnapshot {
+        ConversationPendingSnapshot(currentUserID: currentUserID, messages: pendingMessages)
+    }
+
+    func fetchCachedSnapshot() async throws -> ConversationSnapshot? {
+        ConversationSnapshot(
+            currentUserID: currentUserID,
+            messages: messages,
+            unreadCount: unreadCount
+        )
+    }
+
+    func persistCachedSnapshot(_ snapshot: ConversationSnapshot) async {}
+
+    func enqueueMessage(body: String, clientID: UUID, localCreatedAt: Date) async throws {
+        guard let body = ChatTextPolicy.normalizedBody(body) else {
+            throw ConversationServiceError.invalidMessage
+        }
+        pendingMessages.append(ChatMessage(
+            id: clientID,
+            senderUserID: currentUserID,
+            body: body,
+            createdAt: localCreatedAt,
+            deliveryState: .sending
+        ))
+    }
+
+    func beginNextPendingMessage() async throws -> ChatMessage? {
+        pendingMessages.first.map {
+            ChatMessage(
+                id: $0.id,
+                senderUserID: $0.senderUserID,
+                body: $0.body,
+                createdAt: $0.createdAt,
+                deliveryState: .sending
+            )
+        }
+    }
+
+    func acknowledgePendingMessage(clientID: UUID) async throws {
+        guard pendingMessages.first?.id == clientID else {
+            throw ConversationOutboxError.unexpectedAcknowledgement
+        }
+        pendingMessages.removeFirst()
     }
 
     func fetchSnapshot() async throws -> ConversationSnapshot {
@@ -206,6 +339,10 @@ final class InMemoryConversationService: ConversationRemoteServing {
     func sendMessage(body: String, clientID: UUID) async throws -> Date {
         guard let body = ChatTextPolicy.normalizedBody(body) else {
             throw ConversationServiceError.invalidMessage
+        }
+        if sendFailuresRemaining > 0 {
+            sendFailuresRemaining -= 1
+            throw URLError(.notConnectedToInternet)
         }
         if let existing = messages.first(where: { $0.id == clientID }) {
             guard existing.senderUserID == currentUserID, existing.body == body else {

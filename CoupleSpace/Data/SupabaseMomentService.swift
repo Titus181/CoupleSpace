@@ -4,6 +4,8 @@ import Supabase
 @MainActor
 protocol MomentRemoteServing: AnyObject {
     func currentUserID() async throws -> UUID
+    func cachedMoments() -> [Moment]?
+    func cachedPhotoData(for momentID: UUID) -> Data?
     func fetchMoments() async throws -> [Moment]
     func createMoment(_ draft: MomentDraft, clientID: UUID) async throws -> Moment
     func createQuestion(
@@ -21,6 +23,11 @@ protocol MomentRemoteServing: AnyObject {
     func photoData(for momentID: UUID) async throws -> Data
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws
     func stopObservingChanges() async
+}
+
+extension MomentRemoteServing {
+    func cachedMoments() -> [Moment]? { nil }
+    func cachedPhotoData(for momentID: UUID) -> Data? { nil }
 }
 
 private struct MomentRow: Decodable {
@@ -218,21 +225,68 @@ final class SupabaseMomentService: MomentRemoteServing {
     private static let photoBucket = "couplespace-moment-photos"
 
     private let client: SupabaseClient
+    private let currentUserIDValue: UUID
     private let relationshipID: UUID
+    private let snapshotStore: TodaySnapshotStore
     private var realtimeChannel: RealtimeChannelV2?
     private var realtimeTasks: [Task<Void, Never>] = []
 
-    init(client: SupabaseClient, relationshipID: UUID) {
+    init(
+        client: SupabaseClient,
+        currentUserID: UUID,
+        relationshipID: UUID,
+        snapshotStore: TodaySnapshotStore? = nil
+    ) {
         self.client = client
+        currentUserIDValue = currentUserID
         self.relationshipID = relationshipID
+        self.snapshotStore = snapshotStore ?? TodaySnapshotStore()
     }
 
     func currentUserID() async throws -> UUID {
-        try await client.auth.session.user.id
+        currentUserIDValue
+    }
+
+    func cachedMoments() -> [Moment]? {
+        try? snapshotStore.loadMoments(
+            userID: currentUserIDValue,
+            relationshipID: relationshipID
+        )
+    }
+
+    func cachedPhotoData(for momentID: UUID) -> Data? {
+        try? snapshotStore.loadPhoto(
+            userID: currentUserIDValue,
+            relationshipID: relationshipID,
+            momentID: momentID
+        )
     }
 
     func fetchMoments() async throws -> [Moment] {
-        _ = try await client.auth.session
+        do {
+            let moments = try await fetchRemoteMoments()
+            try? snapshotStore.saveMoments(
+                moments,
+                userID: currentUserIDValue,
+                relationshipID: relationshipID
+            )
+            return moments
+        } catch {
+            if let cached = try? snapshotStore.loadMoments(
+                userID: currentUserIDValue,
+                relationshipID: relationshipID
+            ) {
+                return cached
+            }
+            throw error
+        }
+    }
+
+    private func fetchRemoteMoments() async throws -> [Moment] {
+        let session = try await client.auth.session
+        guard session.user.id == currentUserIDValue else {
+            throw MomentServiceError.accountChanged
+        }
         let rows: [MomentRow] = try await client
             .from("moments")
             .select(
@@ -326,7 +380,17 @@ final class SupabaseMomentService: MomentRemoteServing {
                 .execute()
                 .value
             guard let row = rows.first else { throw MomentServiceError.missingCreatedMoment }
-            return try row.moment()
+            let moment = try row.moment()
+            cache(moment)
+            if case let .photo(data) = draft {
+                try? snapshotStore.savePhoto(
+                    data,
+                    userID: currentUserIDValue,
+                    relationshipID: relationshipID,
+                    momentID: moment.id
+                )
+            }
+            return moment
         } catch {
             if let uploadedPath {
                 _ = try? await client.storage
@@ -397,7 +461,9 @@ final class SupabaseMomentService: MomentRemoteServing {
             .execute()
             .value
         guard let row = rows.first else { throw MomentServiceError.missingCreatedResponse }
-        return try row.response()
+        let response = try row.response()
+        cache(response, for: momentID)
+        return response
     }
 
     func answerQuestion(momentID: UUID, answer: String, clientID: UUID) async throws
@@ -418,14 +484,37 @@ final class SupabaseMomentService: MomentRemoteServing {
             .execute()
             .value
         guard let row = rows.first else { throw MomentServiceError.missingCreatedAnswer }
-        return row.answer()
+        let savedAnswer = row.answer()
+        cache(savedAnswer, for: momentID)
+        return savedAnswer
     }
 
     func photoData(for momentID: UUID) async throws -> Data {
-        _ = try await client.auth.session
-        return try await client.storage
-            .from(Self.photoBucket)
-            .download(path: photoPath(momentID: momentID))
+        do {
+            let session = try await client.auth.session
+            guard session.user.id == currentUserIDValue else {
+                throw MomentServiceError.accountChanged
+            }
+            let data = try await client.storage
+                .from(Self.photoBucket)
+                .download(path: photoPath(momentID: momentID))
+            try? snapshotStore.savePhoto(
+                data,
+                userID: currentUserIDValue,
+                relationshipID: relationshipID,
+                momentID: momentID
+            )
+            return data
+        } catch {
+            if let cached = try? snapshotStore.loadPhoto(
+                userID: currentUserIDValue,
+                relationshipID: relationshipID,
+                momentID: momentID
+            ) {
+                return cached
+            }
+            throw error
+        }
     }
 
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
@@ -483,6 +572,48 @@ final class SupabaseMomentService: MomentRemoteServing {
     private func photoPath(momentID: UUID) -> String {
         "\(relationshipID.uuidString.lowercased())/\(momentID.uuidString.lowercased()).jpg"
     }
+
+    private func cache(_ moment: Moment) {
+        var moments = (try? snapshotStore.loadMoments(
+            userID: currentUserIDValue,
+            relationshipID: relationshipID
+        )) ?? []
+        moments.removeAll { $0.id == moment.id }
+        moments.insert(moment, at: 0)
+        try? snapshotStore.saveMoments(
+            moments,
+            userID: currentUserIDValue,
+            relationshipID: relationshipID
+        )
+    }
+
+    private func cache(_ response: MomentResponse, for momentID: UUID) {
+        guard var moments = try? snapshotStore.loadMoments(
+            userID: currentUserIDValue,
+            relationshipID: relationshipID
+        ), let index = moments.firstIndex(where: { $0.id == momentID }) else { return }
+        moments[index].responses.removeAll { $0.id == response.id }
+        moments[index].responses.append(response)
+        try? snapshotStore.saveMoments(
+            moments,
+            userID: currentUserIDValue,
+            relationshipID: relationshipID
+        )
+    }
+
+    private func cache(_ answer: MomentQuestionAnswer, for momentID: UUID) {
+        guard var moments = try? snapshotStore.loadMoments(
+            userID: currentUserIDValue,
+            relationshipID: relationshipID
+        ), let index = moments.firstIndex(where: { $0.id == momentID }) else { return }
+        moments[index].questionAnswers.removeAll { $0.id == answer.id }
+        moments[index].questionAnswers.append(answer)
+        try? snapshotStore.saveMoments(
+            moments,
+            userID: currentUserIDValue,
+            relationshipID: relationshipID
+        )
+    }
 }
 
 private enum MomentServiceError: LocalizedError {
@@ -492,6 +623,7 @@ private enum MomentServiceError: LocalizedError {
     case missingCreatedMoment
     case missingCreatedResponse
     case missingCreatedAnswer
+    case accountChanged
 
     var errorDescription: String? {
         switch self {
@@ -501,6 +633,7 @@ private enum MomentServiceError: LocalizedError {
         case .missingCreatedMoment: "伺服器未回傳新建立的 Moment。"
         case .missingCreatedResponse: "伺服器未回傳新建立的回應。"
         case .missingCreatedAnswer: "伺服器未回傳新建立的回答。"
+        case .accountChanged: "目前登入帳號已變更。"
         }
     }
 }

@@ -34,7 +34,7 @@ enum CurrentStatusKind: String, CaseIterable, Codable, Equatable, Sendable {
     }
 }
 
-enum CurrentStatusContent: Equatable, Sendable {
+enum CurrentStatusContent: Codable, Equatable, Sendable {
     case fixed(CurrentStatusKind)
     case custom(String)
 
@@ -67,7 +67,7 @@ enum CurrentStatusExpiration: String, CaseIterable, Codable, Equatable, Sendable
     }
 }
 
-struct CurrentRelationshipStatus: Equatable, Sendable {
+struct CurrentRelationshipStatus: Codable, Equatable, Sendable {
     let userID: UUID
     let content: CurrentStatusContent
     let expiration: CurrentStatusExpiration
@@ -85,7 +85,7 @@ struct CurrentStatusDraft: Equatable, Sendable {
     let savesAsMoment: Bool
 }
 
-struct TogetherNowSnapshot: Equatable, Sendable {
+struct TogetherNowSnapshot: Codable, Equatable, Sendable {
     let currentUserID: UUID
     let partnerUserID: UUID
     let currentDisplayName: String?

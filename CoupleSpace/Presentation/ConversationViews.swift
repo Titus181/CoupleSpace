@@ -70,7 +70,7 @@ struct ConversationView: View {
                     Image(systemName: "arrow.up.circle.fill")
                         .font(.title2)
                 }
-                .disabled(model.isSending || ChatTextPolicy.normalizedBody(draft) == nil)
+                .disabled(ChatTextPolicy.normalizedBody(draft) == nil)
                 .accessibilityLabel("傳送")
                 .accessibilityIdentifier("send-conversation-message")
             }
@@ -103,13 +103,16 @@ struct ConversationView: View {
             if !isCurrentUser { Spacer(minLength: 52) }
         }
         .accessibilityIdentifier("conversation-message-\(message.id.uuidString.lowercased())")
+        .accessibilityValue(deliveryAccessibilityValue(for: message))
     }
 
     @ViewBuilder
     private func deliveryStatus(for message: ChatMessage) -> some View {
         switch message.deliveryState {
         case .sending:
-            EmptyView()
+            Text("傳送中")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
         case .failed:
             Button("傳送失敗，點此重試") {
                 Task { await model.retryMessage(id: message.id) }
@@ -122,10 +125,26 @@ struct ConversationView: View {
         }
     }
 
+    private func deliveryAccessibilityValue(for message: ChatMessage) -> String {
+        guard message.senderUserID == model.currentUserID else { return "" }
+        switch message.deliveryState {
+        case .sending:
+            return "傳送中"
+        case .failed:
+            return "傳送失敗"
+        case .synced:
+            return "已同步"
+        }
+    }
+
     private func sendDraft() {
         guard let value = ChatTextPolicy.normalizedBody(draft) else { return }
-        draft = ""
-        Task { await model.send(value) }
+        Task {
+            guard await model.send(value) else { return }
+            if ChatTextPolicy.normalizedBody(draft) == value {
+                draft = ""
+            }
+        }
     }
 
     private func scrollToLatest(using proxy: ScrollViewProxy) {

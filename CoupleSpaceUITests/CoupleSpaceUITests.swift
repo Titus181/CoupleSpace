@@ -50,6 +50,33 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testOfflineLaunchKeepsTheMainTabsVisibleWithoutRestoringAccountSettings() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-offline"]
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["today-screen"].waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.staticTexts["目前為離線模式，待送內容會在恢復網路後重試。"]
+                .waitForExistence(timeout: 1)
+        )
+        XCTAssertTrue(app.tabBars.buttons["今天"].exists)
+        XCTAssertTrue(app.tabBars.buttons["對話"].exists)
+        XCTAssertTrue(app.tabBars.buttons["我們"].exists)
+        XCTAssertFalse(app.navigationBars["帳號設定"].exists)
+
+        app.tabBars.buttons["對話"].tap()
+        let input = app.textFields["conversation-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 1))
+        input.tap()
+        input.typeText("離線待送")
+        app.buttons["send-conversation-message"].tap()
+
+        XCTAssertTrue(app.staticTexts["離線待送"].waitForExistence(timeout: 1))
+        XCTAssertTrue(app.buttons["傳送失敗，點此重試"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testReadsPartnerMessageAndSendsBasicTextChat() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-partner-message"]
@@ -71,6 +98,22 @@ final class CoupleSpaceUITests: XCTestCase {
         XCTAssertFalse(app.keyboards.firstMatch.waitForExistence(timeout: 1))
         app.tabBars.buttons["今天"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["today-screen"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
+    func testShowsFailedMessageWithoutPresentingItAsSyncedOrRead() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-failed-message"]
+        app.launch()
+
+        app.tabBars.buttons["對話"].tap()
+        XCTAssertTrue(app.staticTexts["第三則待重試"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["傳送失敗，點此重試"].waitForExistence(timeout: 1))
+        XCTAssertEqual(
+            app.buttons.matching(NSPredicate(format: "label == '傳送失敗，點此重試'")).count,
+            3
+        )
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS '已讀'")).firstMatch.exists)
     }
 
     @MainActor

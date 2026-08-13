@@ -27,6 +27,13 @@ final class PairingModel: ObservableObject {
         statusMessage = nil
     }
 
+    func restoreCachedRelationship(userID: UUID) async {
+        guard state == .checking,
+              let relationship = await service.cachedRelationship(userID: userID)
+        else { return }
+        apply(relationship: relationship)
+    }
+
     func refresh() async {
         guard let generation = beginOperation() else { return }
         defer { finishOperation(generation: generation) }
