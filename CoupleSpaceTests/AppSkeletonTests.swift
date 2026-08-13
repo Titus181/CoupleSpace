@@ -97,6 +97,275 @@ struct AppSkeletonTests {
         #expect(try store.load(userID: userID, relationshipID: relationshipID).isEmpty)
     }
 
+    @Test func conversationClosingAndArchiveDiscardUnsentText() throws {
+        let content = ConversationOutboxContent.text("關係結束前尚未送出")
+
+        #expect(try ConversationOutboxLifecyclePolicy.actionForClosingRelationship(
+            content: content,
+            remoteCreatorID: nil,
+            remoteItemKind: nil,
+            currentUserID: UUID()
+        ) == .discardUnsentText)
+        #expect(try ConversationOutboxLifecyclePolicy.actionForArchivedRelationship(
+            content: content,
+            archivedItemKind: nil
+        ) == .discardUnsentText)
+    }
+
+    @Test func conversationClosingReconcilesDeliveredAndOrphanPhotos() throws {
+        let userID = UUID()
+        let photo = ConversationOutboxContent.photo(localFileName: "photo.jpg", byteSize: 3)
+
+        #expect(try ConversationOutboxLifecyclePolicy.actionForClosingRelationship(
+            content: photo,
+            remoteCreatorID: userID,
+            remoteItemKind: "photo",
+            currentUserID: userID
+        ) == .acknowledgeDeliveredPhoto)
+        #expect(try ConversationOutboxLifecyclePolicy.actionForClosingRelationship(
+            content: photo,
+            remoteCreatorID: nil,
+            remoteItemKind: nil,
+            currentUserID: userID
+        ) == .deleteOrphanPhoto)
+    }
+
+    @Test func conversationClosingPreservesPhotoOnRemoteIdentityMismatch() {
+        let userID = UUID()
+        let photo = ConversationOutboxContent.photo(localFileName: "photo.jpg", byteSize: 3)
+
+        #expect(throws: ConversationOutboxLifecyclePolicy.ReconciliationError.remoteIdentityMismatch) {
+            try ConversationOutboxLifecyclePolicy.actionForClosingRelationship(
+                content: photo,
+                remoteCreatorID: UUID(),
+                remoteItemKind: "photo",
+                currentUserID: userID
+            )
+        }
+        #expect(throws: ConversationOutboxLifecyclePolicy.ReconciliationError.remoteIdentityMismatch) {
+            try ConversationOutboxLifecyclePolicy.actionForClosingRelationship(
+                content: photo,
+                remoteCreatorID: userID,
+                remoteItemKind: "message",
+                currentUserID: userID
+            )
+        }
+    }
+
+    @Test func conversationArchiveReconcilesPhotoFromSealedMetadata() throws {
+        let photo = ConversationOutboxContent.photo(localFileName: "photo.jpg", byteSize: 3)
+
+        #expect(try ConversationOutboxLifecyclePolicy.actionForArchivedRelationship(
+            content: photo,
+            archivedItemKind: "photo"
+        ) == .acknowledgeDeliveredPhoto)
+        #expect(try ConversationOutboxLifecyclePolicy.actionForArchivedRelationship(
+            content: photo,
+            archivedItemKind: nil
+        ) == .deleteOrphanPhoto)
+        #expect(throws: ConversationOutboxLifecyclePolicy.ReconciliationError.remoteIdentityMismatch) {
+            try ConversationOutboxLifecyclePolicy.actionForArchivedRelationship(
+                content: photo,
+                archivedItemKind: "message"
+            )
+        }
+    }
+
+    @Test func conversationV1OutboxAndSnapshotRemainDecodable() throws {
+        let suiteName = "ConversationV1CompatibilityTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let userID = UUID()
+        let relationshipID = UUID()
+        let messageID = UUID()
+        let createdAt = Date(timeIntervalSince1970: 123)
+
+        let legacyOutbox = LegacyConversationOutboxQueue(entries: [
+            LegacyConversationOutboxEntry(
+                userID: userID,
+                relationshipID: relationshipID,
+                clientID: messageID,
+                body: "升級前待送訊息",
+                localCreatedAt: createdAt,
+                attemptCount: 1
+            ),
+        ])
+        defaults.set(
+            try JSONEncoder().encode(legacyOutbox),
+            forKey: "couplespace.conversation-outbox.v1.\(userID.uuidString.lowercased()).\(relationshipID.uuidString.lowercased())"
+        )
+
+        let restoredOutbox = try ConversationOutboxStore(defaults: defaults).load(
+            userID: userID,
+            relationshipID: relationshipID
+        )
+        #expect(restoredOutbox.entries.first?.content == .text("升級前待送訊息"))
+        #expect(restoredOutbox.entries.first?.attemptCount == 1)
+
+        let legacySnapshot = LegacyConversationSnapshot(
+            messages: [LegacyConversationCachedMessage(
+                id: messageID,
+                senderUserID: userID,
+                body: "升級前對話",
+                createdAt: createdAt
+            )],
+            unreadCount: 2
+        )
+        defaults.set(
+            try JSONEncoder().encode(legacySnapshot),
+            forKey: "couplespace.conversation-snapshot.v1.\(userID.uuidString.lowercased()).\(relationshipID.uuidString.lowercased())"
+        )
+
+        let restoredSnapshot = try #require(
+            try ConversationSnapshotStore(defaults: defaults).load(
+                userID: userID,
+                relationshipID: relationshipID
+            )
+        )
+        #expect(restoredSnapshot.messages.first?.content == .text("升級前對話"))
+        #expect(restoredSnapshot.unreadCount == 2)
+    }
+
+    @Test func conversationOutboxPersistsMixedFIFOAndDeletesAcknowledgedPhoto() throws {
+        let suiteName = "ConversationMixedOutboxTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ConversationMixedOutboxTests.\(UUID().uuidString)", isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+        let userID = UUID()
+        let relationshipID = UUID()
+        let firstTextID = UUID()
+        let photoID = UUID()
+        let lastTextID = UUID()
+        let photoData = Data([0x01, 0x02, 0x03])
+        let store = ConversationOutboxStore(
+            defaults: defaults,
+            directoryURL: directoryURL,
+            availableCapacity: { _ in Int64.max }
+        )
+
+        try store.enqueueText(
+            "第一則",
+            userID: userID,
+            relationshipID: relationshipID,
+            clientID: firstTextID,
+            localCreatedAt: Date(timeIntervalSince1970: 100)
+        )
+        try store.enqueuePhoto(
+            photoData,
+            userID: userID,
+            relationshipID: relationshipID,
+            clientID: photoID,
+            localCreatedAt: Date(timeIntervalSince1970: 101)
+        )
+        try store.enqueueText(
+            "第三則",
+            userID: userID,
+            relationshipID: relationshipID,
+            clientID: lastTextID,
+            localCreatedAt: Date(timeIntervalSince1970: 102)
+        )
+
+        let rebuiltStore = ConversationOutboxStore(
+            defaults: defaults,
+            directoryURL: directoryURL,
+            availableCapacity: { _ in Int64.max }
+        )
+        let restored = try rebuiltStore.load(userID: userID, relationshipID: relationshipID)
+        #expect(restored.entries.map(\.clientID) == [firstTextID, photoID, lastTextID])
+        #expect(restored.messages.map(\.content) == [.text("第一則"), .photo, .text("第三則")])
+        let photoEntry = try #require(restored.entries.first { $0.clientID == photoID })
+        #expect(try rebuiltStore.data(for: photoEntry) == photoData)
+
+        try rebuiltStore.acknowledgeFirst(
+            clientID: firstTextID,
+            userID: userID,
+            relationshipID: relationshipID
+        )
+        try rebuiltStore.acknowledgeFirst(
+            clientID: photoID,
+            userID: userID,
+            relationshipID: relationshipID
+        )
+        #expect(throws: ConversationOutboxError.missingLocalFile) {
+            try rebuiltStore.data(for: photoEntry)
+        }
+        #expect(
+            try rebuiltStore.load(userID: userID, relationshipID: relationshipID).entries.map(\.clientID)
+                == [lastTextID]
+        )
+    }
+
+    @Test func conversationPhotoOutboxRejectsLowCapacityAndClearsOnlyTheUserScope() throws {
+        let suiteName = "ConversationPhotoOutboxBoundaryTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ConversationPhotoOutboxBoundaryTests.\(UUID().uuidString)", isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
+        let userID = UUID()
+        let otherUserID = UUID()
+        let relationshipID = UUID()
+        let photoID = UUID()
+        let otherPhotoID = UUID()
+        let photoData = Data([0x01, 0x02])
+        let lowCapacityStore = ConversationOutboxStore(
+            defaults: defaults,
+            directoryURL: directoryURL,
+            availableCapacity: { _ in 1 }
+        )
+
+        #expect(throws: ConversationOutboxError.insufficientCapacity) {
+            try lowCapacityStore.enqueuePhoto(
+                photoData,
+                userID: userID,
+                relationshipID: relationshipID,
+                clientID: photoID,
+                localCreatedAt: .now
+            )
+        }
+        #expect(try lowCapacityStore.load(userID: userID, relationshipID: relationshipID).isEmpty)
+
+        let store = ConversationOutboxStore(
+            defaults: defaults,
+            directoryURL: directoryURL,
+            availableCapacity: { _ in Int64.max }
+        )
+        try store.enqueuePhoto(
+            photoData,
+            userID: userID,
+            relationshipID: relationshipID,
+            clientID: photoID,
+            localCreatedAt: .now
+        )
+        try store.enqueuePhoto(
+            photoData,
+            userID: otherUserID,
+            relationshipID: relationshipID,
+            clientID: otherPhotoID,
+            localCreatedAt: .now
+        )
+        let photoEntry = try #require(
+            try store.load(userID: userID, relationshipID: relationshipID).entries.first
+        )
+        let otherPhotoEntry = try #require(
+            try store.load(userID: otherUserID, relationshipID: relationshipID).entries.first
+        )
+
+        store.clearAll(userID: userID)
+
+        #expect(try store.load(userID: userID, relationshipID: relationshipID).isEmpty)
+        #expect(throws: ConversationOutboxError.missingLocalFile) {
+            try store.data(for: photoEntry)
+        }
+        #expect(try store.data(for: otherPhotoEntry) == photoData)
+    }
+
     @Test func conversationSnapshotPersistsRecentSyncedMessagesAndIsolatesScope() throws {
         let suiteName = "ConversationSnapshotTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -121,8 +390,8 @@ struct AppSkeletonTests {
         let loaded = try store.load(userID: userID, relationshipID: relationshipID)
         let restored = try #require(loaded)
         #expect(restored.messages.count == ConversationLocalSnapshotPolicy.maximumMessageCount)
-        #expect(restored.messages.first?.body == "訊息 1")
-        #expect(restored.messages.last?.body == "訊息 200")
+        #expect(restored.messages.first?.textBody == "訊息 1")
+        #expect(restored.messages.last?.textBody == "訊息 200")
         #expect(restored.unreadCount == 3)
         #expect(try store.load(userID: UUID(), relationshipID: relationshipID) == nil)
         #expect(try store.load(userID: userID, relationshipID: UUID()) == nil)
@@ -246,7 +515,7 @@ struct AppSkeletonTests {
         service.sendDelay = .milliseconds(300)
         let slowSend = Task { await model.send("立即顯示") }
         try await Task.sleep(for: .milliseconds(50))
-        #expect(model.messages.last?.body == "立即顯示")
+        #expect(model.messages.last?.textBody == "立即顯示")
         #expect(model.messages.last?.deliveryState == .sending)
         #expect(await slowSend.value)
         await model.waitForScheduledDelivery()
@@ -256,13 +525,13 @@ struct AppSkeletonTests {
         service.sendFailuresRemaining = 1
         #expect(await model.send("  我很好  "))
         await model.waitForScheduledDelivery()
-        #expect(model.messages.last?.body == "我很好")
+        #expect(model.messages.last?.textBody == "我很好")
         #expect(model.messages.last?.deliveryState == .failed)
         let failedMessageID = try #require(model.messages.last?.id)
         await model.retryMessage(id: failedMessageID)
         #expect(service.sentBodies == ["立即顯示", "我很好", "我很好"])
         #expect(service.sentClientIDs[1] == service.sentClientIDs[2])
-        #expect(model.messages.last?.body == "我很好")
+        #expect(model.messages.last?.textBody == "我很好")
         #expect(model.messages.last?.deliveryState == .synced)
 
         let realtimeMessage = ChatMessage(
@@ -302,7 +571,7 @@ struct AppSkeletonTests {
         #expect(await first.value)
         await model.waitForScheduledDelivery()
         #expect(service.sentBodies == ["第一則", "第二則"])
-        #expect(model.messages.map(\.body) == ["第一則", "第二則"])
+        #expect(model.messages.compactMap(\.textBody) == ["第一則", "第二則"])
         #expect(model.messages.allSatisfy { $0.deliveryState == .synced })
     }
 
@@ -321,7 +590,7 @@ struct AppSkeletonTests {
         #expect(await model.send("第二則"))
         #expect(await model.send("第三則"))
         await model.waitForScheduledDelivery()
-        #expect(model.messages.map(\.body) == ["第一則", "第二則", "第三則"])
+        #expect(model.messages.compactMap(\.textBody) == ["第一則", "第二則", "第三則"])
         #expect(model.messages.allSatisfy { $0.deliveryState == .failed })
     }
 
@@ -349,7 +618,7 @@ struct AppSkeletonTests {
         ))
         await service.sendChange()
         await firstRefresh.value
-        #expect(model.messages.map(\.body) == ["恢復後立即看見"])
+        #expect(model.messages.compactMap(\.textBody) == ["恢復後立即看見"])
 
         service.fetchDelay = .zero
         await model.recoverPendingMessages()
@@ -403,6 +672,136 @@ struct AppSkeletonTests {
         #expect(model.currentUserID == currentUserID)
     }
 
+    @MainActor
+    @Test func conversationRejectedRecoveredPhotoIsAcknowledgedWithoutLosingQuotaStatus() async {
+        let currentUserID = UUID()
+        let pendingPhotoID = UUID()
+        let rejectionMessage = "本月照片新增已達目前上限。"
+        let service = ConversationRemoteServiceFake(
+            currentUserID: currentUserID,
+            messages: [],
+            unreadCount: 0
+        )
+        service.seedPendingMessage(ChatMessage(
+            id: pendingPhotoID,
+            senderUserID: currentUserID,
+            content: .photo,
+            createdAt: Date(timeIntervalSince1970: 100),
+            deliveryState: .failed
+        ))
+        service.deliveryResultOverride = .rejected(rejectionMessage)
+        let model = ConversationModel(service: service)
+
+        await model.start()
+
+        #expect(service.pendingMessageCount == 0)
+        #expect(!model.messages.contains { $0.id == pendingPhotoID })
+        #expect(model.statusMessage == rejectionMessage)
+
+        await model.refresh()
+        #expect(model.statusMessage == rejectionMessage)
+    }
+
+    @MainActor
+    @Test func conversationReactionOptimismRollsBackAndRetryReusesIdentity() async throws {
+        let currentUserID = UUID()
+        let partnerUserID = UUID()
+        let originalReactionID = UUID()
+        let partnerMessage = ChatMessage(
+            id: UUID(),
+            senderUserID: partnerUserID,
+            body: "今天辛苦了",
+            createdAt: .now,
+            reaction: ChatMessageReaction(
+                id: originalReactionID,
+                reactorUserID: currentUserID,
+                emoji: .heart,
+                updatedAt: .now
+            )
+        )
+        let service = ConversationRemoteServiceFake(
+            currentUserID: currentUserID,
+            messages: [partnerMessage],
+            unreadCount: 0
+        )
+        let model = ConversationModel(service: service)
+        await model.start()
+
+        service.reactionDelay = .milliseconds(200)
+        service.reactionFailuresRemaining = 1
+        let firstReplace = Task {
+            await model.react(to: partnerMessage, with: .hug)
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(model.messages.first?.reaction?.emoji == .hug)
+        await firstReplace.value
+        #expect(model.messages.first?.reaction?.id == originalReactionID)
+        #expect(model.messages.first?.reaction?.emoji == .heart)
+
+        service.reactionDelay = .zero
+        await model.react(to: try #require(model.messages.first), with: .hug)
+        #expect(service.reactionClientIDs.count == 2)
+        #expect(service.reactionClientIDs[0] == service.reactionClientIDs[1])
+        #expect(model.messages.first?.reaction?.emoji == .hug)
+
+        service.removeReactionDelay = .milliseconds(200)
+        service.removeReactionFailuresRemaining = 1
+        let reactedMessage = try #require(model.messages.first)
+        let remove = Task {
+            await model.react(to: reactedMessage, with: .hug)
+        }
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(model.messages.first?.reaction == nil)
+        await remove.value
+        #expect(model.messages.first?.reaction?.emoji == .hug)
+    }
+
+    @MainActor
+    @Test func conversationSaveAsMomentRetryReusesStableMomentIdentity() async throws {
+        let message = ChatMessage(
+            id: UUID(),
+            senderUserID: UUID(),
+            body: "把這句留下來",
+            createdAt: .now
+        )
+        let service = ConversationRemoteServiceFake(
+            currentUserID: UUID(),
+            messages: [message],
+            unreadCount: 0
+        )
+        let model = ConversationModel(service: service)
+        await model.start()
+        service.saveMomentFailuresRemaining = 1
+
+        #expect(await model.saveAsMoment(message) == false)
+        #expect(await model.saveAsMoment(message))
+        #expect(service.savedMomentClientIDs.count == 2)
+        #expect(service.savedMomentClientIDs[0] == service.savedMomentClientIDs[1])
+        #expect(model.savedMomentMessageIDs == Set([message.id]))
+    }
+
+    @MainActor
+    @Test func conversationSourceLookupRefreshesWhenTheMessageIsNotInLocalHistory() async {
+        let source = ChatMessage(
+            id: UUID(),
+            senderUserID: UUID(),
+            body: "較早的來源訊息",
+            createdAt: .now.addingTimeInterval(-10_000)
+        )
+        let service = ConversationRemoteServiceFake(
+            currentUserID: UUID(),
+            messages: [],
+            unreadCount: 0
+        )
+        let model = ConversationModel(service: service)
+        await model.start()
+
+        service.messages = [source]
+
+        #expect(await model.ensureMessageAvailable(id: source.id))
+        #expect(model.messages.contains(source))
+    }
+
     @Test func momentDraftNormalizesShortTextAndRejectsInvalidContent() {
         #expect(MomentDraftPolicy.normalizedText("  想到你  ") == "想到你")
         #expect(MomentDraftPolicy.normalizedText(" \n\t ") == nil)
@@ -412,6 +811,25 @@ struct AppSkeletonTests {
         #expect(MomentMood.allCases.map(\.rawValue) == [
             "calm", "happy", "tired", "thinking_of_you", "need_hug",
         ])
+    }
+
+    @Test func legacyMomentSnapshotDecodesWithoutSourceMessageID() throws {
+        let legacy = LegacyMoment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("升級前的 Moment"),
+            createdAt: Date(timeIntervalSince1970: 100),
+            responses: [],
+            questionAnswers: []
+        )
+
+        let decoded = try JSONDecoder().decode(
+            Moment.self,
+            from: JSONEncoder().encode(legacy)
+        )
+        #expect(decoded.id == legacy.id)
+        #expect(decoded.content == legacy.content)
+        #expect(decoded.sourceMessageID == nil)
     }
 
     @Test func momentInteractionPoliciesKeepResponsesShortAndQuestionsFixed() {
@@ -933,14 +1351,44 @@ struct AppSkeletonTests {
     }
 
     @MainActor
-    @Test func pairingModelRestoresCachedRelationshipBeforeRemoteRefreshCompletes() async {
+    @Test func pairingAuthenticatedBootstrapDoesNotMountCachedRelationshipBeforeRemoteRefresh() async {
         let relationship = PairingRelationship(id: UUID(), memberCount: 2)
         let service = SuspendedPairingRemoteServiceFake(cachedRelationship: relationship)
         let model = PairingModel(service: service)
+        let bootstrap = Task {
+            await model.refreshForAuthenticatedSession(userID: UUID())
+        }
 
-        await model.restoreCachedRelationship(userID: UUID())
+        while service.currentRelationshipContinuation == nil {
+            await Task.yield()
+        }
+        #expect(model.state == .checking)
+
+        service.resumeCurrentRelationship(relationship)
+        await bootstrap.value
 
         #expect(model.state == .paired(relationship))
+    }
+
+    @MainActor
+    @Test func pairingAuthenticatedBootstrapFallsBackToCacheOnlyAfterRemoteFailure() async {
+        let relationship = PairingRelationship(id: UUID(), memberCount: 2)
+        let service = SuspendedPairingRemoteServiceFake(cachedRelationship: relationship)
+        let model = PairingModel(service: service)
+        let bootstrap = Task {
+            await model.refreshForAuthenticatedSession(userID: UUID())
+        }
+
+        while service.currentRelationshipContinuation == nil {
+            await Task.yield()
+        }
+        #expect(model.state == .checking)
+
+        service.failCurrentRelationship()
+        await bootstrap.value
+
+        #expect(model.state == .paired(relationship))
+        #expect(model.statusMessage != nil)
     }
 }
 
@@ -951,12 +1399,21 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
     var unreadCount: Int
     var sentBodies: [String] = []
     var sentClientIDs: [UUID] = []
+    var cachedPhotoDataByMessageID: [UUID: Data] = [:]
+    var reactionClientIDs: [UUID] = []
+    var savedMomentClientIDs: [UUID] = []
     var markedReadMessageIDs: [UUID] = []
     var sendFailuresRemaining = 0
     var fetchFailuresRemaining = 0
     var acknowledgementFailuresRemaining = 0
+    var reactionFailuresRemaining = 0
+    var removeReactionFailuresRemaining = 0
+    var saveMomentFailuresRemaining = 0
     var sendDelay: Duration = .zero
     var fetchDelay: Duration = .zero
+    var reactionDelay: Duration = .zero
+    var removeReactionDelay: Duration = .zero
+    var deliveryResultOverride: ConversationDeliveryResult?
     var nextAcceptedAt = Date(timeIntervalSince1970: 200)
     var isObserving = false
     var startObservingCallCount = 0
@@ -967,6 +1424,12 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
         self.currentUserID = currentUserID
         self.messages = messages
         self.unreadCount = unreadCount
+    }
+
+    var pendingMessageCount: Int { pendingMessages.count }
+
+    func seedPendingMessage(_ message: ChatMessage) {
+        pendingMessages.append(message)
     }
 
     func fetchPendingSnapshot() async throws -> ConversationPendingSnapshot {
@@ -983,11 +1446,23 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
 
     func persistCachedSnapshot(_ snapshot: ConversationSnapshot) async {}
 
-    func enqueueMessage(body: String, clientID: UUID, localCreatedAt: Date) async throws {
+    func enqueueMessage(
+        _ draft: ChatMessageDraft,
+        clientID: UUID,
+        localCreatedAt: Date
+    ) async throws {
+        let content: ChatMessageContent
+        switch draft {
+        case let .text(body):
+            content = .text(body)
+        case let .photo(data):
+            content = .photo
+            cachedPhotoDataByMessageID[clientID] = data
+        }
         pendingMessages.append(ChatMessage(
             id: clientID,
             senderUserID: currentUserID,
-            body: body,
+            content: content,
             createdAt: localCreatedAt,
             deliveryState: .sending
         ))
@@ -998,9 +1473,10 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
             ChatMessage(
                 id: $0.id,
                 senderUserID: $0.senderUserID,
-                body: $0.body,
+                content: $0.content,
                 createdAt: $0.createdAt,
-                deliveryState: .sending
+                deliveryState: .sending,
+                reaction: $0.reaction
             )
         }
     }
@@ -1030,26 +1506,87 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
         return snapshot
     }
 
-    func sendMessage(body: String, clientID: UUID) async throws -> Date {
-        sentBodies.append(body)
-        sentClientIDs.append(clientID)
+    func deliverPendingMessage(_ message: ChatMessage) async throws -> ConversationDeliveryResult {
+        if let body = message.textBody { sentBodies.append(body) }
+        sentClientIDs.append(message.id)
         try await Task.sleep(for: sendDelay)
         if sendFailuresRemaining > 0 {
             sendFailuresRemaining -= 1
             throw TestServiceError.expected
         }
-        if let existing = messages.first(where: { $0.id == clientID }) {
-            return existing.createdAt
+        if let deliveryResultOverride { return deliveryResultOverride }
+        if let existing = messages.first(where: { $0.id == message.id }) {
+            return .accepted(existing.createdAt)
         }
         let acceptedAt = nextAcceptedAt
         nextAcceptedAt = nextAcceptedAt.addingTimeInterval(1)
         messages.append(ChatMessage(
-            id: clientID,
+            id: message.id,
             senderUserID: currentUserID,
-            body: body,
-            createdAt: acceptedAt
+            content: message.content,
+            createdAt: acceptedAt,
+            reaction: message.reaction
         ))
-        return acceptedAt
+        return .accepted(acceptedAt)
+    }
+
+    func cachedPhotoData(for messageID: UUID) -> Data? {
+        cachedPhotoDataByMessageID[messageID]
+    }
+
+    func photoData(for messageID: UUID) async throws -> Data {
+        guard let data = cachedPhotoDataByMessageID[messageID] else {
+            throw TestServiceError.expected
+        }
+        return data
+    }
+
+    func setReaction(
+        messageID: UUID,
+        emoji: MomentEmoji,
+        clientID: UUID
+    ) async throws -> ChatMessageReaction {
+        reactionClientIDs.append(clientID)
+        try await Task.sleep(for: reactionDelay)
+        if reactionFailuresRemaining > 0 {
+            reactionFailuresRemaining -= 1
+            throw TestServiceError.expected
+        }
+        let reaction = ChatMessageReaction(
+            id: clientID,
+            reactorUserID: currentUserID,
+            emoji: emoji,
+            updatedAt: .now
+        )
+        guard let index = messages.firstIndex(where: { $0.id == messageID }) else {
+            throw TestServiceError.expected
+        }
+        messages[index].reaction = reaction
+        return reaction
+    }
+
+    func removeReaction(messageID: UUID) async throws {
+        try await Task.sleep(for: removeReactionDelay)
+        if removeReactionFailuresRemaining > 0 {
+            removeReactionFailuresRemaining -= 1
+            throw TestServiceError.expected
+        }
+        guard let index = messages.firstIndex(where: { $0.id == messageID }) else {
+            throw TestServiceError.expected
+        }
+        messages[index].reaction = nil
+    }
+
+    func saveAsMoment(messageID: UUID, momentClientID: UUID) async throws -> UUID {
+        savedMomentClientIDs.append(momentClientID)
+        if saveMomentFailuresRemaining > 0 {
+            saveMomentFailuresRemaining -= 1
+            throw TestServiceError.expected
+        }
+        guard messages.contains(where: { $0.id == messageID }) else {
+            throw TestServiceError.expected
+        }
+        return momentClientID
     }
 
     func markRead(through messageID: UUID) async throws {
@@ -1115,7 +1652,7 @@ private final class PairingRemoteServiceFake: PairingRemoteServing {
 
 private final class SuspendedPairingRemoteServiceFake: PairingRemoteServing {
     let cachedRelationshipValue: PairingRelationship?
-    var currentRelationshipContinuation: CheckedContinuation<PairingRelationship?, Never>?
+    var currentRelationshipContinuation: CheckedContinuation<PairingRelationship?, Error>?
 
     init(cachedRelationship: PairingRelationship? = nil) {
         cachedRelationshipValue = cachedRelationship
@@ -1126,13 +1663,20 @@ private final class SuspendedPairingRemoteServiceFake: PairingRemoteServing {
     }
 
     func currentRelationship() async throws -> PairingRelationship? {
-        await withCheckedContinuation { continuation in
+        try await withCheckedThrowingContinuation { continuation in
             currentRelationshipContinuation = continuation
         }
     }
 
     func resumeCurrentRelationship(_ relationship: PairingRelationship?) {
         currentRelationshipContinuation?.resume(returning: relationship)
+        currentRelationshipContinuation = nil
+    }
+
+    func failCurrentRelationship() {
+        currentRelationshipContinuation?.resume(
+            throwing: NSError(domain: "PairingBootstrapTests", code: 1)
+        )
         currentRelationshipContinuation = nil
     }
 
@@ -1378,7 +1922,9 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
         return questionAnswer
     }
 
-    func photoData(for momentID: UUID) async throws -> Data { Data() }
+    func photoData(for moment: Moment) async throws -> Data {
+        cachedPhotoDataByMomentID[moment.id] ?? Data()
+    }
 
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
         isObserving = true
@@ -1393,4 +1939,38 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
     func sendChange() async {
         await onChange?()
     }
+}
+
+private struct LegacyConversationOutboxQueue: Encodable {
+    let entries: [LegacyConversationOutboxEntry]
+}
+
+private struct LegacyConversationOutboxEntry: Encodable {
+    let userID: UUID
+    let relationshipID: UUID
+    let clientID: UUID
+    let body: String
+    let localCreatedAt: Date
+    let attemptCount: Int
+}
+
+private struct LegacyConversationSnapshot: Encodable {
+    let messages: [LegacyConversationCachedMessage]
+    let unreadCount: Int
+}
+
+private struct LegacyConversationCachedMessage: Encodable {
+    let id: UUID
+    let senderUserID: UUID
+    let body: String
+    let createdAt: Date
+}
+
+private struct LegacyMoment: Encodable {
+    let id: UUID
+    let creatorUserID: UUID
+    let content: MomentContent
+    let createdAt: Date
+    let responses: [MomentResponse]
+    let questionAnswers: [MomentQuestionAnswer]
 }

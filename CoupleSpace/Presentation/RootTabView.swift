@@ -4,6 +4,7 @@ import SwiftUI
 struct RootTabView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var selection = PrimarySection.defaultSelection
+    @State private var conversationFocusMessageID: UUID?
     @StateObject private var networkRecoveryMonitor = NetworkRecoveryMonitor()
     @StateObject private var momentModel: MomentModel
     @StateObject private var togetherNowModel: TogetherNowModel
@@ -67,7 +68,19 @@ struct RootTabView: View {
             let arguments = ProcessInfo.processInfo.arguments
             let uiTestUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
             let uiTestPartnerID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D2")!
-            if arguments.contains("--ui-testing-photo-moment"),
+            if arguments.contains("--ui-testing-w10-chat") {
+                let sourceMessageID = UUID(uuidString: "D4000000-0000-0000-0000-000000000010")!
+                service = InMemoryMomentService(
+                    userID: uiTestUserID,
+                    moments: [Moment(
+                        id: UUID(uuidString: "D1000000-0000-0000-0000-000000000010")!,
+                        creatorUserID: uiTestUserID,
+                        content: .text("值得留下的晚餐約定"),
+                        createdAt: .now,
+                        sourceMessageID: sourceMessageID
+                    )]
+                )
+            } else if arguments.contains("--ui-testing-photo-moment"),
                let photoData = Data(base64Encoded:
                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
                ) {
@@ -120,7 +133,29 @@ struct RootTabView: View {
                 wrappedValue: TogetherNowModel(service: InMemoryTogetherNowService())
             )
             let seededMessages: [ChatMessage]
-            if arguments.contains("--ui-testing-failed-message") {
+            let seededPhotoDataByMessageID: [UUID: Data]
+            if arguments.contains("--ui-testing-w10-chat") {
+                let sourceMessageID = UUID(uuidString: "D4000000-0000-0000-0000-000000000010")!
+                let photoMessageID = UUID(uuidString: "D4000000-0000-0000-0000-000000000011")!
+                seededMessages = [
+                    ChatMessage(
+                        id: sourceMessageID,
+                        senderUserID: uiTestPartnerID,
+                        body: "晚餐後一起散步",
+                        createdAt: .now.addingTimeInterval(-1)
+                    ),
+                    ChatMessage(
+                        id: photoMessageID,
+                        senderUserID: uiTestPartnerID,
+                        content: .photo,
+                        createdAt: .now
+                    ),
+                ]
+                let pixel = Data(base64Encoded:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                )!
+                seededPhotoDataByMessageID = [photoMessageID: pixel]
+            } else if arguments.contains("--ui-testing-failed-message") {
                 seededMessages = ["第一則待重試", "第二則待重試", "第三則待重試"]
                     .enumerated()
                     .map { index, body in
@@ -132,6 +167,7 @@ struct RootTabView: View {
                             deliveryState: .failed
                         )
                     }
+                seededPhotoDataByMessageID = [:]
             } else if arguments.contains("--ui-testing-partner-message") {
                 seededMessages = [ChatMessage(
                     id: UUID(uuidString: "D4000000-0000-0000-0000-000000000001")!,
@@ -139,8 +175,10 @@ struct RootTabView: View {
                     body: "晚點一起吃飯嗎？",
                     createdAt: .now
                 )]
+                seededPhotoDataByMessageID = [:]
             } else {
                 seededMessages = []
+                seededPhotoDataByMessageID = [:]
             }
             _conversationModel = StateObject(
                 wrappedValue: ConversationModel(
@@ -148,7 +186,8 @@ struct RootTabView: View {
                         currentUserID: uiTestUserID,
                         messages: seededMessages,
                         unreadCount: seededMessages.count,
-                        sendFailuresRemaining: arguments.contains("--ui-testing-offline") ? .max : 0
+                        sendFailuresRemaining: arguments.contains("--ui-testing-offline") ? .max : 0,
+                        photoDataByMessageID: seededPhotoDataByMessageID
                     )
                 )
             )
@@ -158,11 +197,19 @@ struct RootTabView: View {
     var body: some View {
         TabView(selection: $selection) {
             Tab("今天", systemImage: "sun.max", value: PrimarySection.today) {
-                TodayMomentView(model: momentModel, togetherNowModel: togetherNowModel)
+                TodayMomentView(
+                    model: momentModel,
+                    togetherNowModel: togetherNowModel,
+                    onOpenSourceMessage: openSourceMessage
+                )
             }
 
             Tab("對話", systemImage: "bubble.left.and.bubble.right", value: PrimarySection.conversation) {
-                ConversationView(model: conversationModel)
+                ConversationView(
+                    model: conversationModel,
+                    focusMessageID: $conversationFocusMessageID,
+                    onMomentSaved: { await momentModel.refresh() }
+                )
             }
             .badge(conversationModel.unreadCount)
 
@@ -174,6 +221,7 @@ struct RootTabView: View {
                     accountStatusMessage: accountStatusMessage,
                     relationshipToken: relationshipToken,
                     technicalValidationClient: technicalValidationClient,
+                    onOpenSourceMessage: openSourceMessage,
                     onSignOut: onSignOut
                 )
             }
@@ -234,6 +282,14 @@ struct RootTabView: View {
             }
         }
     }
+
+    private func openSourceMessage(_ messageID: UUID) {
+        selection = .conversation
+        Task { @MainActor in
+            await Task.yield()
+            conversationFocusMessageID = messageID
+        }
+    }
 }
 
 private struct UsView: View {
@@ -244,12 +300,17 @@ private struct UsView: View {
     let accountStatusMessage: String?
     let relationshipToken: String?
     let technicalValidationClient: SupabaseClient?
+    let onOpenSourceMessage: (UUID) -> Void
     let onSignOut: () -> Void
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                MomentTimelineView(model: momentModel, togetherNowModel: togetherNowModel)
+                MomentTimelineView(
+                    model: momentModel,
+                    togetherNowModel: togetherNowModel,
+                    onOpenSourceMessage: onOpenSourceMessage
+                )
                 if let accountStatusMessage {
                     Text(accountStatusMessage)
                         .font(.footnote)

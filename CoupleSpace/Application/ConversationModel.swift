@@ -9,12 +9,24 @@ final class ConversationModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isSending = false
     @Published private(set) var statusMessage: String?
+    @Published private(set) var photoDataByMessageID: [UUID: Data] = [:]
+    @Published private(set) var activeReactionMessageIDs: Set<UUID> = []
+    @Published private(set) var savedMomentMessageIDs: Set<UUID> = []
+
+    private struct ReactionAttempt {
+        let emoji: MomentEmoji?
+        let clientID: UUID?
+        let previous: ChatMessageReaction?
+    }
 
     private let service: ConversationRemoteServing
     private var hasStarted = false
     private var isConversationVisible = false
     private var refreshRequested = false
     private var scheduledDrain: Task<Void, Never>?
+    private var pendingReactionAttempts: [UUID: ReactionAttempt] = [:]
+    private var pendingMomentIDs: [UUID: UUID] = [:]
+    private var terminalDeliveryMessage: String?
 
     init(service: ConversationRemoteServing) {
         self.service = service
@@ -25,13 +37,17 @@ final class ConversationModel: ObservableObject {
         hasStarted = true
         await loadCachedMessages()
         await loadPendingMessages()
+        loadCachedPhotos()
         await refresh()
         let isObserving = await restartObservation()
-        _ = await drainPendingMessages(
+        let terminalRejectionMessage = await drainPendingMessages(
             maximumAttemptsPerMessage: ConversationRecoveryRetryPolicy.maximumAttempts
         )
         await refresh()
-        if !isObserving {
+        if let terminalRejectionMessage {
+            terminalDeliveryMessage = terminalRejectionMessage
+            statusMessage = terminalRejectionMessage
+        } else if !isObserving {
             statusMessage = "即時同步暫時無法連線；恢復網路後會再連線。"
         }
     }
@@ -45,17 +61,15 @@ final class ConversationModel: ObservableObject {
 
     func setConversationVisible(_ isVisible: Bool) async {
         isConversationVisible = isVisible
-        if isVisible {
-            await markVisibleMessagesReadIfNeeded()
-        }
+        if isVisible { await markVisibleMessagesReadIfNeeded() }
     }
 
     func refresh() async {
         if isLoading {
             refreshRequested = true
+            while isLoading { await Task.yield() }
             return
         }
-
         repeat {
             refreshRequested = false
             isLoading = true
@@ -66,11 +80,11 @@ final class ConversationModel: ObservableObject {
                 let remoteIDs = Set(snapshot.messages.map(\.id))
                 messages = (snapshot.messages + unresolvedMessages.filter { !remoteIDs.contains($0.id) })
                     .sorted(by: Self.messageOrder)
+                applyPendingReactionAttempts()
                 unreadCount = snapshot.unreadCount
-                statusMessage = nil
-                if isConversationVisible {
-                    await markVisibleMessagesReadIfNeeded()
-                }
+                statusMessage = terminalDeliveryMessage
+                loadCachedPhotos()
+                if isConversationVisible { await markVisibleMessagesReadIfNeeded() }
             } catch {
                 statusMessage = "無法更新對話，請稍後再試。"
             }
@@ -81,33 +95,47 @@ final class ConversationModel: ObservableObject {
     @discardableResult
     func send(_ value: String) async -> Bool {
         guard let body = ChatTextPolicy.normalizedBody(value) else { return false }
+        return await send(.text(body))
+    }
+
+    @discardableResult
+    func sendPhoto(_ data: Data) async -> Bool {
+        await send(.photo(data))
+    }
+
+    @discardableResult
+    func send(_ draft: ChatMessageDraft) async -> Bool {
         guard let currentUserID else { return false }
         let clientID = UUID()
         let localCreatedAt = Date.now
         do {
             try await service.enqueueMessage(
-                body: body,
+                draft,
                 clientID: clientID,
                 localCreatedAt: localCreatedAt
             )
         } catch {
-            statusMessage = "無法保留待送訊息，請再試一次。"
+            statusMessage = draft.isPhoto
+                ? "無法保留待送照片，請確認裝置空間後再試。"
+                : "無法保留待送訊息，請再試一次。"
             return false
+        }
+        let content: ChatMessageContent
+        switch draft {
+        case let .text(body): content = .text(body)
+        case .photo: content = .photo
         }
         mergeMessages([ChatMessage(
             id: clientID,
             senderUserID: currentUserID,
-            body: body,
+            content: content,
             createdAt: localCreatedAt,
             deliveryState: .sending
         )])
-        if scheduledDrain == nil {
-            scheduledDrain = Task { [weak self] in
-                guard let self else { return }
-                _ = await self.drainPendingMessages(maximumAttemptsPerMessage: 1)
-                self.scheduledDrain = nil
-            }
+        if case .photo = content, let data = service.cachedPhotoData(for: clientID) {
+            photoDataByMessageID[clientID] = data
         }
+        scheduleSingleDrainIfNeeded()
         return true
     }
 
@@ -116,24 +144,140 @@ final class ConversationModel: ObservableObject {
     }
 
     func retryMessage(id: UUID) async {
-        guard messages.contains(where: { $0.id == id && $0.deliveryState == .failed }) else { return }
+        guard messages.contains(where: { $0.id == id && $0.deliveryState == .failed }) else {
+            return
+        }
         await drainPendingMessages(maximumAttemptsPerMessage: 1)
     }
 
     func recoverPendingMessages() async {
         await loadPendingMessages()
+        loadCachedPhotos()
         let isObserving = await restartObservation()
-        _ = await drainPendingMessages(
+        let terminalRejectionMessage = await drainPendingMessages(
             maximumAttemptsPerMessage: ConversationRecoveryRetryPolicy.maximumAttempts
         )
         await refresh()
-        if !isObserving {
+        if let terminalRejectionMessage {
+            terminalDeliveryMessage = terminalRejectionMessage
+            statusMessage = terminalRejectionMessage
+        } else if !isObserving {
             statusMessage = "即時同步暫時無法連線；恢復網路後會再連線。"
         }
     }
 
+    func loadPhoto(for message: ChatMessage) async {
+        guard case .photo = message.content, photoDataByMessageID[message.id] == nil else { return }
+        if let cached = service.cachedPhotoData(for: message.id) {
+            photoDataByMessageID[message.id] = cached
+            return
+        }
+        do {
+            photoDataByMessageID[message.id] = try await service.photoData(for: message.id)
+        } catch {
+            statusMessage = "照片暫時無法載入，請稍後再試。"
+        }
+    }
+
+    func react(to message: ChatMessage, with emoji: MomentEmoji) async {
+        guard canReact(to: message),
+              !activeReactionMessageIDs.contains(message.id),
+              let currentUserID else { return }
+        activeReactionMessageIDs.insert(message.id)
+        defer { activeReactionMessageIDs.remove(message.id) }
+
+        let previous = message.reaction
+        let removesReaction = previous?.emoji == emoji
+        let targetEmoji: MomentEmoji? = removesReaction ? nil : emoji
+        let attempt: ReactionAttempt
+        if let pending = pendingReactionAttempts[message.id], pending.emoji == targetEmoji {
+            attempt = pending
+        } else {
+            attempt = ReactionAttempt(
+                emoji: targetEmoji,
+                clientID: targetEmoji == nil ? nil : UUID(),
+                previous: previous
+            )
+            pendingReactionAttempts[message.id] = attempt
+        }
+
+        if let targetEmoji, let clientID = attempt.clientID {
+            replaceReaction(
+                messageID: message.id,
+                reaction: ChatMessageReaction(
+                    id: clientID,
+                    reactorUserID: currentUserID,
+                    emoji: targetEmoji,
+                    updatedAt: .now
+                )
+            )
+            do {
+                let reaction = try await service.setReaction(
+                    messageID: message.id,
+                    emoji: targetEmoji,
+                    clientID: clientID
+                )
+                pendingReactionAttempts[message.id] = nil
+                replaceReaction(messageID: message.id, reaction: reaction)
+                await persistCurrentSnapshot()
+            } catch {
+                replaceReaction(messageID: message.id, reaction: attempt.previous)
+                statusMessage = "Emoji 回應尚未送出，請稍後再試。"
+            }
+        } else {
+            replaceReaction(messageID: message.id, reaction: nil)
+            do {
+                try await service.removeReaction(messageID: message.id)
+                pendingReactionAttempts[message.id] = nil
+                await persistCurrentSnapshot()
+            } catch {
+                replaceReaction(messageID: message.id, reaction: attempt.previous)
+                statusMessage = "Emoji 回應尚未移除，請稍後再試。"
+            }
+        }
+    }
+
+    func canReact(to message: ChatMessage) -> Bool {
+        message.deliveryState == .synced && message.senderUserID != currentUserID
+    }
+
+    func canSaveAsMoment(_ message: ChatMessage) -> Bool {
+        message.deliveryState == .synced && !savedMomentMessageIDs.contains(message.id)
+    }
+
+    @discardableResult
+    func saveAsMoment(_ message: ChatMessage) async -> Bool {
+        guard canSaveAsMoment(message) else { return false }
+        let momentClientID = pendingMomentIDs[message.id] ?? UUID()
+        pendingMomentIDs[message.id] = momentClientID
+        do {
+            _ = try await service.saveAsMoment(
+                messageID: message.id,
+                momentClientID: momentClientID
+            )
+            pendingMomentIDs[message.id] = nil
+            savedMomentMessageIDs.insert(message.id)
+            statusMessage = "已留在你們的共同時間線。"
+            return true
+        } catch {
+            statusMessage = "尚未收藏為 Moment，請確認連線後再試。"
+            return false
+        }
+    }
+
+    func ensureMessageAvailable(id: UUID) async -> Bool {
+        if messages.contains(where: { $0.id == id }) { return true }
+        await refresh()
+        if messages.contains(where: { $0.id == id }) { return true }
+        statusMessage = "連線後可查看原對話。"
+        return false
+    }
+
     private func markVisibleMessagesReadIfNeeded() async {
-        guard unreadCount > 0, let lastMessageID = messages.last?.id else { return }
+        guard unreadCount > 0,
+              let lastMessageID = messages.last(where: { $0.deliveryState == .synced })?.id else {
+            return
+        }
         do {
             try await service.markRead(through: lastMessageID)
             unreadCount = 0
@@ -143,18 +287,29 @@ final class ConversationModel: ObservableObject {
         }
     }
 
+    private func scheduleSingleDrainIfNeeded() {
+        guard scheduledDrain == nil else { return }
+        scheduledDrain = Task { [weak self] in
+            guard let self else { return }
+            _ = await self.drainPendingMessages(maximumAttemptsPerMessage: 1)
+            self.scheduledDrain = nil
+        }
+    }
+
     private func updateMessage(
         id: UUID,
         createdAt: Date? = nil,
         deliveryState: ChatMessageDeliveryState
     ) {
         guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+        let existing = messages[index]
         messages[index] = ChatMessage(
-            id: messages[index].id,
-            senderUserID: messages[index].senderUserID,
-            body: messages[index].body,
-            createdAt: createdAt ?? messages[index].createdAt,
-            deliveryState: deliveryState
+            id: existing.id,
+            senderUserID: existing.senderUserID,
+            content: existing.content,
+            createdAt: createdAt ?? existing.createdAt,
+            deliveryState: deliveryState,
+            reaction: existing.reaction
         )
         messages.sort(by: Self.messageOrder)
     }
@@ -181,41 +336,47 @@ final class ConversationModel: ObservableObject {
     }
 
     @discardableResult
-    private func drainPendingMessages(maximumAttemptsPerMessage: Int) async -> Bool {
-        guard !isSending else { return true }
+    private func drainPendingMessages(maximumAttemptsPerMessage: Int) async -> String? {
+        guard !isSending else { return nil }
         isSending = true
         defer { isSending = false }
+        var terminalRejectionMessage: String?
 
         while hasStarted {
             var attempt = 0
-            var sentCurrentMessage = false
-
+            var resolvedCurrentMessage = false
             while attempt < maximumAttemptsPerMessage {
                 let pendingMessage: ChatMessage
                 do {
                     guard let next = try await service.beginNextPendingMessage() else {
-                        return true
+                        return terminalRejectionMessage
                     }
                     pendingMessage = next
                     mergeMessages([pendingMessage])
                 } catch {
                     statusMessage = "無法讀取待送訊息，請稍後再試。"
-                    return false
+                    return terminalRejectionMessage
                 }
 
                 do {
-                    let acceptedAt = try await service.sendMessage(
-                        body: pendingMessage.body,
-                        clientID: pendingMessage.id
-                    )
+                    let result = try await service.deliverPendingMessage(pendingMessage)
                     try await service.acknowledgePendingMessage(clientID: pendingMessage.id)
-                    updateMessage(
-                        id: pendingMessage.id,
-                        createdAt: acceptedAt,
-                        deliveryState: .synced
-                    )
+                    switch result {
+                    case let .accepted(acceptedAt):
+                        updateMessage(
+                            id: pendingMessage.id,
+                            createdAt: acceptedAt,
+                            deliveryState: .synced
+                        )
+                    case let .rejected(message):
+                        messages.removeAll { $0.id == pendingMessage.id }
+                        photoDataByMessageID[pendingMessage.id] = nil
+                        statusMessage = message
+                        terminalDeliveryMessage = message
+                        terminalRejectionMessage = message
+                    }
                     await persistCurrentSnapshot()
-                    sentCurrentMessage = true
+                    resolvedCurrentMessage = true
                     break
                 } catch {
                     attempt += 1
@@ -223,31 +384,23 @@ final class ConversationModel: ObservableObject {
                     guard attempt < maximumAttemptsPerMessage,
                           let delay = ConversationRecoveryRetryPolicy.delayNanoseconds(
                               afterAttempt: attempt
-                          )
-                    else {
-                        return false
-                    }
+                          ) else { return terminalRejectionMessage }
                     do {
                         try await Task.sleep(nanoseconds: delay)
                     } catch {
-                        return false
+                        return terminalRejectionMessage
                     }
-                    guard hasStarted else { return false }
+                    guard hasStarted else { return terminalRejectionMessage }
                 }
             }
-
-            if !sentCurrentMessage {
-                return false
-            }
+            if !resolvedCurrentMessage { return terminalRejectionMessage }
         }
-        return false
+        return terminalRejectionMessage
     }
 
     private func restartObservation() async -> Bool {
         do {
-            try await service.startObservingChanges { [weak self] in
-                await self?.refresh()
-            }
+            try await service.startObservingChanges { [weak self] in await self?.refresh() }
             return true
         } catch {
             return false
@@ -258,14 +411,14 @@ final class ConversationModel: ObservableObject {
         guard let currentUserID else { return }
         messages = messages.map { message in
             guard message.senderUserID == currentUserID,
-                  message.deliveryState != .synced
-            else { return message }
+                  message.deliveryState != .synced else { return message }
             return ChatMessage(
                 id: message.id,
                 senderUserID: message.senderUserID,
-                body: message.body,
+                content: message.content,
                 createdAt: message.createdAt,
-                deliveryState: .failed
+                deliveryState: .failed,
+                reaction: message.reaction
             )
         }
     }
@@ -281,6 +434,37 @@ final class ConversationModel: ObservableObject {
         messages = messagesByID.values.sorted(by: Self.messageOrder)
     }
 
+    private func replaceReaction(messageID: UUID, reaction: ChatMessageReaction?) {
+        guard let index = messages.firstIndex(where: { $0.id == messageID }) else { return }
+        messages[index].reaction = reaction
+    }
+
+    private func applyPendingReactionAttempts() {
+        guard let currentUserID else { return }
+        for (messageID, attempt) in pendingReactionAttempts
+        where activeReactionMessageIDs.contains(messageID) {
+            let reaction = attempt.emoji.flatMap { emoji in
+                attempt.clientID.map {
+                    ChatMessageReaction(
+                        id: $0,
+                        reactorUserID: currentUserID,
+                        emoji: emoji,
+                        updatedAt: .now
+                    )
+                }
+            }
+            replaceReaction(messageID: messageID, reaction: reaction)
+        }
+    }
+
+    private func loadCachedPhotos() {
+        for message in messages where photoDataByMessageID[message.id] == nil {
+            guard case .photo = message.content,
+                  let data = service.cachedPhotoData(for: message.id) else { continue }
+            photoDataByMessageID[message.id] = data
+        }
+    }
+
     private func persistCurrentSnapshot() async {
         guard let currentUserID else { return }
         await service.persistCachedSnapshot(ConversationSnapshot(
@@ -292,5 +476,12 @@ final class ConversationModel: ObservableObject {
 
     private static func messageOrder(_ lhs: ChatMessage, _ rhs: ChatMessage) -> Bool {
         (lhs.createdAt, lhs.id.uuidString) < (rhs.createdAt, rhs.id.uuidString)
+    }
+}
+
+private extension ChatMessageDraft {
+    var isPhoto: Bool {
+        if case .photo = self { return true }
+        return false
     }
 }

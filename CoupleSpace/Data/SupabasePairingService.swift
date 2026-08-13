@@ -33,6 +33,28 @@ private struct PairingMembershipRow: Decodable {
     }
 }
 
+private struct PairingSharedItemIdentityRow: Decodable {
+    let creatorUserID: UUID?
+    let itemKind: String?
+
+    enum CodingKeys: String, CodingKey {
+        case creatorUserID = "creator_user_id"
+        case itemKind = "item_kind"
+    }
+}
+
+private struct PairingArchivedItemIdentityRow: Decodable {
+    let itemKind: String
+
+    enum CodingKeys: String, CodingKey {
+        case itemKind = "item_kind"
+    }
+}
+
+private struct PairingPersonalArchiveRow: Decodable {
+    let id: UUID
+}
+
 protocol PairingRemoteServing {
     func cachedRelationship(userID: UUID) async -> PairingRelationship?
     func currentRelationship() async throws -> PairingRelationship?
@@ -80,9 +102,15 @@ final class SupabasePairingService: PairingRemoteServing {
                 .value
 
             guard let relationship = relationships.first else {
+                if let previous = try? relationshipSnapshotStore.load(userID: session.user.id) {
+                    try await reconcileConversationOutboxAfterRelationshipClosed(
+                        userID: session.user.id,
+                        relationshipID: previous.relationshipID
+                    )
+                }
                 relationshipSnapshotStore.clear(userID: session.user.id)
-                ConversationOutboxStore().clearAll(userID: session.user.id)
                 ConversationSnapshotStore().clearAll(userID: session.user.id)
+                ConversationPhotoCacheStore().clearAll(userID: session.user.id)
                 TodaySnapshotStore().clearAll(userID: session.user.id)
                 return nil
             }
@@ -97,8 +125,12 @@ final class SupabasePairingService: PairingRemoteServing {
             let result = PairingRelationship(id: relationship.id, memberCount: members.count)
             if let previous = try? relationshipSnapshotStore.load(userID: session.user.id),
                previous.relationshipID != result.id {
-                ConversationOutboxStore().clearAll(userID: session.user.id)
+                try await reconcileConversationOutboxAfterRelationshipClosed(
+                    userID: session.user.id,
+                    relationshipID: previous.relationshipID
+                )
                 ConversationSnapshotStore().clearAll(userID: session.user.id)
+                ConversationPhotoCacheStore().clearAll(userID: session.user.id)
                 TodaySnapshotStore().clearAll(userID: session.user.id)
             }
             try? relationshipSnapshotStore.save(
@@ -119,6 +151,72 @@ final class SupabasePairingService: PairingRemoteServing {
                 )
             }
             throw error
+        }
+    }
+
+    private func reconcileConversationOutboxAfterRelationshipClosed(
+        userID: UUID,
+        relationshipID: UUID
+    ) async throws {
+        let outboxStore = ConversationOutboxStore()
+        let archives: [PairingPersonalArchiveRow] = try await client
+            .from("personal_archives")
+            .select("id")
+            .eq("relationship_id", value: relationshipID)
+            .eq("owner_user_id", value: userID)
+            .limit(1)
+            .execute()
+            .value
+        let archiveID = archives.first?.id
+
+        while let entry = try outboxStore.load(
+            userID: userID,
+            relationshipID: relationshipID
+        ).entries.first {
+            let action: ConversationOutboxLifecyclePolicy.ClosedRelationshipAction
+            if let archiveID {
+                let archivedItems: [PairingArchivedItemIdentityRow] = try await client
+                    .from("personal_archive_items")
+                    .select("item_kind")
+                    .eq("archive_id", value: archiveID)
+                    .eq("client_id", value: entry.clientID)
+                    .limit(1)
+                    .execute()
+                    .value
+                action = try ConversationOutboxLifecyclePolicy.actionForArchivedRelationship(
+                    content: entry.content,
+                    archivedItemKind: archivedItems.first?.itemKind
+                )
+            } else {
+                let sharedItems: [PairingSharedItemIdentityRow] = try await client
+                    .from("shared_items")
+                    .select("creator_user_id,item_kind")
+                    .eq("relationship_id", value: relationshipID)
+                    .eq("client_id", value: entry.clientID)
+                    .limit(1)
+                    .execute()
+                    .value
+                action = try ConversationOutboxLifecyclePolicy.actionForClosingRelationship(
+                    content: entry.content,
+                    remoteCreatorID: sharedItems.first?.creatorUserID,
+                    remoteItemKind: sharedItems.first?.itemKind,
+                    currentUserID: userID
+                )
+            }
+
+            if action == .deleteOrphanPhoto {
+                try await client.storage
+                    .from("couplespace-w1-photos")
+                    .remove(paths: [
+                        relationshipID.uuidString.lowercased()
+                            + "/" + entry.clientID.uuidString.lowercased() + ".jpg"
+                    ])
+            }
+            try outboxStore.acknowledgeFirst(
+                clientID: entry.clientID,
+                userID: userID,
+                relationshipID: relationshipID
+            )
         }
     }
 

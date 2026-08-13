@@ -5,8 +5,19 @@ import UIKit
 struct TodayMomentView: View {
     @ObservedObject var model: MomentModel
     @ObservedObject var togetherNowModel: TogetherNowModel
+    let onOpenSourceMessage: (UUID) -> Void
     @State private var isCreatingMoment = false
     @State private var isCreatingQuestion = false
+
+    init(
+        model: MomentModel,
+        togetherNowModel: TogetherNowModel,
+        onOpenSourceMessage: @escaping (UUID) -> Void = { _ in }
+    ) {
+        self.model = model
+        self.togetherNowModel = togetherNowModel
+        self.onOpenSourceMessage = onOpenSourceMessage
+    }
 
     var body: some View {
         NavigationStack {
@@ -58,7 +69,8 @@ struct TodayMomentView: View {
                                     names: togetherNowModel.snapshot
                                 ),
                                 names: togetherNowModel.snapshot,
-                                model: model
+                                model: model,
+                                onOpenSourceMessage: onOpenSourceMessage
                             )
                         }
                     } else {
@@ -96,6 +108,17 @@ struct TodayMomentView: View {
 struct MomentTimelineView: View {
     @ObservedObject var model: MomentModel
     @ObservedObject var togetherNowModel: TogetherNowModel
+    let onOpenSourceMessage: (UUID) -> Void
+
+    init(
+        model: MomentModel,
+        togetherNowModel: TogetherNowModel,
+        onOpenSourceMessage: @escaping (UUID) -> Void = { _ in }
+    ) {
+        self.model = model
+        self.togetherNowModel = togetherNowModel
+        self.onOpenSourceMessage = onOpenSourceMessage
+    }
 
     var body: some View {
         Group {
@@ -119,7 +142,8 @@ struct MomentTimelineView: View {
                                     names: togetherNowModel.snapshot
                                 ),
                                 names: togetherNowModel.snapshot,
-                                model: model
+                                model: model,
+                                onOpenSourceMessage: onOpenSourceMessage
                             )
                         }
                     }
@@ -138,6 +162,7 @@ struct MomentCard: View {
     let authorLabel: String
     let names: TogetherNowSnapshot?
     @ObservedObject var model: MomentModel
+    let onOpenSourceMessage: (UUID) -> Void
     @State private var isWritingResponse = false
     @State private var isChoosingEmoji = false
     @State private var isAnsweringQuestion = false
@@ -188,6 +213,17 @@ struct MomentCard: View {
             .foregroundStyle(.secondary)
 
             interactionContent
+
+            if let sourceMessageID = moment.sourceMessageID {
+                Divider()
+                Button {
+                    onOpenSourceMessage(sourceMessageID)
+                } label: {
+                    Label("查看原對話", systemImage: "bubble.left.and.bubble.right")
+                }
+                .font(.subheadline.weight(.semibold))
+                .accessibilityIdentifier("open-source-conversation")
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)

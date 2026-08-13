@@ -117,6 +117,49 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testChatPhotoReactionReplacementAndRemoval() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w10-chat"]
+        app.launch()
+
+        app.tabBars.buttons["對話"].tap()
+        let sourceMessage = app.staticTexts["晚餐後一起散步"]
+        XCTAssertTrue(sourceMessage.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.images["聊天照片"].waitForExistence(timeout: 2))
+
+        sourceMessage.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["愛心"].waitForExistence(timeout: 1))
+        app.buttons["愛心"].tap()
+        XCTAssertTrue(app.staticTexts["愛心"].waitForExistence(timeout: 2))
+
+        sourceMessage.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["微笑"].waitForExistence(timeout: 1))
+        app.buttons["微笑"].tap()
+        XCTAssertTrue(app.staticTexts["微笑"].waitForExistence(timeout: 2))
+
+        sourceMessage.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["微笑"].waitForExistence(timeout: 1))
+        app.buttons["微笑"].tap()
+        XCTAssertFalse(app.staticTexts["微笑"].waitForExistence(timeout: 1))
+    }
+
+    @MainActor
+    func testSavedMomentOpensAndHighlightsItsSourceConversation() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w10-chat"]
+        app.launch()
+
+        let sourceButton = app.buttons["查看原對話"]
+        XCTAssertTrue(sourceButton.waitForExistence(timeout: 3))
+        sourceButton.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["conversation-screen"].waitForExistence(timeout: 2))
+        let sourceMessage = app.staticTexts["晚餐後一起散步"]
+        XCTAssertTrue(sourceMessage.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["來源訊息"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testCreatesShortTextMomentAndShowsItInSharedTimeline() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]

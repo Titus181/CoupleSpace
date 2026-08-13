@@ -95,6 +95,7 @@ struct Moment: Codable, Identifiable, Equatable, Sendable {
     let creatorUserID: UUID
     let content: MomentContent
     let createdAt: Date
+    var sourceMessageID: UUID? = nil
     var responses: [MomentResponse] = []
     var questionAnswers: [MomentQuestionAnswer] = []
 

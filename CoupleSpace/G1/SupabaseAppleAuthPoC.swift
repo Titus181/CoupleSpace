@@ -202,10 +202,11 @@ final class SupabaseAppleAuthenticationModel: ObservableObject {
         do {
             try await client.auth.signOut()
             if let signedInUserID {
-                ConversationOutboxStore().clearAll(userID: signedInUserID)
                 ConversationSnapshotStore().clearAll(userID: signedInUserID)
+                ConversationPhotoCacheStore().clearAll(userID: signedInUserID)
                 TodaySnapshotStore().clearAll(userID: signedInUserID)
-                RelationshipSnapshotStore().clear(userID: signedInUserID)
+                // Keep the user-scoped relationship identity and mixed outbox so a
+                // partially uploaded chat photo can be retried or reconciled on sign-in.
             }
             apply(session: nil)
         } catch {

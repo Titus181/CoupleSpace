@@ -58,8 +58,7 @@ struct AuthenticationGateView: View {
                   let userID = authModel.state.userID
             else { return }
             pairingModel.resetForAuthenticatedSession()
-            await pairingModel.restoreCachedRelationship(userID: userID)
-            await pairingModel.refresh()
+            await pairingModel.refreshForAuthenticatedSession(userID: userID)
         }
     }
 }

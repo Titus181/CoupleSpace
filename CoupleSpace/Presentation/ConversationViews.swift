@@ -1,9 +1,25 @@
+import PhotosUI
 import SwiftUI
+import UIKit
 
 struct ConversationView: View {
     @ObservedObject var model: ConversationModel
+    @Binding private var focusMessageID: UUID?
+    private let onMomentSaved: @MainActor () async -> Void
     @State private var draft = ""
+    @State private var selectedPhotoItem: PhotosPickerItem?
+    @State private var highlightedMessageID: UUID?
     @FocusState private var isComposerFocused: Bool
+
+    init(
+        model: ConversationModel,
+        focusMessageID: Binding<UUID?> = .constant(nil),
+        onMomentSaved: @escaping @MainActor () async -> Void = {}
+    ) {
+        self.model = model
+        _focusMessageID = focusMessageID
+        self.onMomentSaved = onMomentSaved
+    }
 
     var body: some View {
         NavigationStack {
@@ -17,6 +33,10 @@ struct ConversationView: View {
             .navigationTitle("對話")
         }
         .accessibilityIdentifier("conversation-screen")
+        .onChange(of: selectedPhotoItem) { _, item in
+            guard let item else { return }
+            Task { await sendSelectedPhoto(item) }
+        }
     }
 
     @ViewBuilder
@@ -43,8 +63,19 @@ struct ConversationView: View {
                     .padding()
                 }
                 .scrollDismissesKeyboard(.interactively)
-                .onAppear { scrollToLatest(using: proxy) }
-                .onChange(of: model.messages) { _, _ in scrollToLatest(using: proxy) }
+                .onAppear {
+                    if focusMessageID == nil {
+                        scrollToLatest(using: proxy)
+                    }
+                }
+                .onChange(of: model.messages.last?.id) { _, _ in
+                    guard focusMessageID == nil else { return }
+                    scrollToLatest(using: proxy)
+                }
+                .task(id: focusMessageID) {
+                    guard let focusMessageID else { return }
+                    await focus(on: focusMessageID, using: proxy)
+                }
             }
         }
     }
@@ -59,6 +90,14 @@ struct ConversationView: View {
                     .accessibilityIdentifier("conversation-status")
             }
             HStack(alignment: .bottom, spacing: 10) {
+                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    Image(systemName: "photo")
+                        .font(.title3)
+                        .frame(minWidth: 32, minHeight: 32)
+                }
+                .accessibilityLabel("傳送照片")
+                .accessibilityIdentifier("send-conversation-photo")
+
                 TextField("寫訊息…", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
                     .textFieldStyle(.roundedBorder)
@@ -85,25 +124,90 @@ struct ConversationView: View {
         return HStack {
             if isCurrentUser { Spacer(minLength: 52) }
             VStack(alignment: isCurrentUser ? .trailing : .leading, spacing: 4) {
-                Text(message.body)
-                    .padding(.horizontal, 13)
-                    .padding(.vertical, 9)
-                    .foregroundStyle(isCurrentUser ? Color.white : Color.primary)
-                    .background(
-                        isCurrentUser ? Color.accentColor : Color(uiColor: .secondarySystemBackground),
-                        in: RoundedRectangle(cornerRadius: 16)
-                    )
+                if highlightedMessageID == message.id {
+                    Text("來源訊息")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.tint)
+                        .accessibilityIdentifier("source-message-highlight")
+                }
+                messageBubble(message, isCurrentUser: isCurrentUser)
+                if let reaction = message.reaction {
+                    Text(reaction.emoji.symbol)
+                        .font(.title3)
+                        .accessibilityLabel(reaction.emoji.accessibilityLabel)
+                        .accessibilityIdentifier("conversation-reaction")
+                }
                 Text(message.createdAt.formatted(date: .omitted, time: .shortened))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
-                if isCurrentUser {
-                    deliveryStatus(for: message)
-                }
+                if isCurrentUser { deliveryStatus(for: message) }
             }
             if !isCurrentUser { Spacer(minLength: 52) }
         }
+        .padding(4)
+        .background(
+            highlightedMessageID == message.id ? Color.accentColor.opacity(0.16) : Color.clear,
+            in: RoundedRectangle(cornerRadius: 18)
+        )
+        .contextMenu {
+            if model.canReact(to: message) {
+                ForEach(MomentEmoji.allCases, id: \.self) { emoji in
+                    Button {
+                        Task { await model.react(to: message, with: emoji) }
+                    } label: {
+                        Label(emoji.accessibilityLabel, systemImage: "face.smiling")
+                    }
+                }
+            }
+            if model.canSaveAsMoment(message) {
+                Button {
+                    Task {
+                        guard await model.saveAsMoment(message) else { return }
+                        await onMomentSaved()
+                    }
+                } label: {
+                    Label("收藏為 Moment", systemImage: "sparkles")
+                }
+            }
+        }
         .accessibilityIdentifier("conversation-message-\(message.id.uuidString.lowercased())")
         .accessibilityValue(deliveryAccessibilityValue(for: message))
+    }
+
+    @ViewBuilder
+    private func messageBubble(_ message: ChatMessage, isCurrentUser: Bool) -> some View {
+        switch message.content {
+        case let .text(body):
+            Text(body)
+                .padding(.horizontal, 13)
+                .padding(.vertical, 9)
+                .foregroundStyle(isCurrentUser ? Color.white : Color.primary)
+                .background(
+                    isCurrentUser ? Color.accentColor : Color(uiColor: .secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 16)
+                )
+        case .photo:
+            Group {
+                if let data = model.photoDataByMessageID[message.id],
+                   let image = UIImage(data: data) {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFit()
+                        .allowsHitTesting(false)
+                } else {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 16).fill(.quaternary)
+                        ProgressView()
+                    }
+                    .frame(height: 160)
+                }
+            }
+            .frame(maxWidth: 260)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .task(id: message.id) { await model.loadPhoto(for: message) }
+            .accessibilityLabel("聊天照片")
+            .accessibilityIdentifier("conversation-photo")
+        }
     }
 
     @ViewBuilder
@@ -126,14 +230,12 @@ struct ConversationView: View {
     }
 
     private func deliveryAccessibilityValue(for message: ChatMessage) -> String {
+        if highlightedMessageID == message.id { return "來源訊息" }
         guard message.senderUserID == model.currentUserID else { return "" }
         switch message.deliveryState {
-        case .sending:
-            return "傳送中"
-        case .failed:
-            return "傳送失敗"
-        case .synced:
-            return "已同步"
+        case .sending: return "傳送中"
+        case .failed: return "傳送失敗"
+        case .synced: return "已同步"
         }
     }
 
@@ -141,14 +243,34 @@ struct ConversationView: View {
         guard let value = ChatTextPolicy.normalizedBody(draft) else { return }
         Task {
             guard await model.send(value) else { return }
-            if ChatTextPolicy.normalizedBody(draft) == value {
-                draft = ""
-            }
+            if ChatTextPolicy.normalizedBody(draft) == value { draft = "" }
         }
+    }
+
+    private func sendSelectedPhoto(_ item: PhotosPickerItem) async {
+        defer { selectedPhotoItem = nil }
+        guard let data = try? await item.loadTransferable(type: Data.self),
+              let prepared = try? PhotoAssetProcessor.prepare(data) else { return }
+        _ = await model.sendPhoto(prepared.fullData)
     }
 
     private func scrollToLatest(using proxy: ScrollViewProxy) {
         guard let lastID = model.messages.last?.id else { return }
         proxy.scrollTo(lastID, anchor: .bottom)
+    }
+
+    private func focus(on messageID: UUID, using proxy: ScrollViewProxy) async {
+        guard await model.ensureMessageAvailable(id: messageID) else {
+            focusMessageID = nil
+            return
+        }
+        await Task.yield()
+        withAnimation { proxy.scrollTo(messageID, anchor: .center) }
+        highlightedMessageID = messageID
+        focusMessageID = nil
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(5))
+            if highlightedMessageID == messageID { highlightedMessageID = nil }
+        }
     }
 }

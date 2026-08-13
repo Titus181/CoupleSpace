@@ -267,7 +267,7 @@ final class MomentModel: ObservableObject {
     }
 
     private func loadPhoto(_ moment: Moment) async {
-        if let data = try? await service.photoData(for: moment.id) {
+        if let data = try? await service.photoData(for: moment) {
             photoDataByMomentID[moment.id] = data
         }
     }

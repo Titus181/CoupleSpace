@@ -20,7 +20,7 @@ protocol MomentRemoteServing: AnyObject {
     ) async throws -> MomentResponse
     func answerQuestion(momentID: UUID, answer: String, clientID: UUID) async throws
         -> MomentQuestionAnswer
-    func photoData(for momentID: UUID) async throws -> Data
+    func photoData(for moment: Moment) async throws -> Data
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws
     func stopObservingChanges() async
 }
@@ -38,6 +38,7 @@ private struct MomentRow: Decodable {
     let textContent: String?
     let questionKey: String?
     let questionPrompt: String?
+    let sourceMessageID: UUID?
     let createdAt: Date
 
     enum CodingKeys: String, CodingKey {
@@ -48,6 +49,7 @@ private struct MomentRow: Decodable {
         case textContent = "text_content"
         case questionKey = "question_key"
         case questionPrompt = "question_prompt"
+        case sourceMessageID = "source_shared_item_client_id"
         case createdAt = "created_at"
     }
 
@@ -81,6 +83,7 @@ private struct MomentRow: Decodable {
             creatorUserID: creatorUserID,
             content: content,
             createdAt: createdAt,
+            sourceMessageID: sourceMessageID,
             responses: responses,
             questionAnswers: questionAnswers
         )
@@ -290,7 +293,7 @@ final class SupabaseMomentService: MomentRemoteServing {
         let rows: [MomentRow] = try await client
             .from("moments")
             .select(
-                "client_id,creator_user_id,kind,mood_value,text_content,question_key,question_prompt,created_at"
+                "client_id,creator_user_id,kind,mood_value,text_content,question_key,question_prompt,source_shared_item_client_id,created_at"
             )
             .eq("relationship_id", value: relationshipID)
             .order("created_at", ascending: false)
@@ -489,27 +492,35 @@ final class SupabaseMomentService: MomentRemoteServing {
         return savedAnswer
     }
 
-    func photoData(for momentID: UUID) async throws -> Data {
+    func photoData(for moment: Moment) async throws -> Data {
         do {
             let session = try await client.auth.session
             guard session.user.id == currentUserIDValue else {
                 throw MomentServiceError.accountChanged
             }
-            let data = try await client.storage
-                .from(Self.photoBucket)
-                .download(path: photoPath(momentID: momentID))
+            let bucket: String
+            let path: String
+            if let sourceMessageID = moment.sourceMessageID {
+                bucket = "couplespace-w1-photos"
+                path = relationshipID.uuidString.lowercased()
+                    + "/" + sourceMessageID.uuidString.lowercased() + ".jpg"
+            } else {
+                bucket = Self.photoBucket
+                path = photoPath(momentID: moment.id)
+            }
+            let data = try await client.storage.from(bucket).download(path: path)
             try? snapshotStore.savePhoto(
                 data,
                 userID: currentUserIDValue,
                 relationshipID: relationshipID,
-                momentID: momentID
+                momentID: moment.id
             )
             return data
         } catch {
             if let cached = try? snapshotStore.loadPhoto(
                 userID: currentUserIDValue,
                 relationshipID: relationshipID,
-                momentID: momentID
+                momentID: moment.id
             ) {
                 return cached
             }
@@ -759,8 +770,8 @@ final class InMemoryMomentService: MomentRemoteServing {
         return questionAnswer
     }
 
-    func photoData(for momentID: UUID) async throws -> Data {
-        guard let data = photoDataByMomentID[momentID] else {
+    func photoData(for moment: Moment) async throws -> Data {
+        guard let data = photoDataByMomentID[moment.id] else {
             throw MomentServiceError.invalidServerMoment
         }
         return data

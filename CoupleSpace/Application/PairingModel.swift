@@ -34,6 +34,27 @@ final class PairingModel: ObservableObject {
         apply(relationship: relationship)
     }
 
+    func refreshForAuthenticatedSession(userID: UUID) async {
+        guard let generation = beginOperation() else { return }
+        defer { finishOperation(generation: generation) }
+
+        do {
+            let relationship = try await service.currentRelationship()
+            guard generation == sessionGeneration else { return }
+            apply(relationship: relationship)
+            statusMessage = nil
+        } catch {
+            guard generation == sessionGeneration else { return }
+            if let cachedRelationship = await service.cachedRelationship(userID: userID) {
+                guard generation == sessionGeneration else { return }
+                apply(relationship: cachedRelationship)
+            } else if state == .checking {
+                state = .unpaired
+            }
+            statusMessage = message(for: error)
+        }
+    }
+
     func refresh() async {
         guard let generation = beginOperation() else { return }
         defer { finishOperation(generation: generation) }

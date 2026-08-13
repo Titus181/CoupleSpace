@@ -27,17 +27,20 @@ last_updated: 2026-08-13
 | DELETE-001 | W1 刪除／解除配對 | 單方刪除影響另一方、GC／雙方結果不一致 | pgTAP／Unit＋真機 | `personal_archive_deletion_queue.test.sql`、`CoupleSpaceTests/CoupleSpaceTests.swift`、`manual/deletion-and-unpairing.md` | A、B、D |
 | MOMENT-001 | W5 Moment 建立 | 空白／過長內容、client ID 碰撞、非 active relationship 寫入 | pgTAP／Unit／UI | `moment_vertical_slice.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift` | A、B、D |
 | MOMENT-002 | W5 照片 Moment UI | 展示照片攔截 composer、時間線顯示與建立者標示錯誤 | Unit／UI＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
+| MOMENT-003 | W10 聊天收藏為 Moment | 待送訊息可被收藏、重試重複建立、文字／照片來源斷裂，或無法由 Today／我們返回正確對話訊息 | pgTAP／Unit／UI＋真機 | `message_save_as_moment.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | INTERACT-001 | W6 Moment 回應 | 非伴侶回應、重試重複、回應長度或類型繞過 | pgTAP／Unit／UI | `moment_interactions.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift` | A、B、D |
 | QUESTION-001 | W6 共同問答 | 第一份答案提前洩漏、共同揭曉不一致 | pgTAP／Unit／UI＋真機 | `moment_interactions.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | STATUS-001 | W7 名稱與私人稱呼 | 私人稱呼被伴侶讀取、清除與 fallback 錯誤 | pgTAP／Unit／UI＋真機 | `together_now.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | STATUS-002 | W7 此刻狀態 | 到期仍顯示、重建後未恢復、未選擇卻建立歷史 | pgTAP／Unit／UI＋真機 | 同上、`manual/upgrade-and-recovery.md` | A、B、D |
 | CHAT-001 | W1／W8 基本文字聊天 | 內容長度、伺服器排序、第三人存取、未讀游標倒退或外洩 | pgTAP／Unit／UI＋真機 | `text_message_contract.test.sql`、`basic_text_chat.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift` | A、B、D |
 | CHAT-002 | W9 可靠文字傳送 | 離線輸入靜默消失、待送／最近同步內容跨啟動遺失、錯 relationship、重複、錯序、無限重試或失敗狀態不可操作 | Unit／UI＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/weak-network.md` | A、B、D |
+| CHAT-003 | W10 聊天照片／混合 FIFO | 照片繞過既有私有 Storage／quota、離線檔案跨啟動遺失，或 text→photo→text 重送後漏送、重複、錯序 | pgTAP／Unit／UI＋真機 | `chat_photo_unread.test.sql`、`private_photo_storage.test.sql`、`photo_quota_contract.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/weak-network.md`、`manual/two-iphone.md` | A、B、D |
+| CHAT-004 | W10 訊息 Emoji 回應 | 待送／本人訊息可被回應、非伴侶越權，或 set／replace／remove 造成重複及兩台不同步 | pgTAP／Unit／UI＋真機 | `shared_item_reactions.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | TODAY-001 | W9 離線 Today 顯示 | 離線冷啟動只顯示載入、Moment／照片／狀態消失、過期狀態重現、錯帳號或錯 relationship 快照外洩、重連後不校正 | Unit＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`manual/weak-network.md` | A、B、D |
 | DR-001 | G15／G17 雲端災難復原 | 備份存在但無法還原、Database／Storage 不一致、刪除復活、RLS／Auth／設定缺失、雙主分叉、manifest 遭竄改或切換後要求重新配對 | Integration＋restore drill＋真機 | `manual/disaster-recovery.md`、`manual/upgrade-and-recovery.md`、`docs/architecture/01-disaster-recovery.md` | C、D |
 | EVAL-001 | Agent 行為 | 未讀文件、越權遠端寫入、跳過測試或洩漏私人資料 | Agent Eval／Harness | `evals/README.md`、`.harness/` | B、D |
 
-Gate A／B／D 定義見 [版本發布閘門](release-gates.md)。`CHAT-001` 只代表 W8 基本聊天；W9 的正式持久 Outbox、離線重送、可靠重試與傳送狀態由 `CHAT-002` 獨立關閉。`CHAT-002`、`TODAY-001` 與兩支真實 iPhone 的 `NETWORK-001` 已於 2026-08-13 通過，G8／W9 已完成；聊天照片、訊息 Emoji 回應與收藏為 Moment 仍由 W10 關閉。
+Gate A／B／D 定義見 [版本發布閘門](release-gates.md)。`CHAT-001` 只代表 W8 基本聊天；W9 的正式持久 Outbox、離線重送、可靠重試與傳送狀態由 `CHAT-002` 獨立關閉。`CHAT-002`、`TODAY-001` 與兩支真實 iPhone 的 `NETWORK-001` 已於 2026-08-13 通過，G8／W9 已完成。`CHAT-003`、`CHAT-004`、`MOMENT-003` 的本機自動化已於 2026-08-13 通過；遠端 migration 部署與兩支真實 iPhone 證據尚未完成，因此 W10 仍不能視為 PASS。
 
 ## 目前必須保留的人工證據
 
@@ -58,3 +61,4 @@ Gate A／B／D 定義見 [版本發布閘門](release-gates.md)。`CHAT-001` 只
 - App Lock 尚未因文件存在而視為已實作或通過。
 - `DR-001` 尚未完成；Database／Storage／設定／刪除 journal restore drill 必須使用同一 recovery point，並實測 signed manifest、異區冷重建、RLS、checksum 與清空本機狀態真機恢復，不能用單純「備份已開啟」代替。
 - W9 的本機自動化不得取代兩支真實 iPhone 的離線、force-quit、重連、去重與 FIFO 證據。
+- W10 的本機自動化不得取代兩支真實 iPhone 對 mixed FIFO、reaction 即時同步、來源跳轉與私有照片讀取的證據。
