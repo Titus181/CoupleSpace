@@ -13,6 +13,47 @@ private struct AppointmentComposerSeed: Identifiable {
     }
 }
 
+private enum ConversationTimelineItemID: Hashable {
+    case message(UUID)
+    case appointment(UUID)
+}
+
+private enum ConversationTimelineItem: Identifiable {
+    case message(ChatMessage)
+    case appointment(SharedAppointment)
+
+    var id: ConversationTimelineItemID {
+        switch self {
+        case let .message(message): .message(message.id)
+        case let .appointment(appointment): .appointment(appointment.id)
+        }
+    }
+
+    var createdAt: Date {
+        switch self {
+        case let .message(message): message.createdAt
+        case let .appointment(appointment): appointment.createdAt
+        }
+    }
+
+    private var stableOrderKey: String {
+        switch id {
+        case let .message(id): "message-\(id.uuidString)"
+        case let .appointment(id): "appointment-\(id.uuidString)"
+        }
+    }
+
+    static func ordered(
+        messages: [ChatMessage],
+        appointments: [SharedAppointment]
+    ) -> [ConversationTimelineItem] {
+        (messages.map(Self.message) + appointments.map(Self.appointment))
+            .sorted { lhs, rhs in
+                (lhs.createdAt, lhs.stableOrderKey) < (rhs.createdAt, rhs.stableOrderKey)
+            }
+    }
+}
+
 struct ConversationView: View {
     @ObservedObject var model: ConversationModel
     @ObservedObject var sharedAppointmentModel: SharedAppointmentModel
@@ -96,10 +137,10 @@ struct ConversationView: View {
 
     @ViewBuilder
     private var conversationContent: some View {
-        if model.isLoading && model.messages.isEmpty {
+        if (model.isLoading || sharedAppointmentModel.isLoading) && timelineItems.isEmpty {
             ProgressView("正在更新對話…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if model.messages.isEmpty {
+        } else if timelineItems.isEmpty {
             ContentUnavailableView(
                 "兩人的對話",
                 systemImage: "bubble.left.and.bubble.right",
@@ -110,9 +151,8 @@ struct ConversationView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 10) {
-                        ForEach(model.messages) { message in
-                            messageRow(message)
-                                .id(message.id)
+                        ForEach(timelineItems) { item in
+                            timelineRow(item)
                         }
                     }
                     .padding()
@@ -123,7 +163,7 @@ struct ConversationView: View {
                         scrollToLatest(using: proxy)
                     }
                 }
-                .onChange(of: model.messages.last?.id) { _, _ in
+                .onChange(of: timelineItems.last?.id) { _, _ in
                     guard focusMessageID == nil else { return }
                     scrollToLatest(using: proxy)
                 }
@@ -133,6 +173,95 @@ struct ConversationView: View {
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private func timelineRow(_ item: ConversationTimelineItem) -> some View {
+        switch item {
+        case let .message(message):
+            messageRow(message)
+        case let .appointment(appointment):
+            appointmentRow(appointment)
+        }
+    }
+
+    @ViewBuilder
+    private func appointmentRow(_ appointment: SharedAppointment) -> some View {
+        if appointment.deliveryState == .synced {
+            NavigationLink {
+                SharedAppointmentDetailView(
+                    appointmentID: appointment.id,
+                    model: sharedAppointmentModel
+                )
+            } label: {
+                conversationAppointmentCard(appointment)
+            }
+            .buttonStyle(.plain)
+        } else {
+            conversationAppointmentCard(appointment)
+        }
+    }
+
+    private func conversationAppointmentCard(_ appointment: SharedAppointment) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(spacing: 8) {
+                Label("共同約定", systemImage: "calendar")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tint)
+                Spacer()
+                if appointment.status == .cancelled {
+                    Text("已取消")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier(
+                            "conversation-appointment-status-\(appointment.id.uuidString.lowercased())"
+                        )
+                }
+            }
+
+            Text(appointment.title)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(appointment.status == .cancelled ? .secondary : .primary)
+                .strikethrough(appointment.status == .cancelled)
+
+            Label(
+                appointment.startsAt.formatted(date: .abbreviated, time: .shortened),
+                systemImage: "clock"
+            )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
+
+            if let location = appointment.location {
+                Label(location, systemImage: "mappin.and.ellipse")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            switch appointment.deliveryState {
+            case .sending:
+                Text("等待同步")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .failed:
+                Button("同步失敗，點此重試") {
+                    Task { await sharedAppointmentModel.retryAppointment(id: appointment.id) }
+                }
+                .font(.caption)
+                .foregroundStyle(.red)
+                .accessibilityIdentifier("retry-conversation-appointment")
+            case .synced:
+                Label("查看約定詳情", systemImage: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.accentColor.opacity(0.1), in: RoundedRectangle(cornerRadius: 18))
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(
+            "conversation-appointment-card-\(appointment.id.uuidString.lowercased())"
+        )
     }
 
     private var composer: some View {
@@ -285,6 +414,13 @@ struct ConversationView: View {
     private var actionMessage: ChatMessage? {
         guard let actionMessageID else { return nil }
         return model.messages.first { $0.id == actionMessageID }
+    }
+
+    private var timelineItems: [ConversationTimelineItem] {
+        ConversationTimelineItem.ordered(
+            messages: model.messages,
+            appointments: sharedAppointmentModel.appointments
+        )
     }
 
     @ViewBuilder
@@ -584,7 +720,7 @@ struct ConversationView: View {
     }
 
     private func scrollToLatest(using proxy: ScrollViewProxy) {
-        guard let lastID = model.messages.last?.id else { return }
+        guard let lastID = timelineItems.last?.id else { return }
         proxy.scrollTo(lastID, anchor: .bottom)
     }
 
@@ -594,7 +730,7 @@ struct ConversationView: View {
             return
         }
         await Task.yield()
-        withAnimation { proxy.scrollTo(messageID, anchor: .center) }
+        withAnimation { proxy.scrollTo(ConversationTimelineItemID.message(messageID), anchor: .center) }
         highlightedMessageID = messageID
         focusMessageID = nil
         Task { @MainActor in

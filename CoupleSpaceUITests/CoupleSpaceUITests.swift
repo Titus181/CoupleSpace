@@ -324,6 +324,33 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testConversationAppointmentCardOpensAndReflectsCancellation() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w11-appointments"]
+        app.launch()
+
+        app.tabBars.buttons["對話"].tap()
+        let appointmentID = "a4000000-0000-0000-0000-000000000001"
+        let card = app.descendants(matching: .any)[
+            "conversation-appointment-card-\(appointmentID)"
+        ]
+        XCTAssertTrue(card.waitForExistence(timeout: 3))
+        card.tap()
+
+        XCTAssertTrue(app.navigationBars["約定詳情"].waitForExistence(timeout: 2))
+        app.buttons["cancel-shared-appointment"].tap()
+        XCTAssertTrue(app.alerts["要取消這筆共同約定嗎？"].waitForExistence(timeout: 1))
+        app.alerts.buttons["取消約定"].tap()
+        XCTAssertTrue(app.staticTexts["狀態, 已取消"].waitForExistence(timeout: 2))
+
+        app.navigationBars["約定詳情"].buttons["對話"].tap()
+        let cancelledStatus = app.descendants(matching: .any)[
+            "conversation-appointment-status-\(appointmentID)"
+        ]
+        XCTAssertTrue(cancelledStatus.waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testSetsAndClearsCurrentStatusWithoutCreatingHistoryByDefault() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
