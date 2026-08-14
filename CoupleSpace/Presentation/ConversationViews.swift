@@ -2,8 +2,20 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
+private struct AppointmentComposerSeed: Identifiable {
+    let id = UUID()
+    let title: String
+    let sourceMessageID: UUID?
+
+    init(title: String = "", sourceMessageID: UUID? = nil) {
+        self.title = title
+        self.sourceMessageID = sourceMessageID
+    }
+}
+
 struct ConversationView: View {
     @ObservedObject var model: ConversationModel
+    @ObservedObject var sharedAppointmentModel: SharedAppointmentModel
     @Binding private var focusMessageID: UUID?
     private let savedMomentSourceIDs: Set<UUID>
     private let onMomentSaved: @MainActor () async -> Void
@@ -13,15 +25,18 @@ struct ConversationView: View {
     @State private var actionMessageID: UUID?
     @State private var customEmojiMessage: ChatMessage?
     @State private var highlightedMessageID: UUID?
+    @State private var appointmentComposerSeed: AppointmentComposerSeed?
     @FocusState private var isComposerFocused: Bool
 
     init(
         model: ConversationModel,
+        sharedAppointmentModel: SharedAppointmentModel,
         focusMessageID: Binding<UUID?> = .constant(nil),
         savedMomentSourceIDs: Set<UUID> = [],
         onMomentSaved: @escaping @MainActor () async -> Void = {}
     ) {
         self.model = model
+        self.sharedAppointmentModel = sharedAppointmentModel
         _focusMessageID = focusMessageID
         self.savedMomentSourceIDs = savedMomentSourceIDs
         self.onMomentSaved = onMomentSaved
@@ -69,6 +84,13 @@ struct ConversationView: View {
             }
             .presentationDetents([.medium, .large])
             .presentationDragIndicator(.visible)
+        }
+        .sheet(item: $appointmentComposerSeed) { seed in
+            SharedAppointmentComposerView(
+                model: sharedAppointmentModel,
+                initialTitle: seed.title,
+                sourceMessageID: seed.sourceMessageID
+            )
         }
     }
 
@@ -123,6 +145,16 @@ struct ConversationView: View {
                     .accessibilityIdentifier("conversation-status")
             }
             HStack(alignment: .bottom, spacing: 10) {
+                Button {
+                    appointmentComposerSeed = AppointmentComposerSeed()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.title3.weight(.semibold))
+                        .frame(minWidth: 32, minHeight: 32)
+                }
+                .accessibilityLabel("建立共同約定")
+                .accessibilityIdentifier("create-appointment-from-composer")
+
                 PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
                     Image(systemName: "photo")
                         .font(.title3)
@@ -195,7 +227,8 @@ struct ConversationView: View {
         )
         .onLongPressGesture(minimumDuration: 0.45) {
             guard model.canReact(to: message)
-                    || (model.canSaveAsMoment(message) && !isSavedAsMoment(message)) else { return }
+                    || (model.canSaveAsMoment(message) && !isSavedAsMoment(message))
+                    || canCreateAppointment(from: message) else { return }
             UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.8)
             actionMessageID = message.id
         }
@@ -265,10 +298,12 @@ struct ConversationView: View {
         let reactionWidth = containerSize.width - (reactionInset * 2)
         let actionWidth = min(216, containerSize.width - (actionInset * 2))
         let reactionHeight: CGFloat = 54
-        let actionHeight: CGFloat = 46
+        let actionCount = (model.canSaveAsMoment(message) && !isSavedAsMoment(message) ? 1 : 0)
+            + (canCreateAppointment(from: message) ? 1 : 0)
+        let actionHeight = CGFloat(actionCount * 46 + max(0, actionCount - 1) * 8)
         let itemSpacing: CGFloat = 8
         let showsReaction = model.canReact(to: message)
-        let showsAction = model.canSaveAsMoment(message) && !isSavedAsMoment(message)
+        let showsAction = actionCount > 0
         let elementCount = 1 + (showsReaction ? 1 : 0) + (showsAction ? 1 : 0)
         let stackHeight = messageFrame.height
             + (showsReaction ? reactionHeight : 0)
@@ -317,7 +352,6 @@ struct ConversationView: View {
                 y: stackTop + (stackHeight / 2)
             )
         }
-        .accessibilityIdentifier("conversation-action-focus")
     }
 
     @ViewBuilder
@@ -335,7 +369,7 @@ struct ConversationView: View {
         VStack(spacing: 8) {
             if placeBothAbove {
                 reactionPicker(for: message, width: reactionWidth)
-                alignedSaveAction(
+                alignedMessageActions(
                     for: message,
                     width: actionWidth,
                     inset: actionInset,
@@ -349,7 +383,7 @@ struct ConversationView: View {
                 focusedMessage(message)
                     .frame(width: messageSize.width, height: messageSize.height)
                     .offset(x: messageOffsetX)
-                alignedSaveAction(
+                alignedMessageActions(
                     for: message,
                     width: actionWidth,
                     inset: actionInset,
@@ -359,7 +393,7 @@ struct ConversationView: View {
                 focusedMessage(message)
                     .frame(width: messageSize.width, height: messageSize.height)
                     .offset(x: messageOffsetX)
-                alignedSaveAction(
+                alignedMessageActions(
                     for: message,
                     width: actionWidth,
                     inset: actionInset,
@@ -371,16 +405,20 @@ struct ConversationView: View {
     }
 
     @ViewBuilder
-    private func alignedSaveAction(
+    private func alignedMessageActions(
         for message: ChatMessage,
         width: CGFloat,
         inset: CGFloat,
         height: CGFloat
     ) -> some View {
-        if model.canSaveAsMoment(message) && !isSavedAsMoment(message) {
+        if (model.canSaveAsMoment(message) && !isSavedAsMoment(message))
+            || canCreateAppointment(from: message) {
             HStack {
                 if message.senderUserID == model.currentUserID { Spacer(minLength: 0) }
-                saveMomentAction(for: message)
+                VStack(spacing: 8) {
+                    saveMomentAction(for: message)
+                    createAppointmentAction(for: message)
+                }
                     .frame(width: width, height: height)
                 if message.senderUserID != model.currentUserID { Spacer(minLength: 0) }
             }
@@ -470,6 +508,35 @@ struct ConversationView: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
             .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
         }
+    }
+
+    @ViewBuilder
+    private func createAppointmentAction(for message: ChatMessage) -> some View {
+        if canCreateAppointment(from: message), let title = message.textBody {
+            Button {
+                actionMessageID = nil
+                appointmentComposerSeed = AppointmentComposerSeed(
+                    title: title,
+                    sourceMessageID: message.id
+                )
+            } label: {
+                Label("建立共同約定", systemImage: "calendar.badge.plus")
+                    .font(.body.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.88)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 12)
+            }
+            .buttonStyle(.plain)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+            .shadow(color: .black.opacity(0.14), radius: 12, y: 5)
+            .accessibilityIdentifier("create-appointment-from-message")
+        }
+    }
+
+    private func canCreateAppointment(from message: ChatMessage) -> Bool {
+        message.deliveryState == .synced && message.textBody != nil
     }
 
     @ViewBuilder

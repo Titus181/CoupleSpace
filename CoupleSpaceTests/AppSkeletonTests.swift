@@ -55,6 +55,148 @@ struct AppSkeletonTests {
         ) == nil)
     }
 
+    @Test func sharedAppointmentPolicyNormalizesFieldsAndRejectsInvalidReminder() throws {
+        let startsAt = Date(timeIntervalSince1970: 10_000)
+        let normalized = try #require(SharedAppointmentPolicy.normalizedDraft(
+            SharedAppointmentDraft(
+                title: "  週末晚餐  ",
+                startsAt: startsAt,
+                location: "  中山站  ",
+                note: "  記得訂位  ",
+                reminderAt: startsAt.addingTimeInterval(-1_800),
+                sourceMessageID: nil
+            )
+        ))
+
+        #expect(normalized.title == "週末晚餐")
+        #expect(normalized.location == "中山站")
+        #expect(normalized.note == "記得訂位")
+        #expect(SharedAppointmentPolicy.normalizedDraft(
+            SharedAppointmentDraft(
+                title: "晚餐",
+                startsAt: startsAt,
+                location: nil,
+                note: nil,
+                reminderAt: startsAt.addingTimeInterval(1),
+                sourceMessageID: nil
+            )
+        ) == nil)
+    }
+
+    @MainActor
+    @Test func sharedAppointmentModelReusesStableIdentityAfterFailedCreate() async throws {
+        let service = SharedAppointmentRemoteServiceFake()
+        service.createFailuresRemaining = 1
+        let now = Date(timeIntervalSince1970: 1_000)
+        let model = SharedAppointmentModel(service: service, now: { now })
+        let draft = SharedAppointmentDraft(
+            title: "一起吃晚餐",
+            startsAt: now.addingTimeInterval(3_600),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            sourceMessageID: nil
+        )
+
+        #expect(await model.create(draft))
+        let pendingID = try #require(model.nextAppointment?.id)
+        #expect(model.nextAppointment?.deliveryState == .failed)
+        await model.retryAppointment(id: pendingID)
+        #expect(service.deliveryClientIDs.count == 2)
+        #expect(service.deliveryClientIDs.first == service.deliveryClientIDs.last)
+        #expect(model.nextAppointment?.title == "一起吃晚餐")
+        #expect(model.nextAppointment?.deliveryState == .synced)
+    }
+
+    @Test func sharedAppointmentOutboxPersistsFIFOAcrossStoreRecreation() throws {
+        let suiteName = "SharedAppointmentOutboxTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let userID = UUID()
+        let relationshipID = UUID()
+        let firstID = UUID()
+        let secondID = UUID()
+        let startsAt = Date(timeIntervalSince1970: 10_000)
+        let firstStore = SharedAppointmentOutboxStore(defaults: defaults)
+        for (clientID, title) in [(firstID, "第一筆"), (secondID, "第二筆")] {
+            try firstStore.enqueue(
+                SharedAppointmentDraft(
+                    title: title,
+                    startsAt: startsAt,
+                    location: nil,
+                    note: nil,
+                    reminderAt: nil,
+                    sourceMessageID: nil
+                ),
+                userID: userID,
+                relationshipID: relationshipID,
+                clientID: clientID,
+                localCreatedAt: startsAt.addingTimeInterval(-100)
+            )
+        }
+
+        let restored = try SharedAppointmentOutboxStore(defaults: defaults).load(
+            userID: userID,
+            relationshipID: relationshipID
+        )
+        #expect(restored.entries.map(\.clientID) == [firstID, secondID])
+    }
+
+    @MainActor
+    @Test func sharedAppointmentLostAcknowledgementRetriesWithoutDuplicate() async throws {
+        let service = SharedAppointmentRemoteServiceFake()
+        service.acknowledgementFailuresRemaining = 1
+        let now = Date(timeIntervalSince1970: 2_000)
+        let model = SharedAppointmentModel(service: service, now: { now })
+
+        #expect(await model.create(SharedAppointmentDraft(
+            title: "不重複的約定",
+            startsAt: now.addingTimeInterval(3_600),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            sourceMessageID: nil
+        )))
+        let pendingID = try #require(model.nextAppointment?.id)
+        #expect(model.nextAppointment?.deliveryState == .failed)
+
+        await model.retryAppointment(id: pendingID)
+
+        #expect(service.appointments.count == 1)
+        #expect(service.deliveryClientIDs == [pendingID, pendingID])
+        #expect(model.nextAppointment?.deliveryState == .synced)
+    }
+
+    @MainActor
+    @Test func sharedAppointmentRecoveryKeepsOfflineDeliveryExplanation() async throws {
+        let service = SharedAppointmentRemoteServiceFake()
+        service.createFailuresRemaining = ConversationRecoveryRetryPolicy.maximumAttempts
+        let now = Date(timeIntervalSince1970: 3_000)
+        let clientID = UUID()
+        service.pendingEntries = [SharedAppointmentOutboxEntry(
+            userID: UUID(),
+            relationshipID: UUID(),
+            clientID: clientID,
+            draft: SharedAppointmentDraft(
+                title: "離線待同步約定",
+                startsAt: now.addingTimeInterval(3_600),
+                location: nil,
+                note: nil,
+                reminderAt: nil,
+                sourceMessageID: nil
+            ),
+            localCreatedAt: now,
+            attemptCount: 0
+        )]
+        let model = SharedAppointmentModel(service: service, now: { now })
+
+        await model.recoverPendingAppointments()
+
+        #expect(model.nextAppointment?.id == clientID)
+        #expect(model.nextAppointment?.deliveryState == .failed)
+        #expect(model.statusMessage == "共同約定已保存在這支裝置；請確認連線後重試。")
+    }
+
     @Test func conversationOutboxPersistsFIFOAndIsolatesAccountsAndRelationships() throws {
         let suiteName = "ConversationOutboxTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -1395,6 +1537,88 @@ struct AppSkeletonTests {
         #expect(model.state == .paired(relationship))
         #expect(model.statusMessage != nil)
     }
+}
+
+@MainActor
+private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteServing {
+    var appointments: [SharedAppointment] = []
+    var pendingEntries: [SharedAppointmentOutboxEntry] = []
+    var deliveryClientIDs: [UUID] = []
+    var createFailuresRemaining = 0
+    var acknowledgementFailuresRemaining = 0
+    private var onChange: (@MainActor () async -> Void)?
+
+    func fetchAppointments() async throws -> [SharedAppointment] { appointments }
+
+    func fetchPendingAppointments() async throws -> [SharedAppointment] {
+        pendingEntries.map(\.appointment)
+    }
+
+    func enqueueAppointment(
+        _ draft: SharedAppointmentDraft,
+        clientID: UUID,
+        localCreatedAt: Date
+    ) async throws {
+        pendingEntries.append(SharedAppointmentOutboxEntry(
+            userID: UUID(),
+            relationshipID: UUID(),
+            clientID: clientID,
+            draft: draft,
+            localCreatedAt: localCreatedAt,
+            attemptCount: 0
+        ))
+    }
+
+    func beginNextPendingAppointment() async throws -> SharedAppointmentOutboxEntry? {
+        guard !pendingEntries.isEmpty else { return nil }
+        pendingEntries[0].attemptCount += 1
+        return pendingEntries[0]
+    }
+
+    func deliverPendingAppointment(
+        _ entry: SharedAppointmentOutboxEntry
+    ) async throws -> SharedAppointment {
+        deliveryClientIDs.append(entry.clientID)
+        if createFailuresRemaining > 0 {
+            createFailuresRemaining -= 1
+            throw CancellationError()
+        }
+        if let existing = appointments.first(where: { $0.id == entry.clientID }) {
+            return existing
+        }
+        let appointment = SharedAppointment(
+            id: entry.clientID,
+            creatorUserID: UUID(),
+            title: entry.draft.title,
+            startsAt: entry.draft.startsAt,
+            location: entry.draft.location,
+            note: entry.draft.note,
+            reminderAt: entry.draft.reminderAt,
+            status: .scheduled,
+            sourceMessageID: entry.draft.sourceMessageID,
+            createdAt: .now,
+            updatedAt: .now
+        )
+        appointments.append(appointment)
+        return appointment
+    }
+
+    func acknowledgePendingAppointment(clientID: UUID) async throws {
+        if acknowledgementFailuresRemaining > 0 {
+            acknowledgementFailuresRemaining -= 1
+            throw CancellationError()
+        }
+        guard pendingEntries.first?.clientID == clientID else {
+            throw SharedAppointmentOutboxError.unexpectedAcknowledgement
+        }
+        pendingEntries.removeFirst()
+    }
+
+    func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
+        self.onChange = onChange
+    }
+
+    func stopObservingChanges() async { onChange = nil }
 }
 
 @MainActor

@@ -8,6 +8,7 @@ struct RootTabView: View {
     @StateObject private var networkRecoveryMonitor = NetworkRecoveryMonitor()
     @StateObject private var momentModel: MomentModel
     @StateObject private var togetherNowModel: TogetherNowModel
+    @StateObject private var sharedAppointmentModel: SharedAppointmentModel
     @StateObject private var conversationModel: ConversationModel
 
     private var isOffline: Bool {
@@ -48,6 +49,15 @@ struct RootTabView: View {
             _togetherNowModel = StateObject(
                 wrappedValue: TogetherNowModel(
                     service: SupabaseTogetherNowService(
+                        client: technicalValidationClient,
+                        currentUserID: accountUserID,
+                        relationshipID: relationshipID
+                    )
+                )
+            )
+            _sharedAppointmentModel = StateObject(
+                wrappedValue: SharedAppointmentModel(
+                    service: SupabaseSharedAppointmentService(
                         client: technicalValidationClient,
                         currentUserID: accountUserID,
                         relationshipID: relationshipID
@@ -132,6 +142,11 @@ struct RootTabView: View {
             _togetherNowModel = StateObject(
                 wrappedValue: TogetherNowModel(service: InMemoryTogetherNowService())
             )
+            _sharedAppointmentModel = StateObject(
+                wrappedValue: SharedAppointmentModel(
+                    service: InMemorySharedAppointmentService()
+                )
+            )
             let seededMessages: [ChatMessage]
             let seededPhotoDataByMessageID: [UUID: Data]
             if arguments.contains("--ui-testing-w10-chat") {
@@ -200,6 +215,7 @@ struct RootTabView: View {
                 TodayMomentView(
                     model: momentModel,
                     togetherNowModel: togetherNowModel,
+                    sharedAppointmentModel: sharedAppointmentModel,
                     onOpenSourceMessage: openSourceMessage
                 )
             }
@@ -207,6 +223,7 @@ struct RootTabView: View {
             Tab("對話", systemImage: "bubble.left.and.bubble.right", value: PrimarySection.conversation) {
                 ConversationView(
                     model: conversationModel,
+                    sharedAppointmentModel: sharedAppointmentModel,
                     focusMessageID: $conversationFocusMessageID,
                     savedMomentSourceIDs: Set(momentModel.moments.compactMap(\.sourceMessageID)),
                     onMomentSaved: { await momentModel.refresh() }
@@ -244,8 +261,14 @@ struct RootTabView: View {
             networkRecoveryMonitor.start()
             async let momentStart: Void = momentModel.start()
             async let togetherNowStart: Void = togetherNowModel.start()
+            async let sharedAppointmentStart: Void = sharedAppointmentModel.start()
             async let conversationStart: Void = conversationModel.start()
-            _ = await (momentStart, togetherNowStart, conversationStart)
+            _ = await (
+                momentStart,
+                togetherNowStart,
+                sharedAppointmentStart,
+                conversationStart
+            )
         }
         .onChange(of: selection) { _, selection in
             Task {
@@ -257,8 +280,15 @@ struct RootTabView: View {
             Task {
                 async let momentRefresh: Void = momentModel.refresh()
                 async let togetherNowRefresh: Void = togetherNowModel.refresh()
+                async let sharedAppointmentRefresh: Void = sharedAppointmentModel
+                    .recoverPendingAppointments()
                 async let conversationRecovery: Void = conversationModel.recoverPendingMessages()
-                _ = await (momentRefresh, togetherNowRefresh, conversationRecovery)
+                _ = await (
+                    momentRefresh,
+                    togetherNowRefresh,
+                    sharedAppointmentRefresh,
+                    conversationRecovery
+                )
             }
         }
         .onChange(of: networkRecoveryMonitor.state) { previous, current in
@@ -271,14 +301,22 @@ struct RootTabView: View {
             Task {
                 async let momentRefresh: Void = momentModel.refresh()
                 async let togetherNowRefresh: Void = togetherNowModel.refresh()
+                async let sharedAppointmentRefresh: Void = sharedAppointmentModel
+                    .recoverPendingAppointments()
                 async let conversationRecovery: Void = conversationModel.recoverPendingMessages()
-                _ = await (momentRefresh, togetherNowRefresh, conversationRecovery)
+                _ = await (
+                    momentRefresh,
+                    togetherNowRefresh,
+                    sharedAppointmentRefresh,
+                    conversationRecovery
+                )
             }
         }
         .onDisappear {
             Task {
                 await momentModel.stop()
                 await togetherNowModel.stop()
+                await sharedAppointmentModel.stop()
                 await conversationModel.stop()
             }
         }

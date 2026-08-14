@@ -184,6 +184,35 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testChatComposerAndTextLongPressUseSharedAppointmentForm() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w10-chat"]
+        app.launch()
+
+        app.tabBars.buttons["對話"].tap()
+        let composerAppointment = app.buttons["create-appointment-from-composer"]
+        XCTAssertTrue(composerAppointment.waitForExistence(timeout: 3))
+        composerAppointment.tap()
+        XCTAssertTrue(app.navigationBars["建立共同約定"].waitForExistence(timeout: 2))
+        XCTAssertEqual(app.textFields["appointment-title"].value as? String, "標題")
+        app.buttons["取消"].tap()
+
+        let sourceMessage = app.staticTexts["晚餐後一起散步"]
+        XCTAssertTrue(sourceMessage.waitForExistence(timeout: 2))
+        sourceMessage.press(forDuration: 1)
+        let createFromMessage = app.buttons["create-appointment-from-message"]
+        XCTAssertTrue(createFromMessage.waitForExistence(timeout: 2))
+        createFromMessage.tap()
+
+        XCTAssertTrue(app.navigationBars["建立共同約定"].waitForExistence(timeout: 2))
+        XCTAssertEqual(
+            app.textFields["appointment-title"].value as? String,
+            "晚餐後一起散步"
+        )
+        XCTAssertTrue(app.staticTexts["已帶入原訊息文字；請自行確認標題、日期與時間後再建立。"].exists)
+    }
+
+    @MainActor
     func testSavedMomentOpensAndHighlightsItsSourceConversation() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-w10-chat"]
@@ -225,6 +254,33 @@ final class CoupleSpaceUITests: XCTestCase {
         app.tabBars.buttons["我們"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["moment-timeline"].waitForExistence(timeout: 1))
         XCTAssertTrue(app.staticTexts["今天看到漂亮的天空"].exists)
+    }
+
+    @MainActor
+    func testCreatesSharedAppointmentFromToday() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+
+        let createButton = app.buttons["create-shared-appointment"]
+        XCTAssertTrue(createButton.waitForExistence(timeout: 3))
+        if !createButton.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(createButton.isHittable)
+        createButton.tap()
+
+        XCTAssertTrue(app.navigationBars["建立共同約定"].waitForExistence(timeout: 2))
+        let title = app.textFields["appointment-title"]
+        XCTAssertTrue(title.waitForExistence(timeout: 1))
+        title.tap()
+        title.typeText("週末一起吃晚餐")
+        app.buttons["confirm-shared-appointment"].tap()
+
+        XCTAssertTrue(app.staticTexts["週末一起吃晚餐"].waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["next-shared-appointment"].exists
+        )
     }
 
     @MainActor

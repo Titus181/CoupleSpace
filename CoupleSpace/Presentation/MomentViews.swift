@@ -5,6 +5,7 @@ import UIKit
 struct TodayMomentView: View {
     @ObservedObject var model: MomentModel
     @ObservedObject var togetherNowModel: TogetherNowModel
+    @ObservedObject var sharedAppointmentModel: SharedAppointmentModel
     let onOpenSourceMessage: (UUID) -> Void
     @State private var isCreatingMoment = false
     @State private var isCreatingQuestion = false
@@ -12,10 +13,12 @@ struct TodayMomentView: View {
     init(
         model: MomentModel,
         togetherNowModel: TogetherNowModel,
+        sharedAppointmentModel: SharedAppointmentModel,
         onOpenSourceMessage: @escaping (UUID) -> Void = { _ in }
     ) {
         self.model = model
         self.togetherNowModel = togetherNowModel
+        self.sharedAppointmentModel = sharedAppointmentModel
         self.onOpenSourceMessage = onOpenSourceMessage
     }
 
@@ -53,6 +56,8 @@ struct TodayMomentView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.large)
                     .accessibilityIdentifier("create-question-moment")
+
+                    NextSharedAppointmentSection(model: sharedAppointmentModel)
 
                     if model.isLoading && model.moments.isEmpty {
                         ProgressView("正在更新你們的此刻…")
