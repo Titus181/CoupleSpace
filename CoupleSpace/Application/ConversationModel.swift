@@ -14,7 +14,7 @@ final class ConversationModel: ObservableObject {
     @Published private(set) var savedMomentMessageIDs: Set<UUID> = []
 
     private struct ReactionAttempt {
-        let emoji: MomentEmoji?
+        let emojiValue: String?
         let clientID: UUID?
         let previous: ChatMessageReaction?
     }
@@ -180,6 +180,11 @@ final class ConversationModel: ObservableObject {
     }
 
     func react(to message: ChatMessage, with emoji: MomentEmoji) async {
+        await react(to: message, withEmoji: emoji.rawValue)
+    }
+
+    func react(to message: ChatMessage, withEmoji value: String) async {
+        guard let emojiValue = ChatReactionPolicy.normalizedEmojiValue(value) else { return }
         guard canReact(to: message),
               !activeReactionMessageIDs.contains(message.id),
               let currentUserID else { return }
@@ -187,34 +192,34 @@ final class ConversationModel: ObservableObject {
         defer { activeReactionMessageIDs.remove(message.id) }
 
         let previous = message.reaction
-        let removesReaction = previous?.emoji == emoji
-        let targetEmoji: MomentEmoji? = removesReaction ? nil : emoji
+        let removesReaction = previous?.emojiValue == emojiValue
+        let targetEmojiValue: String? = removesReaction ? nil : emojiValue
         let attempt: ReactionAttempt
-        if let pending = pendingReactionAttempts[message.id], pending.emoji == targetEmoji {
+        if let pending = pendingReactionAttempts[message.id], pending.emojiValue == targetEmojiValue {
             attempt = pending
         } else {
             attempt = ReactionAttempt(
-                emoji: targetEmoji,
-                clientID: targetEmoji == nil ? nil : UUID(),
+                emojiValue: targetEmojiValue,
+                clientID: targetEmojiValue == nil ? nil : UUID(),
                 previous: previous
             )
             pendingReactionAttempts[message.id] = attempt
         }
 
-        if let targetEmoji, let clientID = attempt.clientID {
+        if let targetEmojiValue, let clientID = attempt.clientID {
             replaceReaction(
                 messageID: message.id,
                 reaction: ChatMessageReaction(
                     id: clientID,
                     reactorUserID: currentUserID,
-                    emoji: targetEmoji,
+                    emojiValue: targetEmojiValue,
                     updatedAt: .now
                 )
             )
             do {
                 let reaction = try await service.setReaction(
                     messageID: message.id,
-                    emoji: targetEmoji,
+                    emojiValue: targetEmojiValue,
                     clientID: clientID
                 )
                 pendingReactionAttempts[message.id] = nil
@@ -443,12 +448,12 @@ final class ConversationModel: ObservableObject {
         guard let currentUserID else { return }
         for (messageID, attempt) in pendingReactionAttempts
         where activeReactionMessageIDs.contains(messageID) {
-            let reaction = attempt.emoji.flatMap { emoji in
+            let reaction = attempt.emojiValue.flatMap { emojiValue in
                 attempt.clientID.map {
                     ChatMessageReaction(
                         id: $0,
                         reactorUserID: currentUserID,
-                        emoji: emoji,
+                        emojiValue: emojiValue,
                         updatedAt: .now
                     )
                 }

@@ -125,22 +125,62 @@ final class CoupleSpaceUITests: XCTestCase {
         app.tabBars.buttons["對話"].tap()
         let sourceMessage = app.staticTexts["晚餐後一起散步"]
         XCTAssertTrue(sourceMessage.waitForExistence(timeout: 3))
-        XCTAssertTrue(app.images["聊天照片"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["已收藏為 Moment"].waitForExistence(timeout: 2))
+        var photo = app.images["聊天照片"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 2))
 
-        sourceMessage.press(forDuration: 1)
+        photo.tap()
+        XCTAssertTrue(app.images["聊天照片預覽"].waitForExistence(timeout: 2))
+        app.images["聊天照片預覽"].swipeDown()
+        XCTAssertFalse(app.images["聊天照片預覽"].waitForExistence(timeout: 1))
+        photo = app.images["聊天照片"]
+
+        photo.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["關閉訊息選單"].waitForExistence(timeout: 1))
         XCTAssertTrue(app.buttons["愛心"].waitForExistence(timeout: 1))
         app.buttons["愛心"].tap()
         XCTAssertTrue(app.staticTexts["愛心"].waitForExistence(timeout: 2))
 
-        sourceMessage.press(forDuration: 1)
+        photo.press(forDuration: 1)
         XCTAssertTrue(app.buttons["微笑"].waitForExistence(timeout: 1))
         app.buttons["微笑"].tap()
         XCTAssertTrue(app.staticTexts["微笑"].waitForExistence(timeout: 2))
 
-        sourceMessage.press(forDuration: 1)
+        photo.press(forDuration: 1)
         XCTAssertTrue(app.buttons["微笑"].waitForExistence(timeout: 1))
         app.buttons["微笑"].tap()
         XCTAssertFalse(app.staticTexts["微笑"].waitForExistence(timeout: 1))
+
+        photo.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["收藏為 Moment"].waitForExistence(timeout: 1))
+        app.buttons["收藏為 Moment"].tap()
+        let savedMomentLabels = app.staticTexts.matching(
+            NSPredicate(format: "label == '已收藏為 Moment'")
+        )
+        expectation(
+            for: NSPredicate { _, _ in savedMomentLabels.count == 2 },
+            evaluatedWith: app
+        )
+        waitForExpectations(timeout: 2)
+    }
+
+    @MainActor
+    func testChatUsesSharedPickerForCustomEmojiReaction() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w10-chat"]
+        app.launch()
+
+        app.tabBars.buttons["對話"].tap()
+        let photo = app.images["聊天照片"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 3))
+        photo.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["更多 Emoji"].waitForExistence(timeout: 1))
+        app.buttons["更多 Emoji"].tap()
+
+        let partyEmoji = app.buttons["custom-conversation-emoji-🥳"]
+        XCTAssertTrue(partyEmoji.waitForExistence(timeout: 2))
+        partyEmoji.tap()
+        XCTAssertTrue(app.staticTexts["🥳"].waitForExistence(timeout: 2))
     }
 
     @MainActor

@@ -8,8 +8,35 @@ enum ChatMessageContent: Equatable, Sendable {
 struct ChatMessageReaction: Equatable, Sendable {
     let id: UUID
     let reactorUserID: UUID
-    let emoji: MomentEmoji
+    let emojiValue: String
     let updatedAt: Date
+
+    init(id: UUID, reactorUserID: UUID, emoji: MomentEmoji, updatedAt: Date) {
+        self.init(
+            id: id,
+            reactorUserID: reactorUserID,
+            emojiValue: emoji.rawValue,
+            updatedAt: updatedAt
+        )
+    }
+
+    init(id: UUID, reactorUserID: UUID, emojiValue: String, updatedAt: Date) {
+        self.id = id
+        self.reactorUserID = reactorUserID
+        self.emojiValue = emojiValue
+        self.updatedAt = updatedAt
+    }
+
+    var emoji: MomentEmoji? { MomentEmoji(rawValue: emojiValue) }
+    var symbol: String { emoji?.symbol ?? emojiValue }
+    var accessibilityLabel: String { emoji?.accessibilityLabel ?? emojiValue }
+}
+
+enum ChatReactionPolicy {
+    static func normalizedEmojiValue(_ value: String) -> String? {
+        if MomentEmoji(rawValue: value) != nil { return value }
+        return MomentResponsePolicy.normalizedEmoji(value)
+    }
 }
 
 struct ChatMessage: Identifiable, Equatable, Sendable {

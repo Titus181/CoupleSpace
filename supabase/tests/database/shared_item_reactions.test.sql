@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(24);
+select plan(27);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password)
 values
@@ -240,6 +240,30 @@ select results_eq(
     'the receiving partner can react to a photo message'
 );
 
+select results_eq(
+    $$
+        select message_client_id::text || '/' || emoji_value
+        from public.set_shared_item_reaction(
+            'e0000000-0000-0000-0000-000000000001',
+            'e1000000-0000-0000-0000-000000000003',
+            'e2000000-0000-0000-0000-000000000009',
+            '🥳'
+        )
+    $$,
+    array['e1000000-0000-0000-0000-000000000003/🥳'::text],
+    'the receiver can replace a standard reaction with a custom Emoji'
+);
+
+select ok(
+    (
+        select position('octet_length' in pg_get_constraintdef(oid)) > 0
+        from pg_constraint
+        where conname = 'shared_item_reactions_emoji_value_check'
+          and conrelid = 'public.shared_item_reactions'::regclass
+    ),
+    'the reaction constraint accepts bounded custom Emoji values'
+);
+
 select throws_ok(
     $$ select public.set_shared_item_reaction(
         'e0000000-0000-0000-0000-000000000001',
@@ -250,6 +274,18 @@ select throws_ok(
     '22023',
     'invalid_message_reaction',
     'unsupported message reaction values are rejected'
+);
+
+select throws_ok(
+    $$ select public.set_shared_item_reaction(
+        'e0000000-0000-0000-0000-000000000001',
+        'e1000000-0000-0000-0000-000000000003',
+        'e2000000-0000-0000-0000-000000000010',
+        '收到'
+    ) $$,
+    '22023',
+    'invalid_message_reaction',
+    'non-Emoji Unicode text is rejected'
 );
 
 reset role;

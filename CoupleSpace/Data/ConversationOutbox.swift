@@ -399,18 +399,47 @@ private enum ConversationCachedContent: Codable, Equatable {
 private struct ConversationCachedReaction: Codable, Equatable {
     let id: UUID
     let reactorUserID: UUID
-    let emoji: MomentEmoji
+    let emojiValue: String
     let updatedAt: Date
+
+    private enum CodingKeys: String, CodingKey {
+        case id, reactorUserID, emojiValue, emoji, updatedAt
+    }
 
     init(_ reaction: ChatMessageReaction) {
         id = reaction.id
         reactorUserID = reaction.reactorUserID
-        emoji = reaction.emoji
+        emojiValue = reaction.emojiValue
         updatedAt = reaction.updatedAt
     }
 
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        reactorUserID = try container.decode(UUID.self, forKey: .reactorUserID)
+        if let value = try container.decodeIfPresent(String.self, forKey: .emojiValue) {
+            emojiValue = value
+        } else {
+            emojiValue = try container.decode(MomentEmoji.self, forKey: .emoji).rawValue
+        }
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(reactorUserID, forKey: .reactorUserID)
+        try container.encode(emojiValue, forKey: .emojiValue)
+        try container.encode(updatedAt, forKey: .updatedAt)
+    }
+
     var reaction: ChatMessageReaction {
-        ChatMessageReaction(id: id, reactorUserID: reactorUserID, emoji: emoji, updatedAt: updatedAt)
+        ChatMessageReaction(
+            id: id,
+            reactorUserID: reactorUserID,
+            emojiValue: emojiValue,
+            updatedAt: updatedAt
+        )
     }
 }
 

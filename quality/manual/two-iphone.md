@@ -17,7 +17,7 @@
 7. A、B 分別傳送基本文字訊息；時間與未讀數正確，介面不顯示已讀狀態。
 8. 兩台強制結束後重開；relationship、Moment、回應、答案、名稱、有效狀態與聊天均恢復。
 
-## W10 加驗（尚未執行）
+## W10 加驗（部分完成）
 
 1. A、B 各傳一張聊天照片；兩台只在正確 relationship 的對話看到該照片，伴侶可開啟，登出後不可讀取；切換至無關 relationship 時不得由新對話快取交叉顯示（既有個人封存讀取權限另依 W1 規則）。
 2. 以接近 relationship 剩餘照片 quota 的測試資料重送聊天照片；接受／拒絕結果沿用既有 quota 規則，拒絕後不留下可讀 orphan object。
@@ -29,3 +29,5 @@
 ## 通過證據
 
 記錄 build、兩台 iOS、relationship 前 8 碼、每一步 PASS／FAIL，以及不含私人正文／完整身分識別碼的必要截圖。W10 另記錄照片 quota 前後值、reaction set／replace／remove 時點、收藏後 Moment ID 與來源 client ID 前 8 碼。任一資料錯交、提前揭曉、消失、重複、錯序、來源錯誤或越權照片讀取都阻擋發布。
+
+2026-08-13 W10 實機複驗：`CoupleSpace 1.0 (1)`、兩支 iOS 26.6 真實 iPhone、`CoupleSpace-W1-Dev`（migration 021）完成步驟 1、3–6。雙方聊天照片可載入、全螢幕開啟並以下滑或右上角關閉；待送訊息不提供互動；已同步文字／照片可 set／replace／remove 常用與自訂 Emoji，`＋` 沿用 Today 的分類 picker；文字／照片收藏 Moment 不重複，來源可返回正確對話且顯示收藏標記。relationship、Moment 與 source client ID 前 8 碼未記錄。步驟 2 的近 quota 真機邊界與拒絕後 orphan 證據尚未執行，因此本清單仍為部分完成。

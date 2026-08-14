@@ -754,6 +754,11 @@ struct AppSkeletonTests {
         #expect(model.messages.first?.reaction == nil)
         await remove.value
         #expect(model.messages.first?.reaction?.emoji == .hug)
+
+        await model.react(to: try #require(model.messages.first), withEmoji: "🥳")
+        #expect(model.messages.first?.reaction?.emojiValue == "🥳")
+        await model.react(to: try #require(model.messages.first), withEmoji: "🥳")
+        #expect(model.messages.first?.reaction == nil)
     }
 
     @MainActor
@@ -1543,9 +1548,12 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
 
     func setReaction(
         messageID: UUID,
-        emoji: MomentEmoji,
+        emojiValue: String,
         clientID: UUID
     ) async throws -> ChatMessageReaction {
+        guard let emojiValue = ChatReactionPolicy.normalizedEmojiValue(emojiValue) else {
+            throw TestServiceError.expected
+        }
         reactionClientIDs.append(clientID)
         try await Task.sleep(for: reactionDelay)
         if reactionFailuresRemaining > 0 {
@@ -1555,7 +1563,7 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
         let reaction = ChatMessageReaction(
             id: clientID,
             reactorUserID: currentUserID,
-            emoji: emoji,
+            emojiValue: emojiValue,
             updatedAt: .now
         )
         guard let index = messages.firstIndex(where: { $0.id == messageID }) else {

@@ -24,7 +24,7 @@ protocol ConversationRemoteServing: AnyObject {
     func photoData(for messageID: UUID) async throws -> Data
     func setReaction(
         messageID: UUID,
-        emoji: MomentEmoji,
+        emojiValue: String,
         clientID: UUID
     ) async throws -> ChatMessageReaction
     func removeReaction(messageID: UUID) async throws
@@ -92,13 +92,13 @@ private struct ChatMessageReactionRow: Decodable {
     }
 
     func reaction() throws -> ChatMessageReaction {
-        guard let emoji = MomentEmoji(rawValue: emojiValue) else {
+        guard let emojiValue = ChatReactionPolicy.normalizedEmojiValue(emojiValue) else {
             throw ConversationServiceError.invalidServerReaction
         }
         return ChatMessageReaction(
             id: clientID,
             reactorUserID: reactorUserID,
-            emoji: emoji,
+            emojiValue: emojiValue,
             updatedAt: updatedAt
         )
     }
@@ -381,9 +381,12 @@ final class SupabaseConversationService: ConversationRemoteServing {
 
     func setReaction(
         messageID: UUID,
-        emoji: MomentEmoji,
+        emojiValue: String,
         clientID: UUID
     ) async throws -> ChatMessageReaction {
+        guard let emojiValue = ChatReactionPolicy.normalizedEmojiValue(emojiValue) else {
+            throw ConversationServiceError.invalidServerReaction
+        }
         _ = try await client.auth.session
         let rows: [ChatMessageReactionRow] = try await client.rpc(
             "set_shared_item_reaction",
@@ -391,7 +394,7 @@ final class SupabaseConversationService: ConversationRemoteServing {
                 targetRelationshipID: relationshipID,
                 targetMessageClientID: messageID,
                 targetClientID: clientID,
-                targetEmojiValue: emoji.rawValue
+                targetEmojiValue: emojiValue
             )
         ).execute().value
         guard let row = rows.first else { throw ConversationServiceError.missingReaction }
@@ -694,9 +697,12 @@ final class InMemoryConversationService: ConversationRemoteServing {
 
     func setReaction(
         messageID: UUID,
-        emoji: MomentEmoji,
+        emojiValue: String,
         clientID: UUID
     ) async throws -> ChatMessageReaction {
+        guard let emojiValue = ChatReactionPolicy.normalizedEmojiValue(emojiValue) else {
+            throw ConversationServiceError.invalidServerReaction
+        }
         guard let index = messages.firstIndex(where: { $0.id == messageID }),
               messages[index].senderUserID != currentUserID else {
             throw ConversationServiceError.invalidMessage
@@ -704,7 +710,7 @@ final class InMemoryConversationService: ConversationRemoteServing {
         let reaction = ChatMessageReaction(
             id: clientID,
             reactorUserID: currentUserID,
-            emoji: emoji,
+            emojiValue: emojiValue,
             updatedAt: .now
         )
         messages[index].reaction = reaction

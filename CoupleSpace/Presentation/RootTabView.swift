@@ -208,6 +208,7 @@ struct RootTabView: View {
                 ConversationView(
                     model: conversationModel,
                     focusMessageID: $conversationFocusMessageID,
+                    savedMomentSourceIDs: Set(momentModel.moments.compactMap(\.sourceMessageID)),
                     onMomentSaved: { await momentModel.refresh() }
                 )
             }

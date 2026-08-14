@@ -233,7 +233,12 @@ struct MomentCard: View {
             MomentTextResponseView(moment: moment, model: model)
         }
         .sheet(isPresented: $isChoosingEmoji) {
-            MomentEmojiResponseView(moment: moment, model: model)
+            EmojiPickerView(
+                accessibilityIdentifier: "moment-emoji-picker",
+                emojiIdentifierPrefix: "custom-moment-emoji"
+            ) { emoji in
+                Task { await model.respond(to: moment, with: .text(emoji)) }
+            }
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
@@ -336,7 +341,7 @@ struct MomentCard: View {
     }
 }
 
-private struct MomentEmojiResponseView: View {
+struct EmojiPickerView: View {
     private struct EmojiSection: Identifiable {
         let title: String
         let emojis: [String]
@@ -369,8 +374,9 @@ private struct MomentEmojiResponseView: View {
     }
 
     @Environment(\.dismiss) private var dismiss
-    let moment: Moment
-    @ObservedObject var model: MomentModel
+    let accessibilityIdentifier: String
+    let emojiIdentifierPrefix: String
+    let onSelect: (String) -> Void
 
     var body: some View {
         NavigationStack {
@@ -387,9 +393,7 @@ private struct MomentEmojiResponseView: View {
                                 ForEach(Array(section.emojis.enumerated()), id: \.offset) { _, emoji in
                                     Button {
                                         dismiss()
-                                        Task {
-                                            await model.respond(to: moment, with: .text(emoji))
-                                        }
+                                        onSelect(emoji)
                                     } label: {
                                         Text(emoji)
                                             .font(.title2)
@@ -397,8 +401,7 @@ private struct MomentEmojiResponseView: View {
                                     }
                                     .buttonStyle(.plain)
                                     .accessibilityLabel(emoji)
-                                    .accessibilityIdentifier("custom-moment-emoji-\(emoji)")
-                                    .disabled(model.activeInteractionMomentIDs.contains(moment.id))
+                                    .accessibilityIdentifier("\(emojiIdentifierPrefix)-\(emoji)")
                                 }
                             }
                         }
@@ -414,7 +417,7 @@ private struct MomentEmojiResponseView: View {
                 }
             }
         }
-        .accessibilityIdentifier("moment-emoji-picker")
+        .accessibilityIdentifier(accessibilityIdentifier)
     }
 }
 
