@@ -84,6 +84,62 @@ struct AppSkeletonTests {
     }
 
     @MainActor
+    @Test func sharedAppointmentModelGroupsScheduledAndCancelledItemsByLocalDay() async throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let selectedDate = try #require(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 8,
+            day: 14,
+            hour: 12
+        )))
+        let earlyID = UUID()
+        let cancelledID = UUID()
+        let nextDayID = UUID()
+        let service = SharedAppointmentRemoteServiceFake()
+
+        func appointment(
+            id: UUID,
+            day: Int,
+            hour: Int,
+            status: SharedAppointmentStatus
+        ) throws -> SharedAppointment {
+            let startsAt = try #require(calendar.date(from: DateComponents(
+                year: 2026,
+                month: 8,
+                day: day,
+                hour: hour
+            )))
+            return SharedAppointment(
+                id: id,
+                creatorUserID: UUID(),
+                title: id.uuidString,
+                startsAt: startsAt,
+                location: nil,
+                note: nil,
+                reminderAt: nil,
+                status: status,
+                sourceMessageID: nil,
+                createdAt: startsAt,
+                updatedAt: startsAt
+            )
+        }
+
+        service.appointments = [
+            try appointment(id: cancelledID, day: 14, hour: 20, status: .cancelled),
+            try appointment(id: nextDayID, day: 15, hour: 0, status: .scheduled),
+            try appointment(id: earlyID, day: 14, hour: 8, status: .scheduled),
+        ]
+        let model = SharedAppointmentModel(service: service)
+        await model.refresh()
+
+        #expect(model.appointments(on: selectedDate, calendar: calendar).map(\.id) == [
+            earlyID,
+            cancelledID,
+        ])
+    }
+
+    @MainActor
     @Test func sharedAppointmentModelReusesStableIdentityAfterFailedCreate() async throws {
         let service = SharedAppointmentRemoteServiceFake()
         service.createFailuresRemaining = 1

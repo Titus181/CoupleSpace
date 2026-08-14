@@ -45,6 +45,14 @@ final class SharedAppointmentModel: ObservableObject {
         appointments.first { $0.id == id }
     }
 
+    func appointments(
+        on date: Date,
+        calendar: Calendar = .autoupdatingCurrent
+    ) -> [SharedAppointment] {
+        appointments.filter { calendar.isDate($0.startsAt, inSameDayAs: date) }
+            .sorted(by: Self.appointmentOrder)
+    }
+
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true

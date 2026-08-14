@@ -172,6 +172,26 @@ struct RootTabView: View {
                         updatedAt: .now.addingTimeInterval(-86_400)
                     ),
                 ]
+            } else if arguments.contains("--ui-testing-w11-calendar") {
+                let startsAt = Calendar.autoupdatingCurrent.date(
+                    bySettingHour: 18,
+                    minute: 0,
+                    second: 0,
+                    of: .now
+                ) ?? .now
+                seededAppointments = [SharedAppointment(
+                    id: UUID(uuidString: "A4000000-0000-0000-0000-000000000003")!,
+                    creatorUserID: uiTestPartnerID,
+                    title: "今天一起喝咖啡",
+                    startsAt: startsAt,
+                    location: "常去的咖啡店",
+                    note: nil,
+                    reminderAt: nil,
+                    status: .scheduled,
+                    sourceMessageID: nil,
+                    createdAt: .now,
+                    updatedAt: .now
+                )]
             } else {
                 seededAppointments = []
             }

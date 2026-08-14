@@ -107,10 +107,20 @@ private struct SharedAppointmentCard: View {
 struct SharedAppointmentScheduleView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var model: SharedAppointmentModel
+    @State private var isCreating = false
 
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    NavigationLink {
+                        SharedAppointmentCalendarView(model: model)
+                    } label: {
+                        Label("查看月曆", systemImage: "calendar")
+                    }
+                    .accessibilityIdentifier("open-shared-appointment-calendar")
+                }
+
                 Section("近期") {
                     if model.upcomingAppointments.isEmpty {
                         Text("目前沒有即將到來的共同約定。")
@@ -144,10 +154,22 @@ struct SharedAppointmentScheduleView: View {
             .navigationTitle("共同日程")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        isCreating = true
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    .accessibilityLabel("建立共同約定")
+                    .accessibilityIdentifier("create-appointment-from-schedule")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("完成") { dismiss() }
                 }
             }
             .refreshable { await model.refresh() }
+            .sheet(isPresented: $isCreating) {
+                SharedAppointmentComposerView(model: model)
+            }
         }
         .accessibilityIdentifier("shared-appointment-schedule")
     }
@@ -176,6 +198,69 @@ struct SharedAppointmentScheduleView: View {
             }
         }
         .accessibilityIdentifier("shared-appointment-row-\(appointment.id.uuidString.lowercased())")
+    }
+}
+
+private struct SharedAppointmentCalendarView: View {
+    @ObservedObject var model: SharedAppointmentModel
+    @State private var selectedDate = Date()
+
+    private var selectedAppointments: [SharedAppointment] {
+        model.appointments(on: selectedDate)
+    }
+
+    var body: some View {
+        List {
+            Section {
+                DatePicker(
+                    "選擇日期",
+                    selection: $selectedDate,
+                    displayedComponents: .date
+                )
+                .datePickerStyle(.graphical)
+                .labelsHidden()
+                .accessibilityIdentifier("shared-appointment-calendar")
+            }
+
+            Section(selectedDate.formatted(date: .complete, time: .omitted)) {
+                if selectedAppointments.isEmpty {
+                    Text("這一天沒有共同約定。")
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("shared-appointment-calendar-empty")
+                } else {
+                    ForEach(selectedAppointments) { appointment in
+                        NavigationLink {
+                            SharedAppointmentDetailView(
+                                appointmentID: appointment.id,
+                                model: model
+                            )
+                        } label: {
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack {
+                                    Text(appointment.title)
+                                        .font(.body.weight(.semibold))
+                                    Spacer()
+                                    if appointment.status == .cancelled {
+                                        Text("已取消")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Text(appointment.startsAt.formatted(date: .omitted, time: .shortened))
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .accessibilityIdentifier(
+                            "calendar-appointment-row-\(appointment.id.uuidString.lowercased())"
+                        )
+                    }
+                }
+            }
+        }
+        .navigationTitle("共同月曆")
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("shared-appointment-calendar-screen")
     }
 }
 

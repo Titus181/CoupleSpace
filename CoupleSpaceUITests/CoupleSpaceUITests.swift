@@ -351,6 +351,31 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testSharedAppointmentCalendarShowsSelectedDayAndScheduleCreateEntry() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w11-calendar"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        let scheduleButton = app.buttons["open-shared-appointment-schedule"]
+        XCTAssertTrue(scheduleButton.waitForExistence(timeout: 3))
+        scheduleButton.tap()
+
+        let calendarButton = app.buttons["open-shared-appointment-calendar"]
+        XCTAssertTrue(calendarButton.waitForExistence(timeout: 2))
+        calendarButton.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["shared-appointment-calendar-screen"]
+                .waitForExistence(timeout: 2)
+        )
+        XCTAssertTrue(app.staticTexts["今天一起喝咖啡"].waitForExistence(timeout: 2))
+
+        app.navigationBars["共同月曆"].buttons["共同日程"].tap()
+        app.buttons["create-appointment-from-schedule"].tap()
+        XCTAssertTrue(app.navigationBars["建立共同約定"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testSetsAndClearsCurrentStatusWithoutCreatingHistoryByDefault() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
