@@ -142,6 +142,20 @@ private struct FinalizeChatPhotoParameters: Encodable {
     }
 }
 
+private struct FinalizeAppointmentPhotoParameters: Encodable {
+    let targetRelationshipID: UUID
+    let targetAppointmentClientID: UUID
+    let targetClientID: UUID
+    let targetByteSize: Int
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+        case targetAppointmentClientID = "target_appointment_client_id"
+        case targetClientID = "target_client_id"
+        case targetByteSize = "target_byte_size"
+    }
+}
+
 private struct ChatPhotoFinalizeResponse: Decodable {
     let accepted: Bool
     let reason: String?
@@ -305,7 +319,6 @@ final class SupabaseConversationService: ConversationRemoteServing {
                 localCreatedAt: localCreatedAt
             )
         case let .photo(data):
-            guard scope == .main else { throw ConversationServiceError.unsupportedScopedPhoto }
             guard !data.isEmpty else { throw ConversationServiceError.invalidPhoto }
             try outboxStore.enqueuePhoto(
                 data,
@@ -369,7 +382,6 @@ final class SupabaseConversationService: ConversationRemoteServing {
             }
             return .accepted(acceptedAt)
         case .photo:
-            guard scope == .main else { throw ConversationServiceError.unsupportedScopedPhoto }
             return try await deliverPendingPhoto(messageID: message.id)
         }
     }
@@ -592,14 +604,28 @@ final class SupabaseConversationService: ConversationRemoteServing {
                 options: FileOptions(contentType: "image/jpeg", upsert: false)
             )
         }
-        let results: [ChatPhotoFinalizeResponse] = try await client.rpc(
-            "finalize_chat_photo_upload",
-            params: FinalizeChatPhotoParameters(
-                targetRelationshipID: relationshipID,
-                targetClientID: messageID,
-                targetByteSize: data.count
-            )
-        ).execute().value
+        let results: [ChatPhotoFinalizeResponse]
+        switch scope {
+        case .main:
+            results = try await client.rpc(
+                "finalize_chat_photo_upload",
+                params: FinalizeChatPhotoParameters(
+                    targetRelationshipID: relationshipID,
+                    targetClientID: messageID,
+                    targetByteSize: data.count
+                )
+            ).execute().value
+        case let .appointment(appointmentID):
+            results = try await client.rpc(
+                "finalize_appointment_discussion_photo_upload",
+                params: FinalizeAppointmentPhotoParameters(
+                    targetRelationshipID: relationshipID,
+                    targetAppointmentClientID: appointmentID,
+                    targetClientID: messageID,
+                    targetByteSize: data.count
+                )
+            ).execute().value
+        }
         guard let result = results.first else { throw ConversationServiceError.missingPhotoResult }
         if result.accepted {
             guard let acceptedAt = result.acceptedAt else {
@@ -638,7 +664,6 @@ final class SupabaseConversationService: ConversationRemoteServing {
 private enum ConversationServiceError: LocalizedError {
     case invalidMessage
     case invalidPhoto
-    case unsupportedScopedPhoto
     case invalidServerMessage
     case invalidServerReaction
     case unexpectedAuthenticatedUser
@@ -653,7 +678,6 @@ private enum ConversationServiceError: LocalizedError {
         switch self {
         case .invalidMessage: "訊息內容不完整。"
         case .invalidPhoto: "照片內容無效。"
-        case .unsupportedScopedPhoto: "專屬討論照片尚未開放。"
         case .invalidServerMessage: "伺服器回傳的訊息無效。"
         case .invalidServerReaction: "伺服器回傳的 Emoji 回應無效。"
         case .unexpectedAuthenticatedUser: "登入身分已變更。"

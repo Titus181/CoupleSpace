@@ -397,7 +397,8 @@ final class CoupleSpaceUITests: XCTestCase {
         )
         let partnerMessage = app.staticTexts["要不要先約下午兩點？"]
         XCTAssertTrue(partnerMessage.waitForExistence(timeout: 2))
-        XCTAssertFalse(app.buttons["send-conversation-photo"].exists)
+        XCTAssertTrue(app.images["聊天照片"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["send-conversation-photo"].exists)
         XCTAssertFalse(app.buttons["create-appointment-from-composer"].exists)
 
         let input = app.descendants(matching: .any)["conversation-input"]

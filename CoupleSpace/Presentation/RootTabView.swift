@@ -229,22 +229,40 @@ struct RootTabView: View {
                     ),
                     discussionModelFactory: { appointmentID in
                         let messages: [ChatMessage]
+                        let photoDataByMessageID: [UUID: Data]
                         if arguments.contains("--ui-testing-w11-discussion"),
                            appointmentID == discussionAppointmentID {
-                            messages = [ChatMessage(
-                                id: UUID(uuidString: "D4000000-0000-0000-0000-000000000020")!,
-                                senderUserID: uiTestPartnerID,
-                                body: "要不要先約下午兩點？",
-                                createdAt: .now
-                            )]
+                            let photoMessageID = UUID(
+                                uuidString: "D4000000-0000-0000-0000-000000000021"
+                            )!
+                            let pixel = Data(base64Encoded:
+                                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                            )!
+                            messages = [
+                                ChatMessage(
+                                    id: photoMessageID,
+                                    senderUserID: uiTestPartnerID,
+                                    content: .photo,
+                                    createdAt: .now.addingTimeInterval(-1)
+                                ),
+                                ChatMessage(
+                                    id: UUID(uuidString: "D4000000-0000-0000-0000-000000000020")!,
+                                    senderUserID: uiTestPartnerID,
+                                    body: "要不要先約下午兩點？",
+                                    createdAt: .now
+                                ),
+                            ]
+                            photoDataByMessageID = [photoMessageID: pixel]
                         } else {
                             messages = []
+                            photoDataByMessageID = [:]
                         }
                         return ConversationModel(
                             service: InMemoryConversationService(
                                 currentUserID: uiTestUserID,
                                 messages: messages,
-                                unreadCount: messages.count
+                                unreadCount: messages.count,
+                                photoDataByMessageID: photoDataByMessageID
                             )
                         )
                     }

@@ -380,6 +380,17 @@ struct ConversationOutboxStore {
         )
     }
 
+    func appointmentDiscussionScopeIDs(userID: UUID, relationshipID: UUID) -> [UUID] {
+        let discussionPrefix = baseKey(userID: userID, relationshipID: relationshipID)
+            + ".appointment."
+        return defaults.dictionaryRepresentation().keys.compactMap { key in
+            guard key.hasPrefix(discussionPrefix) else { return nil }
+            let suffix = String(key.dropFirst(discussionPrefix.count))
+            return UUID(uuidString: suffix)
+        }
+        .sorted { $0.uuidString < $1.uuidString }
+    }
+
     private func key(userID: UUID, relationshipID: UUID) -> String {
         let base = baseKey(userID: userID, relationshipID: relationshipID)
         guard let appointmentScopeID else { return base }

@@ -277,12 +277,12 @@ select throws_ok(
         'f2000000-0000-0000-0000-000000000007',
         '00000000-0000-0000-0000-0000000000f1',
         'photo',
-        1,
+        null,
         'f1000000-0000-0000-0000-000000000001'
     ) $$,
     '23514',
     null,
-    'appointment discussion scope rejects photos until the pipeline is implemented'
+    'appointment discussion scope rejects incomplete photo metadata'
 );
 
 select results_eq(

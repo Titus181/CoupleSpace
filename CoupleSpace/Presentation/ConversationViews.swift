@@ -66,7 +66,6 @@ enum ConversationPresentationMode: Equatable {
     }
 
     var showsAppointmentFeatures: Bool { self == .main }
-    var allowsPhotoMessages: Bool { self == .main }
     var allowsMomentSaving: Bool { self == .main }
 }
 
@@ -329,15 +328,13 @@ struct ConversationView: View {
                     .accessibilityIdentifier("create-appointment-from-composer")
                 }
 
-                if mode.allowsPhotoMessages {
-                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                        Image(systemName: "photo")
-                            .font(.title3)
-                            .frame(minWidth: 32, minHeight: 32)
-                    }
-                    .accessibilityLabel("傳送照片")
-                    .accessibilityIdentifier("send-conversation-photo")
+                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                    Image(systemName: "photo")
+                        .font(.title3)
+                        .frame(minWidth: 32, minHeight: 32)
                 }
+                .accessibilityLabel("傳送照片")
+                .accessibilityIdentifier("send-conversation-photo")
 
                 TextField("寫訊息…", text: $draft, axis: .vertical)
                     .lineLimit(1...5)

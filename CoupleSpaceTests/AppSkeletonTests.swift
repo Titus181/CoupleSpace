@@ -353,7 +353,12 @@ struct AppSkeletonTests {
     @Test func appointmentDiscussionOutboxAndSnapshotStayIsolatedFromMainChat() throws {
         let suiteName = "AppointmentDiscussionConversationScopeTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
-        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let directoryURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(suiteName, isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: directoryURL)
+        }
         let userID = UUID()
         let relationshipID = UUID()
         let otherRelationshipID = UUID()
@@ -363,17 +368,24 @@ struct AppSkeletonTests {
         let firstDiscussionMessageID = UUID()
         let secondDiscussionMessageID = UUID()
         let otherRelationshipMessageID = UUID()
-        let mainStore = ConversationOutboxStore(defaults: defaults)
+        let mainStore = ConversationOutboxStore(
+            defaults: defaults,
+            directoryURL: directoryURL
+        )
         let firstDiscussionStore = ConversationOutboxStore(
             defaults: defaults,
+            directoryURL: directoryURL,
+            availableCapacity: { _ in Int64.max },
             appointmentScopeID: firstAppointmentID
         )
         let secondDiscussionStore = ConversationOutboxStore(
             defaults: defaults,
+            directoryURL: directoryURL,
             appointmentScopeID: secondAppointmentID
         )
         let otherRelationshipStore = ConversationOutboxStore(
             defaults: defaults,
+            directoryURL: directoryURL,
             appointmentScopeID: firstAppointmentID
         )
 
@@ -384,8 +396,9 @@ struct AppSkeletonTests {
             clientID: mainMessageID,
             localCreatedAt: .now
         )
-        try firstDiscussionStore.enqueueText(
-            "第一個約定",
+        let discussionPhotoData = Data([0x01, 0x02, 0x03])
+        try firstDiscussionStore.enqueuePhoto(
+            discussionPhotoData,
             userID: userID,
             relationshipID: relationshipID,
             clientID: firstDiscussionMessageID,
@@ -412,6 +425,15 @@ struct AppSkeletonTests {
             .entries.map(\.clientID) == [firstDiscussionMessageID])
         #expect(try secondDiscussionStore.load(userID: userID, relationshipID: relationshipID)
             .entries.map(\.clientID) == [secondDiscussionMessageID])
+        let discussionPhotoEntry = try #require(
+            try firstDiscussionStore.load(userID: userID, relationshipID: relationshipID)
+                .entries.first
+        )
+        #expect(try firstDiscussionStore.data(for: discussionPhotoEntry) == discussionPhotoData)
+        #expect(Set(mainStore.appointmentDiscussionScopeIDs(
+            userID: userID,
+            relationshipID: relationshipID
+        )) == Set([firstAppointmentID, secondAppointmentID]))
 
         let mainSnapshotStore = ConversationSnapshotStore(defaults: defaults)
         let discussionSnapshotStore = ConversationSnapshotStore(
@@ -457,6 +479,9 @@ struct AppSkeletonTests {
             .entries.map(\.clientID) == [mainMessageID])
         #expect(try firstDiscussionStore.load(userID: userID, relationshipID: relationshipID).isEmpty)
         #expect(try secondDiscussionStore.load(userID: userID, relationshipID: relationshipID).isEmpty)
+        #expect(throws: ConversationOutboxError.missingLocalFile) {
+            try firstDiscussionStore.data(for: discussionPhotoEntry)
+        }
         #expect(try otherRelationshipStore.load(userID: userID, relationshipID: otherRelationshipID)
             .entries.map(\.clientID) == [otherRelationshipMessageID])
     }

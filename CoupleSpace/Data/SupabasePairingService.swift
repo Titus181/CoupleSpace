@@ -169,6 +169,35 @@ final class SupabasePairingService: PairingRemoteServing {
             .value
         let archiveID = archives.first?.id
 
+        try await reconcileConversationOutbox(
+            outboxStore,
+            userID: userID,
+            relationshipID: relationshipID,
+            archiveID: archiveID
+        )
+        for appointmentID in outboxStore.appointmentDiscussionScopeIDs(
+            userID: userID,
+            relationshipID: relationshipID
+        ) {
+            try await reconcileConversationOutbox(
+                ConversationOutboxStore(appointmentScopeID: appointmentID),
+                userID: userID,
+                relationshipID: relationshipID,
+                archiveID: archiveID
+            )
+        }
+        outboxStore.clearAppointmentDiscussions(
+            userID: userID,
+            relationshipID: relationshipID
+        )
+    }
+
+    private func reconcileConversationOutbox(
+        _ outboxStore: ConversationOutboxStore,
+        userID: UUID,
+        relationshipID: UUID,
+        archiveID: UUID?
+    ) async throws {
         while let entry = try outboxStore.load(
             userID: userID,
             relationshipID: relationshipID
@@ -218,12 +247,6 @@ final class SupabasePairingService: PairingRemoteServing {
                 relationshipID: relationshipID
             )
         }
-        // Appointment discussions only enqueue text in W11. Once the relationship
-        // closes, those scoped queues cannot be delivered and need no photo cleanup.
-        outboxStore.clearAppointmentDiscussions(
-            userID: userID,
-            relationshipID: relationshipID
-        )
     }
 
     func createInvitation() async throws -> PairingInvitation {

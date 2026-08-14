@@ -371,7 +371,7 @@ struct SharedAppointmentDetailView: View {
                             }
                             .accessibilityIdentifier("open-appointment-discussion")
 
-                            Text("目前支援文字與 Emoji；照片與收藏將在後續切片接上。")
+                            Text("目前支援文字、照片與 Emoji；收藏將在後續切片接上。")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
