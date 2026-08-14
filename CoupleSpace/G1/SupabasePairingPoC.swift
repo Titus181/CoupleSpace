@@ -136,6 +136,40 @@ private struct PersonalArchiveItemRow: Decodable {
     }
 }
 
+private struct PersonalArchiveAuditItemRow: Decodable {
+    let clientID: UUID
+    let itemKind: String
+    let createdAt: Date
+    let sourceCreatorUserID: UUID?
+    let appointmentClientID: UUID?
+
+    enum CodingKeys: String, CodingKey {
+        case clientID = "client_id"
+        case itemKind = "item_kind"
+        case createdAt = "created_at"
+        case sourceCreatorUserID = "source_creator_user_id"
+        case appointmentClientID = "appointment_client_id"
+    }
+}
+
+private struct PersonalArchiveAppointmentRow: Decodable {
+    let clientID: UUID
+    let sourceSharedItemClientID: UUID?
+
+    enum CodingKeys: String, CodingKey {
+        case clientID = "client_id"
+        case sourceSharedItemClientID = "source_shared_item_client_id"
+    }
+}
+
+private struct PersonalArchiveAppointmentEventRow: Decodable {
+    let appointmentClientID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case appointmentClientID = "appointment_client_id"
+    }
+}
+
 private struct ArchivedPhotoIdentityRow: Decodable {
     let itemKind: String
 
@@ -161,6 +195,10 @@ final class SupabasePairingPoC: ObservableObject {
     @Published private(set) var relationshipStatus: String?
     @Published private(set) var lifecycleStatus = "尚未開始資料生命週期驗證"
     @Published private(set) var personalArchiveItemCount = 0
+    @Published private(set) var personalArchiveAppointmentCount = 0
+    @Published private(set) var personalArchiveDiscussionItemCount = 0
+    @Published private(set) var personalArchiveAppointmentEventCount = 0
+    @Published private(set) var personalArchiveAppointmentAuditStatus = "尚未核對約定封存關聯"
     @Published private(set) var hasPersonalArchive = false
     @Published private(set) var archiveExportStatus = "尚未準備個人封存匯出"
     @Published private(set) var archiveExportDocument: PersonalArchiveExportDocument?
@@ -464,6 +502,7 @@ final class SupabasePairingPoC: ObservableObject {
             personalArchiveRelationshipID = nil
             hasPersonalArchive = false
             personalArchiveItemCount = 0
+            resetPersonalArchiveAppointmentAudit()
             storagePhotoData = nil
             cleanupArchiveExportStaging()
             archiveExportDocument = nil
@@ -870,6 +909,7 @@ final class SupabasePairingPoC: ObservableObject {
                 personalArchiveRelationshipID = nil
                 hasPersonalArchive = false
                 personalArchiveItemCount = 0
+                resetPersonalArchiveAppointmentAudit()
                 lifecycleStatus = relationship.status == "closing"
                     ? "關係 closing；請建立自己的個人封存"
                     : "關係 active；尚未開始解除配對"
@@ -965,6 +1005,7 @@ final class SupabasePairingPoC: ObservableObject {
         recentPhotoTokens = "尚無照片"
         lifecycleStatus = "尚未開始資料生命週期驗證"
         personalArchiveItemCount = 0
+        resetPersonalArchiveAppointmentAudit()
         hasPersonalArchive = false
         archiveExportStatus = "尚未準備個人封存匯出"
         cleanupArchiveExportStaging()
@@ -1305,17 +1346,55 @@ final class SupabasePairingPoC: ObservableObject {
     }
 
     private func refreshPersonalArchive(_ archive: PersonalArchiveRow) async throws {
-        let items: [PersonalArchiveItemRow] = try await client
+        let items: [PersonalArchiveAuditItemRow] = try await client
             .from("personal_archive_items")
-            .select("client_id,item_kind,created_at,text_content")
+            .select(
+                "client_id,item_kind,created_at,source_creator_user_id,appointment_client_id"
+            )
             .eq("archive_id", value: archive.id)
             .order("created_at", ascending: false)
             .execute()
             .value
+        let appointments: [PersonalArchiveAppointmentRow] = try await client
+            .from("personal_archive_appointments")
+            .select("client_id,source_shared_item_client_id")
+            .eq("archive_id", value: archive.id)
+            .execute()
+            .value
+        let events: [PersonalArchiveAppointmentEventRow] = try await client
+            .from("personal_archive_appointment_events")
+            .select("appointment_client_id")
+            .eq("archive_id", value: archive.id)
+            .execute()
+            .value
+        let audit = PersonalArchiveAppointmentAudit.inspect(
+            items: items.map {
+                PersonalArchiveItemReference(
+                    clientID: $0.clientID,
+                    sourceCreatorUserID: $0.sourceCreatorUserID,
+                    appointmentClientID: $0.appointmentClientID
+                )
+            },
+            appointments: appointments.map {
+                PersonalArchiveAppointmentReference(
+                    clientID: $0.clientID,
+                    sourceSharedItemClientID: $0.sourceSharedItemClientID
+                )
+            },
+            events: events.map {
+                PersonalArchiveAppointmentEventReference(
+                    appointmentClientID: $0.appointmentClientID
+                )
+            }
+        )
         personalArchiveID = archive.id
         personalArchiveRelationshipID = archive.relationshipID
         hasPersonalArchive = true
         personalArchiveItemCount = items.count
+        personalArchiveAppointmentCount = audit.appointmentCount
+        personalArchiveDiscussionItemCount = audit.discussionItemCount
+        personalArchiveAppointmentEventCount = audit.eventCount
+        personalArchiveAppointmentAuditStatus = audit.status
 
         guard let photo = items.first(where: { $0.itemKind == "photo" }) else {
             storagePhotoData = nil
@@ -1335,6 +1414,13 @@ final class SupabasePairingPoC: ObservableObject {
             storagePhotoData = nil
             storageStatus = "個人封存照片讀取失敗：\(error.localizedDescription)"
         }
+    }
+
+    private func resetPersonalArchiveAppointmentAudit() {
+        personalArchiveAppointmentCount = 0
+        personalArchiveDiscussionItemCount = 0
+        personalArchiveAppointmentEventCount = 0
+        personalArchiveAppointmentAuditStatus = "尚未核對約定封存關聯"
     }
 
 

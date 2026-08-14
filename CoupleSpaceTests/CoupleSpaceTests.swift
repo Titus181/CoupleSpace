@@ -909,6 +909,60 @@ struct CoupleSpaceTests {
         ) == [first])
     }
 
+    @Test func personalArchiveAppointmentAuditDetectsCompleteAndBrokenLinks() {
+        let sourceID = UUID()
+        let discussionID = UUID()
+        let appointmentID = UUID()
+        let creatorID = UUID()
+
+        let complete = PersonalArchiveAppointmentAudit.inspect(
+            items: [
+                PersonalArchiveItemReference(
+                    clientID: sourceID,
+                    sourceCreatorUserID: creatorID,
+                    appointmentClientID: nil
+                ),
+                PersonalArchiveItemReference(
+                    clientID: discussionID,
+                    sourceCreatorUserID: creatorID,
+                    appointmentClientID: appointmentID
+                ),
+            ],
+            appointments: [PersonalArchiveAppointmentReference(
+                clientID: appointmentID,
+                sourceSharedItemClientID: sourceID
+            )],
+            events: [PersonalArchiveAppointmentEventReference(
+                appointmentClientID: appointmentID
+            )]
+        )
+
+        #expect(complete.appointmentCount == 1)
+        #expect(complete.discussionItemCount == 1)
+        #expect(complete.eventCount == 1)
+        #expect(complete.brokenReferenceCount == 0)
+        #expect(complete.status == "約定封存關聯完整")
+
+        let missingID = UUID()
+        let broken = PersonalArchiveAppointmentAudit.inspect(
+            items: [PersonalArchiveItemReference(
+                clientID: discussionID,
+                sourceCreatorUserID: nil,
+                appointmentClientID: missingID
+            )],
+            appointments: [PersonalArchiveAppointmentReference(
+                clientID: appointmentID,
+                sourceSharedItemClientID: sourceID
+            )],
+            events: [PersonalArchiveAppointmentEventReference(
+                appointmentClientID: missingID
+            )]
+        )
+
+        #expect(broken.brokenReferenceCount == 4)
+        #expect(broken.status == "約定封存關聯異常：4 處")
+    }
+
     @Test func personalArchiveExportBuildsDeterministicFolder() throws {
         let relationshipID = UUID(uuidString: "a0000000-0000-4000-8000-000000000001")!
         let messageID = UUID(uuidString: "a0000000-0000-4000-8000-000000000002")!

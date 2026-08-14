@@ -216,6 +216,22 @@ struct G1TechnicalSpikeView: View {
                             "個人封存項目",
                             value: "\(pairingModel.personalArchiveItemCount)"
                         )
+                        LabeledContent(
+                            "封存共同約定",
+                            value: "\(pairingModel.personalArchiveAppointmentCount)"
+                        )
+                        LabeledContent(
+                            "封存專屬討論項目",
+                            value: "\(pairingModel.personalArchiveDiscussionItemCount)"
+                        )
+                        LabeledContent(
+                            "封存重大事件",
+                            value: "\(pairingModel.personalArchiveAppointmentEventCount)"
+                        )
+                        Text(pairingModel.personalArchiveAppointmentAuditStatus)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("personal-archive-appointment-audit")
 
                         Button("1. 開始解除配對（closing）", role: .destructive) {
                             isConfirmingBeginUnpairing = true

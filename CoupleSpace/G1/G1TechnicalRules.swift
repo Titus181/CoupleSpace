@@ -648,6 +648,68 @@ struct RelationshipArchivePolicy {
     }
 }
 
+struct PersonalArchiveItemReference: Equatable {
+    let clientID: UUID
+    let sourceCreatorUserID: UUID?
+    let appointmentClientID: UUID?
+}
+
+struct PersonalArchiveAppointmentReference: Equatable {
+    let clientID: UUID
+    let sourceSharedItemClientID: UUID?
+}
+
+struct PersonalArchiveAppointmentEventReference: Equatable {
+    let appointmentClientID: UUID
+}
+
+struct PersonalArchiveAppointmentAudit: Equatable {
+    let appointmentCount: Int
+    let discussionItemCount: Int
+    let eventCount: Int
+    let brokenReferenceCount: Int
+
+    var status: String {
+        if appointmentCount == 0, discussionItemCount == 0, eventCount == 0 {
+            return "沒有共同約定資料"
+        }
+        return brokenReferenceCount == 0
+            ? "約定封存關聯完整"
+            : "約定封存關聯異常：\(brokenReferenceCount) 處"
+    }
+
+    static func inspect(
+        items: [PersonalArchiveItemReference],
+        appointments: [PersonalArchiveAppointmentReference],
+        events: [PersonalArchiveAppointmentEventReference]
+    ) -> Self {
+        let itemIDs = Set(items.map(\.clientID))
+        let appointmentIDs = Set(appointments.map(\.clientID))
+        let missingCreators = items.filter { $0.sourceCreatorUserID == nil }.count
+        let missingDiscussionAppointments = items.filter { item in
+            guard let appointmentID = item.appointmentClientID else { return false }
+            return !appointmentIDs.contains(appointmentID)
+        }.count
+        let missingSourceItems = appointments.filter { appointment in
+            guard let sourceID = appointment.sourceSharedItemClientID else { return false }
+            return !itemIDs.contains(sourceID)
+        }.count
+        let missingEventAppointments = events.filter {
+            !appointmentIDs.contains($0.appointmentClientID)
+        }.count
+
+        return Self(
+            appointmentCount: appointments.count,
+            discussionItemCount: items.filter { $0.appointmentClientID != nil }.count,
+            eventCount: events.count,
+            brokenReferenceCount: missingCreators
+                + missingDiscussionAppointments
+                + missingSourceItems
+                + missingEventAppointments
+        )
+    }
+}
+
 struct MessageOrderingValue: Equatable {
     let id: UUID
     let clientCreatedAt: Date
