@@ -79,6 +79,7 @@ private notification leakage, message loss/duplication/reordering, inconsistent 
 - At the end of every development task belonging to a numbered `W` milestone, report the current milestone and roadmap gate status.
 - Separate the handoff into: completed and pushed work; completed but not yet pushed or deployed work; and remaining gates.
 - List every remaining gate explicitly and state the total number of remaining items. If a category has no items, say so rather than omitting it.
+- Explicitly state whether a commit is recommended at that point. Include a short reason and the recommended commit scope when the answer is yes; this recommendation is not authorization to commit.
 - End with exactly one clear status line using one of these forms: `W<n> 狀態：已關閉` or `W<n> 狀態：尚未關閉（剩餘 <count> 項）`.
 - Do not mark a milestone closed until its roadmap acceptance criteria, required automated checks, applicable two-device／weak-network evidence, and SSOT documentation are all complete.
 
