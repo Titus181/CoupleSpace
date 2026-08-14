@@ -23,9 +23,26 @@ final class SharedAppointmentModel: ObservableObject {
     }
 
     var nextAppointment: SharedAppointment? {
-        appointments.first {
+        upcomingAppointments.first
+    }
+
+    var upcomingAppointments: [SharedAppointment] {
+        appointments.filter {
             $0.status == .scheduled && $0.startsAt >= now()
         }
+    }
+
+    var pastOrCancelledAppointments: [SharedAppointment] {
+        appointments.filter {
+            $0.status == .cancelled || $0.startsAt < now()
+        }
+        .sorted { lhs, rhs in
+            (lhs.startsAt, lhs.id.uuidString) > (rhs.startsAt, rhs.id.uuidString)
+        }
+    }
+
+    func appointment(id: UUID) -> SharedAppointment? {
+        appointments.first { $0.id == id }
     }
 
     func start() async {
@@ -114,6 +131,60 @@ final class SharedAppointmentModel: ObservableObject {
         await drainPendingAppointments(maximumAttemptsPerAppointment: 1)
     }
 
+    @discardableResult
+    func update(id: UUID, draft: SharedAppointmentDraft) async -> Bool {
+        guard !isSaving,
+              let current = appointment(id: id),
+              current.status == .scheduled,
+              current.deliveryState == .synced,
+              let normalized = SharedAppointmentPolicy.normalizedDraft(draft) else {
+            statusMessage = "請確認約定仍可編輯，並檢查內容與提醒時間。"
+            return false
+        }
+        let preservedSourceDraft = SharedAppointmentDraft(
+            title: normalized.title,
+            startsAt: normalized.startsAt,
+            location: normalized.location,
+            note: normalized.note,
+            reminderAt: normalized.reminderAt,
+            sourceMessageID: current.sourceMessageID
+        )
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            replaceAppointment(try await service.updateAppointment(
+                id: id,
+                draft: preservedSourceDraft
+            ))
+            statusMessage = "共同約定已更新。"
+            return true
+        } catch {
+            statusMessage = "共同約定尚未更新；請確認連線後再試。"
+            return false
+        }
+    }
+
+    @discardableResult
+    func cancel(id: UUID) async -> Bool {
+        guard !isSaving,
+              let current = appointment(id: id),
+              current.status == .scheduled,
+              current.deliveryState == .synced else {
+            statusMessage = "這筆共同約定目前無法取消。"
+            return false
+        }
+        isSaving = true
+        defer { isSaving = false }
+        do {
+            replaceAppointment(try await service.cancelAppointment(id: id))
+            statusMessage = "共同約定已取消，原內容仍會保留。"
+            return true
+        } catch {
+            statusMessage = "共同約定尚未取消；請確認連線後再試。"
+            return false
+        }
+    }
+
     func recoverPendingAppointments() async {
         await loadPendingAppointments()
         await drainPendingAppointments(
@@ -196,6 +267,12 @@ final class SharedAppointmentModel: ObservableObject {
             byID[appointment.id] = appointment
         }
         appointments = byID.values.sorted(by: Self.appointmentOrder)
+    }
+
+    private func replaceAppointment(_ appointment: SharedAppointment) {
+        appointments.removeAll { $0.id == appointment.id }
+        appointments.append(appointment)
+        appointments.sort(by: Self.appointmentOrder)
     }
 
     private static func appointmentOrder(

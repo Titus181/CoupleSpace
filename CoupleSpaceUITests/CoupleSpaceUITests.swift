@@ -274,12 +274,52 @@ final class CoupleSpaceUITests: XCTestCase {
         let title = app.textFields["appointment-title"]
         XCTAssertTrue(title.waitForExistence(timeout: 1))
         title.tap()
+        if !app.keyboards.firstMatch.waitForExistence(timeout: 1) {
+            title.tap()
+        }
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
         title.typeText("週末一起吃晚餐")
         app.buttons["confirm-shared-appointment"].tap()
 
         XCTAssertTrue(app.staticTexts["週末一起吃晚餐"].waitForExistence(timeout: 2))
         XCTAssertTrue(
             app.descendants(matching: .any)["next-shared-appointment"].exists
+        )
+    }
+
+    @MainActor
+    func testOpensEditsAndCancelsSharedAppointmentFromUs() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w11-appointments"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        let scheduleButton = app.buttons["open-shared-appointment-schedule"]
+        XCTAssertTrue(scheduleButton.waitForExistence(timeout: 3))
+        scheduleButton.tap()
+
+        XCTAssertTrue(app.navigationBars["共同日程"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["週末一起吃晚餐"].waitForExistence(timeout: 1))
+        XCTAssertTrue(app.staticTexts["上週一起散步"].exists)
+        app.staticTexts["週末一起吃晚餐"].tap()
+
+        XCTAssertTrue(app.navigationBars["約定詳情"].waitForExistence(timeout: 2))
+        app.buttons["edit-shared-appointment"].tap()
+        XCTAssertTrue(app.navigationBars["編輯共同約定"].waitForExistence(timeout: 2))
+        XCTAssertEqual(
+            app.textFields["appointment-title"].value as? String,
+            "週末一起吃晚餐"
+        )
+        app.buttons["取消"].tap()
+
+        app.buttons["cancel-shared-appointment"].tap()
+        XCTAssertTrue(app.alerts["要取消這筆共同約定嗎？"].waitForExistence(timeout: 1))
+        app.alerts.buttons["取消約定"].tap()
+
+        XCTAssertTrue(app.staticTexts["狀態, 已取消"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["edit-shared-appointment"].exists)
+        XCTAssertTrue(
+            app.staticTexts["這筆約定已取消；原內容會保留在你們的過往約定中。"].exists
         )
     }
 

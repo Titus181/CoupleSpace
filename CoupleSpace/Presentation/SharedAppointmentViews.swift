@@ -23,7 +23,21 @@ struct NextSharedAppointmentSection: View {
                 ProgressView()
                     .frame(maxWidth: .infinity, minHeight: 72)
             } else if let appointment = model.nextAppointment {
-                SharedAppointmentCard(appointment: appointment, model: model)
+                if appointment.deliveryState == .synced {
+                    NavigationLink {
+                        SharedAppointmentDetailView(
+                            appointmentID: appointment.id,
+                            model: model
+                        )
+                    } label: {
+                        SharedAppointmentCard(appointment: appointment, model: model)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("next-shared-appointment")
+                } else {
+                    SharedAppointmentCard(appointment: appointment, model: model)
+                        .accessibilityIdentifier("next-shared-appointment")
+                }
             } else {
                 Button {
                     isCreating = true
@@ -87,7 +101,171 @@ private struct SharedAppointmentCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
-        .accessibilityIdentifier("next-shared-appointment")
+    }
+}
+
+struct SharedAppointmentScheduleView: View {
+    @Environment(\.dismiss) private var dismiss
+    @ObservedObject var model: SharedAppointmentModel
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("近期") {
+                    if model.upcomingAppointments.isEmpty {
+                        Text("目前沒有即將到來的共同約定。")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(model.upcomingAppointments) { appointment in
+                            appointmentLink(appointment)
+                        }
+                    }
+                }
+
+                Section("過往與已取消") {
+                    if model.pastOrCancelledAppointments.isEmpty {
+                        Text("過往約定會保留在這裡。")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(model.pastOrCancelledAppointments) { appointment in
+                            appointmentLink(appointment)
+                        }
+                    }
+                }
+
+                if let statusMessage = model.statusMessage {
+                    Section("狀態") {
+                        Text(statusMessage)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .navigationTitle("共同日程")
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { dismiss() }
+                }
+            }
+            .refreshable { await model.refresh() }
+        }
+        .accessibilityIdentifier("shared-appointment-schedule")
+    }
+
+    private func appointmentLink(_ appointment: SharedAppointment) -> some View {
+        NavigationLink {
+            SharedAppointmentDetailView(
+                appointmentID: appointment.id,
+                model: model
+            )
+        } label: {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack {
+                    Text(appointment.title)
+                        .font(.body.weight(.semibold))
+                    Spacer()
+                    if appointment.status == .cancelled {
+                        Text("已取消")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                Text(appointment.startsAt.formatted(date: .abbreviated, time: .shortened))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityIdentifier("shared-appointment-row-\(appointment.id.uuidString.lowercased())")
+    }
+}
+
+struct SharedAppointmentDetailView: View {
+    @ObservedObject var model: SharedAppointmentModel
+    let appointmentID: UUID
+    @State private var isEditing = false
+    @State private var isConfirmingCancellation = false
+
+    init(appointmentID: UUID, model: SharedAppointmentModel) {
+        self.appointmentID = appointmentID
+        self.model = model
+    }
+
+    var body: some View {
+        Group {
+            if let appointment = model.appointment(id: appointmentID) {
+                List {
+                    Section("約定") {
+                        LabeledContent("標題", value: appointment.title)
+                        LabeledContent(
+                            "開始時間",
+                            value: appointment.startsAt.formatted(
+                                date: .abbreviated,
+                                time: .shortened
+                            )
+                        )
+                        if let location = appointment.location {
+                            LabeledContent("地點", value: location)
+                        }
+                        if let note = appointment.note {
+                            LabeledContent("註記", value: note)
+                        }
+                        if let reminderAt = appointment.reminderAt {
+                            LabeledContent(
+                                "提醒",
+                                value: reminderAt.formatted(date: .abbreviated, time: .shortened)
+                            )
+                        }
+                        LabeledContent(
+                            "狀態",
+                            value: appointment.status == .scheduled ? "已安排" : "已取消"
+                        )
+                    }
+
+                    if appointment.status == .cancelled {
+                        Section {
+                            Text("這筆約定已取消；原內容會保留在你們的過往約定中。")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if appointment.deliveryState == .synced {
+                        Section {
+                            Button("編輯共同約定") { isEditing = true }
+                                .accessibilityIdentifier("edit-shared-appointment")
+                            Button("取消共同約定", role: .destructive) {
+                                isConfirmingCancellation = true
+                            }
+                            .accessibilityIdentifier("cancel-shared-appointment")
+                        }
+                    } else {
+                        Section {
+                            Text("等待同步完成後即可編輯或取消。")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .navigationTitle("約定詳情")
+                .navigationBarTitleDisplayMode(.inline)
+                .sheet(isPresented: $isEditing) {
+                    SharedAppointmentComposerView(
+                        model: model,
+                        appointment: appointment
+                    )
+                }
+                .alert("要取消這筆共同約定嗎？", isPresented: $isConfirmingCancellation) {
+                    Button("取消約定", role: .destructive) {
+                        Task { _ = await model.cancel(id: appointmentID) }
+                    }
+                    Button("保留", role: .cancel) {}
+                } message: {
+                    Text("取消後不會刪除內容，雙方仍可在過往約定中查看。")
+                }
+            } else {
+                ContentUnavailableView(
+                    "找不到共同約定",
+                    systemImage: "calendar.badge.exclamationmark"
+                )
+            }
+        }
+        .accessibilityIdentifier("shared-appointment-detail")
     }
 }
 
@@ -95,11 +273,12 @@ struct SharedAppointmentComposerView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var model: SharedAppointmentModel
     @State private var title: String
-    @State private var startsAt = Date().addingTimeInterval(3_600)
-    @State private var location = ""
-    @State private var note = ""
-    @State private var reminderEnabled = false
-    @State private var reminderAt = Date().addingTimeInterval(1_800)
+    @State private var startsAt: Date
+    @State private var location: String
+    @State private var note: String
+    @State private var reminderEnabled: Bool
+    @State private var reminderAt: Date
+    private let appointmentID: UUID?
     private let sourceMessageID: UUID?
 
     init(
@@ -109,7 +288,28 @@ struct SharedAppointmentComposerView: View {
     ) {
         self.model = model
         _title = State(initialValue: initialTitle)
+        let initialStartsAt = Date().addingTimeInterval(3_600)
+        _startsAt = State(initialValue: initialStartsAt)
+        _location = State(initialValue: "")
+        _note = State(initialValue: "")
+        _reminderEnabled = State(initialValue: false)
+        _reminderAt = State(initialValue: initialStartsAt.addingTimeInterval(-1_800))
+        appointmentID = nil
         self.sourceMessageID = sourceMessageID
+    }
+
+    init(model: SharedAppointmentModel, appointment: SharedAppointment) {
+        self.model = model
+        _title = State(initialValue: appointment.title)
+        _startsAt = State(initialValue: appointment.startsAt)
+        _location = State(initialValue: appointment.location ?? "")
+        _note = State(initialValue: appointment.note ?? "")
+        _reminderEnabled = State(initialValue: appointment.reminderAt != nil)
+        _reminderAt = State(initialValue:
+            appointment.reminderAt ?? appointment.startsAt.addingTimeInterval(-1_800)
+        )
+        appointmentID = appointment.id
+        sourceMessageID = appointment.sourceMessageID
     }
 
     private var draft: SharedAppointmentDraft {
@@ -154,23 +354,33 @@ struct SharedAppointmentComposerView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("建立共同約定")
+            .navigationTitle(appointmentID == nil ? "建立共同約定" : "編輯共同約定")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("建立") {
+                    Button(appointmentID == nil ? "建立" : "儲存") {
                         Task {
-                            if await model.create(draft) { dismiss() }
+                            let succeeded: Bool
+                            if let appointmentID {
+                                succeeded = await model.update(id: appointmentID, draft: draft)
+                            } else {
+                                succeeded = await model.create(draft)
+                            }
+                            if succeeded { dismiss() }
                         }
                     }
                     .disabled(
                         model.isSaving
                             || SharedAppointmentPolicy.normalizedDraft(draft) == nil
                     )
-                    .accessibilityIdentifier("confirm-shared-appointment")
+                    .accessibilityIdentifier(
+                        appointmentID == nil
+                            ? "confirm-shared-appointment"
+                            : "save-shared-appointment"
+                    )
                 }
             }
         }

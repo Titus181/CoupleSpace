@@ -61,7 +61,8 @@ last_updated: 2026-08-14
 - 第一個共同約定垂直切片已建立 relationship-scoped `shared_appointments` 唯一資料來源，包含穩定 client UUID、標題、開始時間、選填地點／短註記、一次提醒、來源訊息、scheduled／cancelled 狀態與 Realtime 變更提示；RLS 只允許目前伴侶讀取，建立、編輯與取消只能經過 server 驗證 RPC。
 - 同一 client UUID 重試不重複；同一來源訊息即使由兩支裝置使用不同 client UUID 建立，也只保留並回傳同一筆約定。取消保留原資料與來源脈絡，且不可由一般編輯重新變回 scheduled。
 - 「今天」已接入最小建立表單與下一筆約定卡片，維持 Moment 建立入口在前、共同約定為次要協調區塊；本段本機證據不得取代兩支真機、弱網與通知驗證。
-- 建立流程現已在遠端 RPC 前寫入 user＋relationship scoped 的持久 Appointment Outbox；失敗項目以待同步／可重試狀態保留，前景及網路恢復沿用 stable client UUID 重送，包含遠端成功但本機 acknowledgement 遺失時不重複建立。聊天室輸入列 `＋` 與長按已同步文字訊息會開啟同一表單；長按只預填原文並保留來源 ID，不分析日期或自動建立。主對話約定卡片、共同日程／詳情、專屬討論、提醒通知、編輯／取消 UI 及活動後收藏仍未完成，因此 G10 繼續維持進行中。
+- 建立流程現已在遠端 RPC 前寫入 user＋relationship scoped 的持久 Appointment Outbox；失敗項目以待同步／可重試狀態保留，前景及網路恢復沿用 stable client UUID 重送，包含遠端成功但本機 acknowledgement 遺失時不重複建立。聊天室輸入列 `＋` 與長按已同步文字訊息會開啟同一表單；長按只預填原文並保留來源 ID，不分析日期或自動建立。
+- 「我們」現可進入共同日程，分開顯示近期與過往／已取消約定；已同步且仍 scheduled 的項目可查看詳情、編輯或取消，取消後保留原內容且不可由編輯復活。編輯／取消目前採 server-confirmed 操作，失敗不改寫本機狀態；離線 operation Outbox 尚未納入。主對話約定卡片、基本月曆、專屬討論、提醒通知及活動後收藏仍未完成，因此 G10 繼續維持進行中。
 
 ### G4 完成證據（2026-08-11）
 

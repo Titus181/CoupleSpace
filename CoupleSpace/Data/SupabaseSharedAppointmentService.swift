@@ -15,6 +15,11 @@ protocol SharedAppointmentRemoteServing: AnyObject {
         _ entry: SharedAppointmentOutboxEntry
     ) async throws -> SharedAppointment
     func acknowledgePendingAppointment(clientID: UUID) async throws
+    func updateAppointment(
+        id: UUID,
+        draft: SharedAppointmentDraft
+    ) async throws -> SharedAppointment
+    func cancelAppointment(id: UUID) async throws -> SharedAppointment
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws
     func stopObservingChanges() async
 }
@@ -84,6 +89,36 @@ private struct CreateSharedAppointmentParameters: Encodable {
         case targetNote = "target_note"
         case targetReminderAt = "target_reminder_at"
         case targetSourceSharedItemClientID = "target_source_shared_item_client_id"
+    }
+}
+
+private struct UpdateSharedAppointmentParameters: Encodable {
+    let targetRelationshipID: UUID
+    let targetAppointmentClientID: UUID
+    let targetTitle: String
+    let targetStartsAt: Date
+    let targetLocation: String?
+    let targetNote: String?
+    let targetReminderAt: Date?
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+        case targetAppointmentClientID = "target_appointment_client_id"
+        case targetTitle = "target_title"
+        case targetStartsAt = "target_starts_at"
+        case targetLocation = "target_location"
+        case targetNote = "target_note"
+        case targetReminderAt = "target_reminder_at"
+    }
+}
+
+private struct CancelSharedAppointmentParameters: Encodable {
+    let targetRelationshipID: UUID
+    let targetAppointmentClientID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+        case targetAppointmentClientID = "target_appointment_client_id"
     }
 }
 
@@ -208,6 +243,53 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
         )
     }
 
+    func updateAppointment(
+        id: UUID,
+        draft: SharedAppointmentDraft
+    ) async throws -> SharedAppointment {
+        let session = try await client.auth.session
+        guard session.user.id == currentUserID else {
+            throw SharedAppointmentServiceError.accountChanged
+        }
+        guard let normalized = SharedAppointmentPolicy.normalizedDraft(draft) else {
+            throw SharedAppointmentServiceError.invalidDraft
+        }
+        let rows: [SharedAppointmentRow] = try await client.rpc(
+            "update_shared_appointment",
+            params: UpdateSharedAppointmentParameters(
+                targetRelationshipID: relationshipID,
+                targetAppointmentClientID: id,
+                targetTitle: normalized.title,
+                targetStartsAt: normalized.startsAt,
+                targetLocation: normalized.location,
+                targetNote: normalized.note,
+                targetReminderAt: normalized.reminderAt
+            )
+        ).execute().value
+        guard let row = rows.first else {
+            throw SharedAppointmentServiceError.missingSavedAppointment
+        }
+        return try row.appointment()
+    }
+
+    func cancelAppointment(id: UUID) async throws -> SharedAppointment {
+        let session = try await client.auth.session
+        guard session.user.id == currentUserID else {
+            throw SharedAppointmentServiceError.accountChanged
+        }
+        let rows: [SharedAppointmentRow] = try await client.rpc(
+            "cancel_shared_appointment",
+            params: CancelSharedAppointmentParameters(
+                targetRelationshipID: relationshipID,
+                targetAppointmentClientID: id
+            )
+        ).execute().value
+        guard let row = rows.first else {
+            throw SharedAppointmentServiceError.missingSavedAppointment
+        }
+        return try row.appointment()
+    }
+
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
         await stopObservingChanges()
         let channel = client.channel("shared-appointments-\(UUID().uuidString.lowercased())")
@@ -323,6 +405,58 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
             throw SharedAppointmentOutboxError.unexpectedAcknowledgement
         }
         pendingEntries.removeFirst()
+    }
+
+    func updateAppointment(
+        id: UUID,
+        draft: SharedAppointmentDraft
+    ) async throws -> SharedAppointment {
+        guard let index = appointments.firstIndex(where: { $0.id == id }),
+              appointments[index].status == .scheduled,
+              let normalized = SharedAppointmentPolicy.normalizedDraft(draft) else {
+            throw SharedAppointmentServiceError.invalidDraft
+        }
+        let current = appointments[index]
+        let updated = SharedAppointment(
+            id: current.id,
+            creatorUserID: current.creatorUserID,
+            title: normalized.title,
+            startsAt: normalized.startsAt,
+            location: normalized.location,
+            note: normalized.note,
+            reminderAt: normalized.reminderAt,
+            status: .scheduled,
+            sourceMessageID: current.sourceMessageID,
+            createdAt: current.createdAt,
+            updatedAt: .now
+        )
+        appointments[index] = updated
+        await onChange?()
+        return updated
+    }
+
+    func cancelAppointment(id: UUID) async throws -> SharedAppointment {
+        guard let index = appointments.firstIndex(where: { $0.id == id }) else {
+            throw SharedAppointmentServiceError.missingSavedAppointment
+        }
+        let current = appointments[index]
+        guard current.status == .scheduled else { return current }
+        let cancelled = SharedAppointment(
+            id: current.id,
+            creatorUserID: current.creatorUserID,
+            title: current.title,
+            startsAt: current.startsAt,
+            location: current.location,
+            note: current.note,
+            reminderAt: current.reminderAt,
+            status: .cancelled,
+            sourceMessageID: current.sourceMessageID,
+            createdAt: current.createdAt,
+            updatedAt: .now
+        )
+        appointments[index] = cancelled
+        await onChange?()
+        return cancelled
     }
 
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {

@@ -197,6 +197,61 @@ struct AppSkeletonTests {
         #expect(model.statusMessage == "共同約定已保存在這支裝置；請確認連線後重試。")
     }
 
+    @MainActor
+    @Test func sharedAppointmentModelEditsThenCancelsWithoutLosingSource() async throws {
+        let now = Date(timeIntervalSince1970: 4_000)
+        let appointmentID = UUID()
+        let sourceMessageID = UUID()
+        let service = SharedAppointmentRemoteServiceFake()
+        service.appointments = [SharedAppointment(
+            id: appointmentID,
+            creatorUserID: UUID(),
+            title: "原本的約定",
+            startsAt: now.addingTimeInterval(3_600),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            status: .scheduled,
+            sourceMessageID: sourceMessageID,
+            createdAt: now,
+            updatedAt: now
+        )]
+        let model = SharedAppointmentModel(service: service, now: { now })
+        await model.refresh()
+
+        #expect(await model.update(
+            id: appointmentID,
+            draft: SharedAppointmentDraft(
+                title: "更新後的約定",
+                startsAt: now.addingTimeInterval(7_200),
+                location: "中山站",
+                note: "記得訂位",
+                reminderAt: now.addingTimeInterval(5_400),
+                sourceMessageID: UUID()
+            )
+        ))
+        #expect(model.appointment(id: appointmentID)?.title == "更新後的約定")
+        #expect(model.appointment(id: appointmentID)?.sourceMessageID == sourceMessageID)
+
+        #expect(await model.cancel(id: appointmentID))
+        #expect(model.appointment(id: appointmentID)?.status == .cancelled)
+        #expect(model.nextAppointment == nil)
+        #expect(model.pastOrCancelledAppointments.map(\.id) == [appointmentID])
+
+        #expect(await model.update(
+            id: appointmentID,
+            draft: SharedAppointmentDraft(
+                title: "不應復活",
+                startsAt: now.addingTimeInterval(10_800),
+                location: nil,
+                note: nil,
+                reminderAt: nil,
+                sourceMessageID: nil
+            )
+        ) == false)
+        #expect(model.appointment(id: appointmentID)?.status == .cancelled)
+    }
+
     @Test func conversationOutboxPersistsFIFOAndIsolatesAccountsAndRelationships() throws {
         let suiteName = "ConversationOutboxTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -1612,6 +1667,55 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
             throw SharedAppointmentOutboxError.unexpectedAcknowledgement
         }
         pendingEntries.removeFirst()
+    }
+
+    func updateAppointment(
+        id: UUID,
+        draft: SharedAppointmentDraft
+    ) async throws -> SharedAppointment {
+        guard let index = appointments.firstIndex(where: { $0.id == id }),
+              appointments[index].status == .scheduled,
+              let normalized = SharedAppointmentPolicy.normalizedDraft(draft) else {
+            throw SharedAppointmentOutboxError.unexpectedAcknowledgement
+        }
+        let current = appointments[index]
+        let updated = SharedAppointment(
+            id: current.id,
+            creatorUserID: current.creatorUserID,
+            title: normalized.title,
+            startsAt: normalized.startsAt,
+            location: normalized.location,
+            note: normalized.note,
+            reminderAt: normalized.reminderAt,
+            status: .scheduled,
+            sourceMessageID: current.sourceMessageID,
+            createdAt: current.createdAt,
+            updatedAt: .now
+        )
+        appointments[index] = updated
+        return updated
+    }
+
+    func cancelAppointment(id: UUID) async throws -> SharedAppointment {
+        guard let index = appointments.firstIndex(where: { $0.id == id }) else {
+            throw SharedAppointmentOutboxError.unexpectedAcknowledgement
+        }
+        let current = appointments[index]
+        let cancelled = SharedAppointment(
+            id: current.id,
+            creatorUserID: current.creatorUserID,
+            title: current.title,
+            startsAt: current.startsAt,
+            location: current.location,
+            note: current.note,
+            reminderAt: current.reminderAt,
+            status: .cancelled,
+            sourceMessageID: current.sourceMessageID,
+            createdAt: current.createdAt,
+            updatedAt: .now
+        )
+        appointments[index] = cancelled
+        return cancelled
     }
 
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {

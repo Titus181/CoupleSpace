@@ -142,9 +142,44 @@ struct RootTabView: View {
             _togetherNowModel = StateObject(
                 wrappedValue: TogetherNowModel(service: InMemoryTogetherNowService())
             )
+            let seededAppointments: [SharedAppointment]
+            if arguments.contains("--ui-testing-w11-appointments") {
+                seededAppointments = [
+                    SharedAppointment(
+                        id: UUID(uuidString: "A4000000-0000-0000-0000-000000000001")!,
+                        creatorUserID: uiTestUserID,
+                        title: "週末一起吃晚餐",
+                        startsAt: .now.addingTimeInterval(86_400),
+                        location: "中山站",
+                        note: "記得先訂位",
+                        reminderAt: .now.addingTimeInterval(82_800),
+                        status: .scheduled,
+                        sourceMessageID: nil,
+                        createdAt: .now,
+                        updatedAt: .now
+                    ),
+                    SharedAppointment(
+                        id: UUID(uuidString: "A4000000-0000-0000-0000-000000000002")!,
+                        creatorUserID: uiTestPartnerID,
+                        title: "上週一起散步",
+                        startsAt: .now.addingTimeInterval(-86_400),
+                        location: nil,
+                        note: nil,
+                        reminderAt: nil,
+                        status: .scheduled,
+                        sourceMessageID: nil,
+                        createdAt: .now.addingTimeInterval(-172_800),
+                        updatedAt: .now.addingTimeInterval(-86_400)
+                    ),
+                ]
+            } else {
+                seededAppointments = []
+            }
             _sharedAppointmentModel = StateObject(
                 wrappedValue: SharedAppointmentModel(
-                    service: InMemorySharedAppointmentService()
+                    service: InMemorySharedAppointmentService(
+                        appointments: seededAppointments
+                    )
                 )
             )
             let seededMessages: [ChatMessage]
@@ -235,6 +270,7 @@ struct RootTabView: View {
                 UsView(
                     momentModel: momentModel,
                     togetherNowModel: togetherNowModel,
+                    sharedAppointmentModel: sharedAppointmentModel,
                     accountUserToken: accountUserToken,
                     accountStatusMessage: accountStatusMessage,
                     relationshipToken: relationshipToken,
@@ -333,8 +369,10 @@ struct RootTabView: View {
 
 private struct UsView: View {
     @State private var isShowingAccountSettings = false
+    @State private var isShowingSharedSchedule = false
     @ObservedObject var momentModel: MomentModel
     @ObservedObject var togetherNowModel: TogetherNowModel
+    @ObservedObject var sharedAppointmentModel: SharedAppointmentModel
     let accountUserToken: String?
     let accountStatusMessage: String?
     let relationshipToken: String?
@@ -361,6 +399,14 @@ private struct UsView: View {
             }
             .navigationTitle("我們")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        isShowingSharedSchedule = true
+                    } label: {
+                        Label("共同日程", systemImage: "calendar")
+                    }
+                    .accessibilityIdentifier("open-shared-appointment-schedule")
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         isShowingAccountSettings = true
@@ -380,13 +426,18 @@ private struct UsView: View {
                     onSignOut: onSignOut
                 )
             }
+            .sheet(isPresented: $isShowingSharedSchedule) {
+                SharedAppointmentScheduleView(model: sharedAppointmentModel)
+            }
         }
         .accessibilityIdentifier("us-screen")
         .onAppear {
             isShowingAccountSettings = false
+            isShowingSharedSchedule = false
         }
         .onDisappear {
             isShowingAccountSettings = false
+            isShowingSharedSchedule = false
         }
     }
 }
