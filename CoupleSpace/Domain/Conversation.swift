@@ -1,5 +1,15 @@
 import Foundation
 
+enum ConversationScope: Equatable, Sendable {
+    case main
+    case appointment(UUID)
+
+    var appointmentID: UUID? {
+        guard case let .appointment(id) = self else { return nil }
+        return id
+    }
+}
+
 enum ChatMessageContent: Equatable, Sendable {
     case text(String)
     case photo

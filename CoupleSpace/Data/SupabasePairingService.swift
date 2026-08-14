@@ -218,6 +218,12 @@ final class SupabasePairingService: PairingRemoteServing {
                 relationshipID: relationshipID
             )
         }
+        // Appointment discussions only enqueue text in W11. Once the relationship
+        // closes, those scoped queues cannot be delivered and need no photo cleanup.
+        outboxStore.clearAppointmentDiscussions(
+            userID: userID,
+            relationshipID: relationshipID
+        )
     }
 
     func createInvitation() async throws -> PairingInvitation {

@@ -376,6 +376,45 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testAppointmentDiscussionSendsTextAndReusesEmojiActions() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w11-discussion"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        let scheduleButton = app.buttons["open-shared-appointment-schedule"]
+        XCTAssertTrue(scheduleButton.waitForExistence(timeout: 3))
+        scheduleButton.tap()
+        XCTAssertTrue(app.staticTexts["週末去看展"].waitForExistence(timeout: 2))
+        app.staticTexts["週末去看展"].tap()
+
+        let discussionButton = app.buttons["open-appointment-discussion"]
+        XCTAssertTrue(discussionButton.waitForExistence(timeout: 2))
+        discussionButton.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["appointment-discussion-screen"]
+                .waitForExistence(timeout: 2)
+        )
+        let partnerMessage = app.staticTexts["要不要先約下午兩點？"]
+        XCTAssertTrue(partnerMessage.waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["send-conversation-photo"].exists)
+        XCTAssertFalse(app.buttons["create-appointment-from-composer"].exists)
+
+        let input = app.descendants(matching: .any)["conversation-input"]
+        XCTAssertTrue(input.waitForExistence(timeout: 1))
+        input.tap()
+        input.typeText("我們兩點見")
+        app.buttons["send-conversation-message"].tap()
+        XCTAssertTrue(app.staticTexts["我們兩點見"].waitForExistence(timeout: 2))
+
+        partnerMessage.press(forDuration: 1)
+        let heart = app.buttons["愛心"]
+        XCTAssertTrue(heart.waitForExistence(timeout: 2))
+        heart.tap()
+        XCTAssertTrue(app.staticTexts["愛心"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testSetsAndClearsCurrentStatusWithoutCreatingHistoryByDefault() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]

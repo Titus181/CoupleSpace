@@ -61,7 +61,17 @@ struct RootTabView: View {
                         client: technicalValidationClient,
                         currentUserID: accountUserID,
                         relationshipID: relationshipID
-                    )
+                    ),
+                    discussionModelFactory: { appointmentID in
+                        ConversationModel(
+                            service: SupabaseConversationService(
+                                client: technicalValidationClient,
+                                currentUserID: accountUserID,
+                                relationshipID: relationshipID,
+                                scope: .appointment(appointmentID)
+                            )
+                        )
+                    }
                 )
             )
             _conversationModel = StateObject(
@@ -192,14 +202,52 @@ struct RootTabView: View {
                     createdAt: .now,
                     updatedAt: .now
                 )]
+            } else if arguments.contains("--ui-testing-w11-discussion") {
+                seededAppointments = [SharedAppointment(
+                    id: UUID(uuidString: "A4000000-0000-0000-0000-000000000004")!,
+                    creatorUserID: uiTestUserID,
+                    title: "週末去看展",
+                    startsAt: .now.addingTimeInterval(86_400),
+                    location: "美術館",
+                    note: nil,
+                    reminderAt: nil,
+                    status: .scheduled,
+                    sourceMessageID: nil,
+                    createdAt: .now,
+                    updatedAt: .now
+                )]
             } else {
                 seededAppointments = []
             }
+            let discussionAppointmentID = UUID(
+                uuidString: "A4000000-0000-0000-0000-000000000004"
+            )!
             _sharedAppointmentModel = StateObject(
                 wrappedValue: SharedAppointmentModel(
                     service: InMemorySharedAppointmentService(
                         appointments: seededAppointments
-                    )
+                    ),
+                    discussionModelFactory: { appointmentID in
+                        let messages: [ChatMessage]
+                        if arguments.contains("--ui-testing-w11-discussion"),
+                           appointmentID == discussionAppointmentID {
+                            messages = [ChatMessage(
+                                id: UUID(uuidString: "D4000000-0000-0000-0000-000000000020")!,
+                                senderUserID: uiTestPartnerID,
+                                body: "要不要先約下午兩點？",
+                                createdAt: .now
+                            )]
+                        } else {
+                            messages = []
+                        }
+                        return ConversationModel(
+                            service: InMemoryConversationService(
+                                currentUserID: uiTestUserID,
+                                messages: messages,
+                                unreadCount: messages.count
+                            )
+                        )
+                    }
                 )
             )
             let seededMessages: [ChatMessage]

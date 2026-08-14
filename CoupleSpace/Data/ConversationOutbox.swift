@@ -205,16 +205,19 @@ struct ConversationOutboxStore {
     private let directoryURL: URL
     private let fileManager: FileManager
     private let availableCapacity: (URL) -> Int64?
+    private let appointmentScopeID: UUID?
     private let keyPrefix = "couplespace.conversation-outbox.v1."
 
     init(
         defaults: UserDefaults = .standard,
         directoryURL: URL? = nil,
         fileManager: FileManager = .default,
-        availableCapacity: ((URL) -> Int64?)? = nil
+        availableCapacity: ((URL) -> Int64?)? = nil,
+        appointmentScopeID: UUID? = nil
     ) {
         self.defaults = defaults
         self.fileManager = fileManager
+        self.appointmentScopeID = appointmentScopeID
         self.directoryURL = directoryURL
             ?? fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask)
                 .first
@@ -363,7 +366,27 @@ struct ConversationOutboxStore {
         )
     }
 
+    func clearAppointmentDiscussions(userID: UUID, relationshipID: UUID) {
+        let discussionPrefix = baseKey(userID: userID, relationshipID: relationshipID)
+            + ".appointment."
+        defaults.dictionaryRepresentation().keys
+            .filter { $0.hasPrefix(discussionPrefix) }
+            .forEach(defaults.removeObject(forKey:))
+        let relationshipDirectory = directoryURL
+            .appendingPathComponent(userID.uuidString.lowercased(), isDirectory: true)
+            .appendingPathComponent(relationshipID.uuidString.lowercased(), isDirectory: true)
+        try? fileManager.removeItem(
+            at: relationshipDirectory.appendingPathComponent("appointments", isDirectory: true)
+        )
+    }
+
     private func key(userID: UUID, relationshipID: UUID) -> String {
+        let base = baseKey(userID: userID, relationshipID: relationshipID)
+        guard let appointmentScopeID else { return base }
+        return base + ".appointment." + appointmentScopeID.uuidString.lowercased()
+    }
+
+    private func baseKey(userID: UUID, relationshipID: UUID) -> String {
         keyPrefix + userID.uuidString.lowercased() + "." + relationshipID.uuidString.lowercased()
     }
 
@@ -372,9 +395,13 @@ struct ConversationOutboxStore {
     }
 
     private func scopedDirectoryURL(userID: UUID, relationshipID: UUID) -> URL {
-        directoryURL
+        let relationshipDirectory = directoryURL
             .appendingPathComponent(userID.uuidString.lowercased(), isDirectory: true)
             .appendingPathComponent(relationshipID.uuidString.lowercased(), isDirectory: true)
+        guard let appointmentScopeID else { return relationshipDirectory }
+        return relationshipDirectory
+            .appendingPathComponent("appointments", isDirectory: true)
+            .appendingPathComponent(appointmentScopeID.uuidString.lowercased(), isDirectory: true)
     }
 
     private func validatedFileURL(
@@ -508,9 +535,13 @@ private struct ConversationCachedSnapshot: Codable, Equatable {
 
 struct ConversationSnapshotStore {
     private let defaults: UserDefaults
+    private let appointmentScopeID: UUID?
     private let keyPrefix = "couplespace.conversation-snapshot.v1."
 
-    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    init(defaults: UserDefaults = .standard, appointmentScopeID: UUID? = nil) {
+        self.defaults = defaults
+        self.appointmentScopeID = appointmentScopeID
+    }
 
     func load(userID: UUID, relationshipID: UUID) throws -> ConversationSnapshot? {
         guard let data = defaults.data(forKey: key(userID: userID, relationshipID: relationshipID)) else {
@@ -546,7 +577,10 @@ struct ConversationSnapshotStore {
     }
 
     private func key(userID: UUID, relationshipID: UUID) -> String {
-        keyPrefix + userID.uuidString.lowercased() + "." + relationshipID.uuidString.lowercased()
+        let base = keyPrefix + userID.uuidString.lowercased() + "."
+            + relationshipID.uuidString.lowercased()
+        guard let appointmentScopeID else { return base }
+        return base + ".appointment." + appointmentScopeID.uuidString.lowercased()
     }
 }
 

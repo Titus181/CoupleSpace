@@ -116,6 +116,20 @@ private struct SendChatMessageParameters: Encodable {
     }
 }
 
+private struct SendAppointmentMessageParameters: Encodable {
+    let targetRelationshipID: UUID
+    let targetAppointmentClientID: UUID
+    let targetClientID: UUID
+    let targetBody: String
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+        case targetAppointmentClientID = "target_appointment_client_id"
+        case targetClientID = "target_client_id"
+        case targetBody = "target_body"
+    }
+}
+
 private struct FinalizeChatPhotoParameters: Encodable {
     let targetRelationshipID: UUID
     let targetClientID: UUID
@@ -147,12 +161,34 @@ private struct ConversationRelationshipParameters: Encodable {
     }
 }
 
+private struct AppointmentConversationParameters: Encodable {
+    let targetRelationshipID: UUID
+    let targetAppointmentClientID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+        case targetAppointmentClientID = "target_appointment_client_id"
+    }
+}
+
 private struct MarkConversationReadParameters: Encodable {
     let targetRelationshipID: UUID
     let targetMessageClientID: UUID
 
     enum CodingKeys: String, CodingKey {
         case targetRelationshipID = "target_relationship_id"
+        case targetMessageClientID = "target_message_client_id"
+    }
+}
+
+private struct MarkAppointmentConversationReadParameters: Encodable {
+    let targetRelationshipID: UUID
+    let targetAppointmentClientID: UUID
+    let targetMessageClientID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+        case targetAppointmentClientID = "target_appointment_client_id"
         case targetMessageClientID = "target_message_client_id"
     }
 }
@@ -208,6 +244,7 @@ final class SupabaseConversationService: ConversationRemoteServing {
     private let client: SupabaseClient
     private let currentUserID: UUID
     private let relationshipID: UUID
+    private let scope: ConversationScope
     private let outboxStore: ConversationOutboxStore
     private let snapshotStore: ConversationSnapshotStore
     private let photoCacheStore: ConversationPhotoCacheStore
@@ -218,15 +255,21 @@ final class SupabaseConversationService: ConversationRemoteServing {
         client: SupabaseClient,
         currentUserID: UUID,
         relationshipID: UUID,
-        outboxStore: ConversationOutboxStore = ConversationOutboxStore(),
-        snapshotStore: ConversationSnapshotStore = ConversationSnapshotStore(),
+        scope: ConversationScope = .main,
+        outboxStore: ConversationOutboxStore? = nil,
+        snapshotStore: ConversationSnapshotStore? = nil,
         photoCacheStore: ConversationPhotoCacheStore = ConversationPhotoCacheStore()
     ) {
         self.client = client
         self.currentUserID = currentUserID
         self.relationshipID = relationshipID
-        self.outboxStore = outboxStore
-        self.snapshotStore = snapshotStore
+        self.scope = scope
+        self.outboxStore = outboxStore ?? ConversationOutboxStore(
+            appointmentScopeID: scope.appointmentID
+        )
+        self.snapshotStore = snapshotStore ?? ConversationSnapshotStore(
+            appointmentScopeID: scope.appointmentID
+        )
         self.photoCacheStore = photoCacheStore
     }
 
@@ -262,6 +305,7 @@ final class SupabaseConversationService: ConversationRemoteServing {
                 localCreatedAt: localCreatedAt
             )
         case let .photo(data):
+            guard scope == .main else { throw ConversationServiceError.unsupportedScopedPhoto }
             guard !data.isEmpty else { throw ConversationServiceError.invalidPhoto }
             try outboxStore.enqueuePhoto(
                 data,
@@ -301,16 +345,31 @@ final class SupabaseConversationService: ConversationRemoteServing {
             guard let body = ChatTextPolicy.normalizedBody(value) else {
                 throw ConversationServiceError.invalidMessage
             }
-            let acceptedAt: Date = try await client.rpc(
-                "write_shared_message",
-                params: SendChatMessageParameters(
-                    targetRelationshipID: relationshipID,
-                    targetClientID: message.id,
-                    targetBody: body
-                )
-            ).execute().value
+            let acceptedAt: Date
+            switch scope {
+            case .main:
+                acceptedAt = try await client.rpc(
+                    "write_shared_message",
+                    params: SendChatMessageParameters(
+                        targetRelationshipID: relationshipID,
+                        targetClientID: message.id,
+                        targetBody: body
+                    )
+                ).execute().value
+            case let .appointment(appointmentID):
+                acceptedAt = try await client.rpc(
+                    "write_appointment_discussion_message",
+                    params: SendAppointmentMessageParameters(
+                        targetRelationshipID: relationshipID,
+                        targetAppointmentClientID: appointmentID,
+                        targetClientID: message.id,
+                        targetBody: body
+                    )
+                ).execute().value
+            }
             return .accepted(acceptedAt)
         case .photo:
+            guard scope == .main else { throw ConversationServiceError.unsupportedScopedPhoto }
             return try await deliverPendingPhoto(messageID: message.id)
         }
     }
@@ -320,10 +379,17 @@ final class SupabaseConversationService: ConversationRemoteServing {
         guard session.user.id == currentUserID else {
             throw ConversationServiceError.unexpectedAuthenticatedUser
         }
-        let rows: [ChatMessageRow] = try await client
+        var messageQuery = client
             .from("shared_items")
             .select("client_id,creator_user_id,item_kind,text_content,media_byte_size,created_at")
             .eq("relationship_id", value: relationshipID)
+        switch scope {
+        case .main:
+            messageQuery = messageQuery.is("appointment_client_id", value: nil)
+        case let .appointment(appointmentID):
+            messageQuery = messageQuery.eq("appointment_client_id", value: appointmentID)
+        }
+        let rows: [ChatMessageRow] = try await messageQuery
             .order("created_at", ascending: true)
             .order("client_id", ascending: true)
             .execute()
@@ -338,10 +404,22 @@ final class SupabaseConversationService: ConversationRemoteServing {
             uniqueKeysWithValues: reactionRows.map { ($0.messageClientID, try $0.reaction()) }
         )
         let messages = try rows.compactMap { try $0.message(reaction: reactions[$0.clientID]) }
-        let unreadCount: Int = try await client.rpc(
-            "conversation_unread_count",
-            params: ConversationRelationshipParameters(targetRelationshipID: relationshipID)
-        ).execute().value
+        let unreadCount: Int
+        switch scope {
+        case .main:
+            unreadCount = try await client.rpc(
+                "conversation_unread_count",
+                params: ConversationRelationshipParameters(targetRelationshipID: relationshipID)
+            ).execute().value
+        case let .appointment(appointmentID):
+            unreadCount = try await client.rpc(
+                "appointment_discussion_unread_count",
+                params: AppointmentConversationParameters(
+                    targetRelationshipID: relationshipID,
+                    targetAppointmentClientID: appointmentID
+                )
+            ).execute().value
+        }
         let snapshot = ConversationSnapshot(
             currentUserID: currentUserID,
             messages: messages,
@@ -428,13 +506,25 @@ final class SupabaseConversationService: ConversationRemoteServing {
 
     func markRead(through messageID: UUID) async throws {
         _ = try await client.auth.session
-        try await client.rpc(
-            "mark_conversation_read",
-            params: MarkConversationReadParameters(
-                targetRelationshipID: relationshipID,
-                targetMessageClientID: messageID
-            )
-        ).execute()
+        switch scope {
+        case .main:
+            try await client.rpc(
+                "mark_conversation_read",
+                params: MarkConversationReadParameters(
+                    targetRelationshipID: relationshipID,
+                    targetMessageClientID: messageID
+                )
+            ).execute()
+        case let .appointment(appointmentID):
+            try await client.rpc(
+                "mark_appointment_discussion_read",
+                params: MarkAppointmentConversationReadParameters(
+                    targetRelationshipID: relationshipID,
+                    targetAppointmentClientID: appointmentID,
+                    targetMessageClientID: messageID
+                )
+            ).execute()
+        }
     }
 
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
@@ -548,6 +638,7 @@ final class SupabaseConversationService: ConversationRemoteServing {
 private enum ConversationServiceError: LocalizedError {
     case invalidMessage
     case invalidPhoto
+    case unsupportedScopedPhoto
     case invalidServerMessage
     case invalidServerReaction
     case unexpectedAuthenticatedUser
@@ -562,6 +653,7 @@ private enum ConversationServiceError: LocalizedError {
         switch self {
         case .invalidMessage: "訊息內容不完整。"
         case .invalidPhoto: "照片內容無效。"
+        case .unsupportedScopedPhoto: "專屬討論照片尚未開放。"
         case .invalidServerMessage: "伺服器回傳的訊息無效。"
         case .invalidServerReaction: "伺服器回傳的 Emoji 回應無效。"
         case .unexpectedAuthenticatedUser: "登入身分已變更。"

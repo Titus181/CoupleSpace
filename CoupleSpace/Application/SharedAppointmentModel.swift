@@ -10,16 +10,20 @@ final class SharedAppointmentModel: ObservableObject {
 
     private let service: SharedAppointmentRemoteServing
     private let now: () -> Date
+    private let discussionModelFactory: ((UUID) -> ConversationModel)?
     private var hasStarted = false
     private var isDraining = false
     private var deliveryStatusMessage: String?
+    private var discussionModels: [UUID: ConversationModel] = [:]
 
     init(
         service: SharedAppointmentRemoteServing,
-        now: @escaping () -> Date = Date.init
+        now: @escaping () -> Date = Date.init,
+        discussionModelFactory: ((UUID) -> ConversationModel)? = nil
     ) {
         self.service = service
         self.now = now
+        self.discussionModelFactory = discussionModelFactory
     }
 
     var nextAppointment: SharedAppointment? {
@@ -53,6 +57,14 @@ final class SharedAppointmentModel: ObservableObject {
             .sorted(by: Self.appointmentOrder)
     }
 
+    func discussionModel(for appointmentID: UUID) -> ConversationModel? {
+        guard appointment(id: appointmentID)?.deliveryState == .synced else { return nil }
+        if let existing = discussionModels[appointmentID] { return existing }
+        guard let created = discussionModelFactory?(appointmentID) else { return nil }
+        discussionModels[appointmentID] = created
+        return created
+    }
+
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true
@@ -74,6 +86,9 @@ final class SharedAppointmentModel: ObservableObject {
     func stop() async {
         hasStarted = false
         await service.stopObservingChanges()
+        for discussionModel in discussionModels.values {
+            await discussionModel.stop()
+        }
     }
 
     func refresh() async {

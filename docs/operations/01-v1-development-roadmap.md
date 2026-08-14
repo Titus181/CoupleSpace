@@ -62,7 +62,8 @@ last_updated: 2026-08-14
 - 同一 client UUID 重試不重複；同一來源訊息即使由兩支裝置使用不同 client UUID 建立，也只保留並回傳同一筆約定。取消保留原資料與來源脈絡，且不可由一般編輯重新變回 scheduled。
 - 「今天」已接入最小建立表單與下一筆約定卡片，維持 Moment 建立入口在前、共同約定為次要協調區塊；本段本機證據不得取代兩支真機、弱網與通知驗證。
 - 建立流程現已在遠端 RPC 前寫入 user＋relationship scoped 的持久 Appointment Outbox；失敗項目以待同步／可重試狀態保留，前景及網路恢復沿用 stable client UUID 重送，包含遠端成功但本機 acknowledgement 遺失時不重複建立。聊天室輸入列 `＋` 與長按已同步文字訊息會開啟同一表單；長按只預填原文並保留來源 ID，不分析日期或自動建立。
-- 「我們」現可進入共同日程，分開顯示近期與過往／已取消約定，並可直接建立或開啟系統 graphical 基本月曆；月曆依使用者本地日期顯示當日 scheduled／cancelled 約定，並可進入同一筆詳情。已同步且仍 scheduled 的項目可編輯或取消，取消後保留原內容且不可由編輯復活。主對話以 appointment UUID 將約定卡片與一般訊息共同排序；已同步卡片可開啟同一筆詳情，編輯、取消及 Realtime 重讀會就地更新原卡片，不建立平行資料。編輯／取消目前採 server-confirmed 操作，失敗不改寫本機狀態；離線 operation Outbox 與日期／時間重大變更或取消的永久系統紀錄尚未納入。專屬討論、提醒通知及活動後收藏仍未完成，因此 G10 繼續維持進行中。
+- 「我們」現可進入共同日程，分開顯示近期與過往／已取消約定，並可直接建立或開啟系統 graphical 基本月曆；月曆依使用者本地日期顯示當日 scheduled／cancelled 約定，並可進入同一筆詳情。已同步且仍 scheduled 的項目可編輯或取消，取消後保留原內容且不可由編輯復活。主對話以 appointment UUID 將約定卡片與一般訊息共同排序；已同步卡片可開啟同一筆詳情，編輯、取消及 Realtime 重讀會就地更新原卡片，不建立平行資料。編輯／取消目前採 server-confirmed 操作，失敗不改寫本機狀態；離線 operation Outbox 與日期／時間重大變更或取消的永久系統紀錄尚未納入。
+- 每筆已同步約定現可由詳情進入 appointment UUID scoped 的專屬討論；資料仍寫入既有 `shared_items`、沿用相同訊息／Emoji／Realtime 管線，不建立第二套訊息資料。此切片提供文字、Emoji、server timestamp、獨立未讀游標，以及與主對話／其他約定隔離的持久 Outbox 與 snapshot；stable message UUID 重試不重複或跨 scope 移動。已取消約定仍可閱讀原討論但不顯示輸入列，server 也拒絕新文字。新 migration 已由空本機資料庫套用，23 份 pgTAP 共 359 項與 schema lint 通過；完整 iPhone unit suite、專屬討論入口／送字／Emoji UI 流程與四條受影響主對話 UI 回歸均取得 exit 0。專屬討論照片、通知、主對話的討論更新入口、日期／時間重大變更或取消的永久系統紀錄、活動後收藏與返回原約定，以及解除配對封存中的約定／討論關聯仍未完成，因此 G10 繼續維持進行中。
 
 ### G4 完成證據（2026-08-11）
 

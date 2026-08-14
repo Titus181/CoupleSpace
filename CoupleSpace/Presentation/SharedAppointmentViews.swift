@@ -264,6 +264,57 @@ private struct SharedAppointmentCalendarView: View {
     }
 }
 
+private struct AppointmentDiscussionView: View {
+    @StateObject private var discussionModel: ConversationModel
+    @ObservedObject var sharedAppointmentModel: SharedAppointmentModel
+    let appointmentTitle: String
+    let allowsSending: Bool
+
+    init(
+        discussionModel: ConversationModel,
+        sharedAppointmentModel: SharedAppointmentModel,
+        appointmentTitle: String,
+        allowsSending: Bool
+    ) {
+        _discussionModel = StateObject(wrappedValue: discussionModel)
+        self.sharedAppointmentModel = sharedAppointmentModel
+        self.appointmentTitle = appointmentTitle
+        self.allowsSending = allowsSending
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Text(appointmentTitle)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity)
+                .background(.bar)
+                .accessibilityIdentifier("appointment-discussion-screen")
+            ConversationView(
+                model: discussionModel,
+                sharedAppointmentModel: sharedAppointmentModel,
+                mode: .appointmentDiscussion,
+                embedsNavigationStack: false,
+                allowsSending: allowsSending
+            )
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .task {
+            await discussionModel.start()
+            await discussionModel.setConversationVisible(true)
+        }
+        .onDisappear {
+            Task {
+                await discussionModel.setConversationVisible(false)
+                await discussionModel.stop()
+            }
+        }
+    }
+}
+
 struct SharedAppointmentDetailView: View {
     @ObservedObject var model: SharedAppointmentModel
     let appointmentID: UUID
@@ -304,6 +355,26 @@ struct SharedAppointmentDetailView: View {
                             "狀態",
                             value: appointment.status == .scheduled ? "已安排" : "已取消"
                         )
+                    }
+
+                    if let discussionModel = model.discussionModel(for: appointment.id) {
+                        Section("專屬討論") {
+                            NavigationLink {
+                                AppointmentDiscussionView(
+                                    discussionModel: discussionModel,
+                                    sharedAppointmentModel: model,
+                                    appointmentTitle: appointment.title,
+                                    allowsSending: appointment.status == .scheduled
+                                )
+                            } label: {
+                                Label("開啟專屬討論", systemImage: "bubble.left.and.bubble.right")
+                            }
+                            .accessibilityIdentifier("open-appointment-discussion")
+
+                            Text("目前支援文字與 Emoji；照片與收藏將在後續切片接上。")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     if appointment.status == .cancelled {

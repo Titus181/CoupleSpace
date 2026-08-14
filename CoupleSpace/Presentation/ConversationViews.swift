@@ -54,12 +54,31 @@ private enum ConversationTimelineItem: Identifiable {
     }
 }
 
+enum ConversationPresentationMode: Equatable {
+    case main
+    case appointmentDiscussion
+
+    var navigationTitle: String {
+        switch self {
+        case .main: "對話"
+        case .appointmentDiscussion: "專屬討論"
+        }
+    }
+
+    var showsAppointmentFeatures: Bool { self == .main }
+    var allowsPhotoMessages: Bool { self == .main }
+    var allowsMomentSaving: Bool { self == .main }
+}
+
 struct ConversationView: View {
     @ObservedObject var model: ConversationModel
     @ObservedObject var sharedAppointmentModel: SharedAppointmentModel
     @Binding private var focusMessageID: UUID?
     private let savedMomentSourceIDs: Set<UUID>
     private let onMomentSaved: @MainActor () async -> Void
+    private let mode: ConversationPresentationMode
+    private let embedsNavigationStack: Bool
+    private let allowsSending: Bool
     @State private var draft = ""
     @State private var selectedPhotoItem: PhotosPickerItem?
     @State private var previewedPhoto: ConversationPhotoPreview?
@@ -74,27 +93,30 @@ struct ConversationView: View {
         sharedAppointmentModel: SharedAppointmentModel,
         focusMessageID: Binding<UUID?> = .constant(nil),
         savedMomentSourceIDs: Set<UUID> = [],
+        mode: ConversationPresentationMode = .main,
+        embedsNavigationStack: Bool = true,
+        allowsSending: Bool = true,
         onMomentSaved: @escaping @MainActor () async -> Void = {}
     ) {
         self.model = model
         self.sharedAppointmentModel = sharedAppointmentModel
         _focusMessageID = focusMessageID
         self.savedMomentSourceIDs = savedMomentSourceIDs
+        self.mode = mode
+        self.embedsNavigationStack = embedsNavigationStack
+        self.allowsSending = allowsSending
         self.onMomentSaved = onMomentSaved
     }
 
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                conversationContent
-                    .contentShape(Rectangle())
-                    .onTapGesture { isComposerFocused = false }
-                Divider()
-                composer
+        Group {
+            if embedsNavigationStack {
+                NavigationStack { conversationLayout }
+                    .accessibilityIdentifier("conversation-screen")
+            } else {
+                conversationLayout
             }
-            .navigationTitle("對話")
         }
-        .accessibilityIdentifier("conversation-screen")
         .overlayPreferenceValue(ConversationMessageBoundsKey.self) { bounds in
             GeometryReader { proxy in
                 if let message = actionMessage,
@@ -133,6 +155,27 @@ struct ConversationView: View {
                 sourceMessageID: seed.sourceMessageID
             )
         }
+    }
+
+    private var conversationLayout: some View {
+        VStack(spacing: 0) {
+            conversationContent
+                .contentShape(Rectangle())
+                .onTapGesture { isComposerFocused = false }
+            Divider()
+            if allowsSending {
+                composer
+            } else {
+                Text("這筆約定已取消，討論內容仍會保留。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal)
+                    .frame(maxWidth: .infinity, minHeight: 48)
+                    .background(.bar)
+                    .accessibilityIdentifier("appointment-discussion-read-only")
+            }
+        }
+        .navigationTitle(mode.navigationTitle)
     }
 
     @ViewBuilder
@@ -274,23 +317,27 @@ struct ConversationView: View {
                     .accessibilityIdentifier("conversation-status")
             }
             HStack(alignment: .bottom, spacing: 10) {
-                Button {
-                    appointmentComposerSeed = AppointmentComposerSeed()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.title3.weight(.semibold))
-                        .frame(minWidth: 32, minHeight: 32)
+                if mode.showsAppointmentFeatures {
+                    Button {
+                        appointmentComposerSeed = AppointmentComposerSeed()
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.title3.weight(.semibold))
+                            .frame(minWidth: 32, minHeight: 32)
+                    }
+                    .accessibilityLabel("建立共同約定")
+                    .accessibilityIdentifier("create-appointment-from-composer")
                 }
-                .accessibilityLabel("建立共同約定")
-                .accessibilityIdentifier("create-appointment-from-composer")
 
-                PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
-                    Image(systemName: "photo")
-                        .font(.title3)
-                        .frame(minWidth: 32, minHeight: 32)
+                if mode.allowsPhotoMessages {
+                    PhotosPicker(selection: $selectedPhotoItem, matching: .images) {
+                        Image(systemName: "photo")
+                            .font(.title3)
+                            .frame(minWidth: 32, minHeight: 32)
+                    }
+                    .accessibilityLabel("傳送照片")
+                    .accessibilityIdentifier("send-conversation-photo")
                 }
-                .accessibilityLabel("傳送照片")
-                .accessibilityIdentifier("send-conversation-photo")
 
                 TextField("寫訊息…", text: $draft, axis: .vertical)
                     .lineLimit(1...5)
@@ -356,7 +403,7 @@ struct ConversationView: View {
         )
         .onLongPressGesture(minimumDuration: 0.45) {
             guard model.canReact(to: message)
-                    || (model.canSaveAsMoment(message) && !isSavedAsMoment(message))
+                    || (canSaveAsMoment(message) && !isSavedAsMoment(message))
                     || canCreateAppointment(from: message) else { return }
             UIImpactFeedbackGenerator(style: .medium).impactOccurred(intensity: 0.8)
             actionMessageID = message.id
@@ -419,7 +466,9 @@ struct ConversationView: View {
     private var timelineItems: [ConversationTimelineItem] {
         ConversationTimelineItem.ordered(
             messages: model.messages,
-            appointments: sharedAppointmentModel.appointments
+            appointments: mode.showsAppointmentFeatures
+                ? sharedAppointmentModel.appointments
+                : []
         )
     }
 
@@ -434,7 +483,7 @@ struct ConversationView: View {
         let reactionWidth = containerSize.width - (reactionInset * 2)
         let actionWidth = min(216, containerSize.width - (actionInset * 2))
         let reactionHeight: CGFloat = 54
-        let actionCount = (model.canSaveAsMoment(message) && !isSavedAsMoment(message) ? 1 : 0)
+        let actionCount = (canSaveAsMoment(message) && !isSavedAsMoment(message) ? 1 : 0)
             + (canCreateAppointment(from: message) ? 1 : 0)
         let actionHeight = CGFloat(actionCount * 46 + max(0, actionCount - 1) * 8)
         let itemSpacing: CGFloat = 8
@@ -547,7 +596,7 @@ struct ConversationView: View {
         inset: CGFloat,
         height: CGFloat
     ) -> some View {
-        if (model.canSaveAsMoment(message) && !isSavedAsMoment(message))
+        if (canSaveAsMoment(message) && !isSavedAsMoment(message))
             || canCreateAppointment(from: message) {
             HStack {
                 if message.senderUserID == model.currentUserID { Spacer(minLength: 0) }
@@ -624,7 +673,7 @@ struct ConversationView: View {
 
     @ViewBuilder
     private func saveMomentAction(for message: ChatMessage) -> some View {
-        if model.canSaveAsMoment(message) && !isSavedAsMoment(message) {
+        if canSaveAsMoment(message) && !isSavedAsMoment(message) {
             Button {
                 actionMessageID = nil
                 Task {
@@ -672,7 +721,13 @@ struct ConversationView: View {
     }
 
     private func canCreateAppointment(from message: ChatMessage) -> Bool {
-        message.deliveryState == .synced && message.textBody != nil
+        mode.showsAppointmentFeatures
+            && message.deliveryState == .synced
+            && message.textBody != nil
+    }
+
+    private func canSaveAsMoment(_ message: ChatMessage) -> Bool {
+        mode.allowsMomentSaving && model.canSaveAsMoment(message)
     }
 
     @ViewBuilder

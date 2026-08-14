@@ -350,6 +350,117 @@ struct AppSkeletonTests {
         #expect(try store.load(userID: userID, relationshipID: relationshipID).isEmpty)
     }
 
+    @Test func appointmentDiscussionOutboxAndSnapshotStayIsolatedFromMainChat() throws {
+        let suiteName = "AppointmentDiscussionConversationScopeTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let userID = UUID()
+        let relationshipID = UUID()
+        let otherRelationshipID = UUID()
+        let firstAppointmentID = UUID()
+        let secondAppointmentID = UUID()
+        let mainMessageID = UUID()
+        let firstDiscussionMessageID = UUID()
+        let secondDiscussionMessageID = UUID()
+        let otherRelationshipMessageID = UUID()
+        let mainStore = ConversationOutboxStore(defaults: defaults)
+        let firstDiscussionStore = ConversationOutboxStore(
+            defaults: defaults,
+            appointmentScopeID: firstAppointmentID
+        )
+        let secondDiscussionStore = ConversationOutboxStore(
+            defaults: defaults,
+            appointmentScopeID: secondAppointmentID
+        )
+        let otherRelationshipStore = ConversationOutboxStore(
+            defaults: defaults,
+            appointmentScopeID: firstAppointmentID
+        )
+
+        try mainStore.enqueueText(
+            "主對話",
+            userID: userID,
+            relationshipID: relationshipID,
+            clientID: mainMessageID,
+            localCreatedAt: .now
+        )
+        try firstDiscussionStore.enqueueText(
+            "第一個約定",
+            userID: userID,
+            relationshipID: relationshipID,
+            clientID: firstDiscussionMessageID,
+            localCreatedAt: .now
+        )
+        try secondDiscussionStore.enqueueText(
+            "第二個約定",
+            userID: userID,
+            relationshipID: relationshipID,
+            clientID: secondDiscussionMessageID,
+            localCreatedAt: .now
+        )
+        try otherRelationshipStore.enqueueText(
+            "另一段關係",
+            userID: userID,
+            relationshipID: otherRelationshipID,
+            clientID: otherRelationshipMessageID,
+            localCreatedAt: .now
+        )
+
+        #expect(try mainStore.load(userID: userID, relationshipID: relationshipID)
+            .entries.map(\.clientID) == [mainMessageID])
+        #expect(try firstDiscussionStore.load(userID: userID, relationshipID: relationshipID)
+            .entries.map(\.clientID) == [firstDiscussionMessageID])
+        #expect(try secondDiscussionStore.load(userID: userID, relationshipID: relationshipID)
+            .entries.map(\.clientID) == [secondDiscussionMessageID])
+
+        let mainSnapshotStore = ConversationSnapshotStore(defaults: defaults)
+        let discussionSnapshotStore = ConversationSnapshotStore(
+            defaults: defaults,
+            appointmentScopeID: firstAppointmentID
+        )
+        try mainSnapshotStore.save(
+            ConversationSnapshot(
+                currentUserID: userID,
+                messages: [ChatMessage(
+                    id: mainMessageID,
+                    senderUserID: userID,
+                    body: "主對話",
+                    createdAt: .now
+                )],
+                unreadCount: 0
+            ),
+            userID: userID,
+            relationshipID: relationshipID
+        )
+        try discussionSnapshotStore.save(
+            ConversationSnapshot(
+                currentUserID: userID,
+                messages: [ChatMessage(
+                    id: firstDiscussionMessageID,
+                    senderUserID: userID,
+                    body: "第一個約定",
+                    createdAt: .now
+                )],
+                unreadCount: 1
+            ),
+            userID: userID,
+            relationshipID: relationshipID
+        )
+        #expect(try mainSnapshotStore.load(userID: userID, relationshipID: relationshipID)?
+            .messages.map(\.id) == [mainMessageID])
+        #expect(try discussionSnapshotStore.load(userID: userID, relationshipID: relationshipID)?
+            .messages.map(\.id) == [firstDiscussionMessageID])
+
+        mainStore.clearAppointmentDiscussions(userID: userID, relationshipID: relationshipID)
+
+        #expect(try mainStore.load(userID: userID, relationshipID: relationshipID)
+            .entries.map(\.clientID) == [mainMessageID])
+        #expect(try firstDiscussionStore.load(userID: userID, relationshipID: relationshipID).isEmpty)
+        #expect(try secondDiscussionStore.load(userID: userID, relationshipID: relationshipID).isEmpty)
+        #expect(try otherRelationshipStore.load(userID: userID, relationshipID: otherRelationshipID)
+            .entries.map(\.clientID) == [otherRelationshipMessageID])
+    }
+
     @Test func conversationClosingAndArchiveDiscardUnsentText() throws {
         let content = ConversationOutboxContent.text("關係結束前尚未送出")
 
