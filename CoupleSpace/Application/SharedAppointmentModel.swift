@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class SharedAppointmentModel: ObservableObject {
     @Published private(set) var appointments: [SharedAppointment] = []
+    @Published private(set) var recentDiscussionSummaries: [SharedAppointmentDiscussionSummary] = []
     @Published private(set) var isLoading = false
     @Published private(set) var isSaving = false
     @Published private(set) var statusMessage: String?
@@ -43,6 +44,10 @@ final class SharedAppointmentModel: ObservableObject {
         .sorted { lhs, rhs in
             (lhs.startsAt, lhs.id.uuidString) > (rhs.startsAt, rhs.id.uuidString)
         }
+    }
+
+    var discussionUnreadCount: Int {
+        recentDiscussionSummaries.reduce(0) { $0 + $1.unreadCount }
     }
 
     func appointment(id: UUID) -> SharedAppointment? {
@@ -96,12 +101,21 @@ final class SharedAppointmentModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            let remote = try await service.fetchAppointments()
+            async let remoteAppointments = service.fetchAppointments()
+            async let remoteDiscussionSummaries = service.fetchRecentDiscussionSummaries()
+            let remote = try await remoteAppointments
+            let summaries = try await remoteDiscussionSummaries
             let remoteIDs = Set(remote.map(\.id))
             let pending = appointments.filter {
                 $0.deliveryState != .synced && !remoteIDs.contains($0.id)
             }
             appointments = (remote + pending).sorted(by: Self.appointmentOrder)
+            recentDiscussionSummaries = summaries
+                .filter { remoteIDs.contains($0.appointmentID) }
+                .sorted {
+                    ($0.latestActivityAt, $0.appointmentID.uuidString)
+                        > ($1.latestActivityAt, $1.appointmentID.uuidString)
+                }
             statusMessage = deliveryStatusMessage
         } catch {
             statusMessage = "無法更新共同約定，請稍後再試。"

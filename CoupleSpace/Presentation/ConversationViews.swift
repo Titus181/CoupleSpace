@@ -13,6 +13,13 @@ private struct AppointmentComposerSeed: Identifiable {
     }
 }
 
+private struct RecentAppointmentDiscussionEntry: Identifiable {
+    let appointment: SharedAppointment
+    let summary: SharedAppointmentDiscussionSummary
+
+    var id: UUID { summary.id }
+}
+
 private enum ConversationTimelineItemID: Hashable {
     case message(UUID)
     case appointment(UUID)
@@ -158,6 +165,10 @@ struct ConversationView: View {
 
     private var conversationLayout: some View {
         VStack(spacing: 0) {
+            if mode == .main, !recentDiscussionEntries.isEmpty {
+                recentAppointmentDiscussions
+                Divider()
+            }
             conversationContent
                 .contentShape(Rectangle())
                 .onTapGesture { isComposerFocused = false }
@@ -175,6 +186,101 @@ struct ConversationView: View {
             }
         }
         .navigationTitle(mode.navigationTitle)
+    }
+
+    private var recentDiscussionEntries: [RecentAppointmentDiscussionEntry] {
+        let entries = sharedAppointmentModel.recentDiscussionSummaries.compactMap {
+            summary -> RecentAppointmentDiscussionEntry? in
+            guard let appointment = sharedAppointmentModel.appointment(id: summary.appointmentID),
+                  appointment.deliveryState == .synced else { return nil }
+            return RecentAppointmentDiscussionEntry(
+                appointment: appointment,
+                summary: summary
+            )
+        }
+        return Array(entries.prefix(5))
+    }
+
+    private var recentAppointmentDiscussions: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("近期約定討論")
+                .font(.headline)
+                .padding(.horizontal)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    ForEach(recentDiscussionEntries) { entry in
+                        NavigationLink {
+                            if let discussionModel = sharedAppointmentModel.discussionModel(
+                                for: entry.appointment.id
+                            ) {
+                                AppointmentDiscussionView(
+                                    discussionModel: discussionModel,
+                                    sharedAppointmentModel: sharedAppointmentModel,
+                                    appointmentTitle: entry.appointment.title,
+                                    allowsSending: entry.appointment.status == .scheduled
+                                )
+                            }
+                        } label: {
+                            recentDiscussionCard(
+                                appointment: entry.appointment,
+                                summary: entry.summary
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier(
+                            "recent-appointment-discussion-"
+                                + entry.appointment.id.uuidString.lowercased()
+                        )
+                    }
+                }
+                .padding(.horizontal)
+            }
+        }
+        .padding(.vertical, 10)
+        .background(.bar)
+    }
+
+    private func recentDiscussionCard(
+        appointment: SharedAppointment,
+        summary: SharedAppointmentDiscussionSummary
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 6) {
+                Image(systemName: "calendar.badge.clock")
+                    .foregroundStyle(.tint)
+                Text(appointment.title)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+                Spacer(minLength: 4)
+                if summary.unreadCount > 0 {
+                    Text(summary.unreadCount.formatted())
+                        .font(.caption2.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.accentColor, in: Capsule())
+                        .accessibilityLabel("未讀 \(summary.unreadCount) 則")
+                }
+            }
+
+            HStack(spacing: 5) {
+                Text("最新更新")
+                Text(summary.latestActivityAt.formatted(date: .abbreviated, time: .shortened))
+                if appointment.status == .cancelled {
+                    Text("· 已取消")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        .padding(12)
+        .frame(width: 238, alignment: .leading)
+        .background(
+            Color(uiColor: .secondarySystemBackground),
+            in: RoundedRectangle(cornerRadius: 16)
+        )
     }
 
     @ViewBuilder

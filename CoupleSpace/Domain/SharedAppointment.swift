@@ -26,6 +26,14 @@ struct SharedAppointment: Identifiable, Equatable, Sendable {
     var deliveryState: SharedAppointmentDeliveryState = .synced
 }
 
+struct SharedAppointmentDiscussionSummary: Identifiable, Equatable, Sendable {
+    let appointmentID: UUID
+    let latestActivityAt: Date
+    let unreadCount: Int
+
+    var id: UUID { appointmentID }
+}
+
 struct SharedAppointmentDraft: Codable, Equatable, Sendable {
     let title: String
     let startsAt: Date

@@ -222,10 +222,21 @@ struct RootTabView: View {
             let discussionAppointmentID = UUID(
                 uuidString: "A4000000-0000-0000-0000-000000000004"
             )!
+            let seededDiscussionSummaries: [SharedAppointmentDiscussionSummary]
+            if arguments.contains("--ui-testing-w11-discussion") {
+                seededDiscussionSummaries = [SharedAppointmentDiscussionSummary(
+                    appointmentID: discussionAppointmentID,
+                    latestActivityAt: .now,
+                    unreadCount: 2
+                )]
+            } else {
+                seededDiscussionSummaries = []
+            }
             _sharedAppointmentModel = StateObject(
                 wrappedValue: SharedAppointmentModel(
                     service: InMemorySharedAppointmentService(
-                        appointments: seededAppointments
+                        appointments: seededAppointments,
+                        discussionSummaries: seededDiscussionSummaries
                     ),
                     discussionModelFactory: { appointmentID in
                         let messages: [ChatMessage]
@@ -350,7 +361,7 @@ struct RootTabView: View {
                     onMomentSaved: { await momentModel.refresh() }
                 )
             }
-            .badge(conversationModel.unreadCount)
+            .badge(conversationModel.unreadCount + sharedAppointmentModel.discussionUnreadCount)
 
             Tab("我們", systemImage: "person.2", value: PrimarySection.us) {
                 UsView(

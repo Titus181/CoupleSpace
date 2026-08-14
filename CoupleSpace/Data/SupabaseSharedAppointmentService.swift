@@ -5,6 +5,7 @@ import Supabase
 protocol SharedAppointmentRemoteServing: AnyObject {
     func fetchPendingAppointments() async throws -> [SharedAppointment]
     func fetchAppointments() async throws -> [SharedAppointment]
+    func fetchRecentDiscussionSummaries() async throws -> [SharedAppointmentDiscussionSummary]
     func enqueueAppointment(
         _ draft: SharedAppointmentDraft,
         clientID: UUID,
@@ -122,6 +123,34 @@ private struct CancelSharedAppointmentParameters: Encodable {
     }
 }
 
+private struct RecentAppointmentDiscussionsParameters: Encodable {
+    let targetRelationshipID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+    }
+}
+
+private struct SharedAppointmentDiscussionSummaryRow: Decodable {
+    let appointmentClientID: UUID
+    let latestActivityAt: Date
+    let unreadCount: Int
+
+    enum CodingKeys: String, CodingKey {
+        case appointmentClientID = "appointment_client_id"
+        case latestActivityAt = "latest_activity_at"
+        case unreadCount = "unread_count"
+    }
+
+    var summary: SharedAppointmentDiscussionSummary {
+        SharedAppointmentDiscussionSummary(
+            appointmentID: appointmentClientID,
+            latestActivityAt: latestActivityAt,
+            unreadCount: unreadCount
+        )
+    }
+}
+
 @MainActor
 final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
     private let client: SupabaseClient
@@ -129,7 +158,7 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
     private let relationshipID: UUID
     private let outboxStore: SharedAppointmentOutboxStore
     private var realtimeChannel: RealtimeChannelV2?
-    private var realtimeTask: Task<Void, Never>?
+    private var realtimeTasks: [Task<Void, Never>] = []
 
     init(
         client: SupabaseClient,
@@ -176,6 +205,20 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
             .execute()
             .value
         return try rows.map { try $0.appointment() }
+    }
+
+    func fetchRecentDiscussionSummaries() async throws -> [SharedAppointmentDiscussionSummary] {
+        let session = try await client.auth.session
+        guard session.user.id == currentUserID else {
+            throw SharedAppointmentServiceError.accountChanged
+        }
+        let rows: [SharedAppointmentDiscussionSummaryRow] = try await client.rpc(
+            "recent_appointment_discussions",
+            params: RecentAppointmentDiscussionsParameters(
+                targetRelationshipID: relationshipID
+            )
+        ).execute().value
+        return rows.map(\.summary)
     }
 
     func enqueueAppointment(
@@ -299,18 +342,29 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
             table: "shared_appointments",
             filter: .eq("relationship_id", value: relationshipID.uuidString.lowercased())
         )
+        let discussionStream = channel.postgresChange(
+            AnyAction.self,
+            schema: "public",
+            table: "shared_items",
+            filter: .eq("relationship_id", value: relationshipID.uuidString.lowercased())
+        )
         realtimeChannel = channel
-        realtimeTask = Task {
+        realtimeTasks = [Task {
             for await _ in stream {
                 guard !Task.isCancelled else { return }
                 await onChange()
             }
-        }
+        }, Task {
+            for await _ in discussionStream {
+                guard !Task.isCancelled else { return }
+                await onChange()
+            }
+        }]
         do {
             try await channel.subscribeWithError()
         } catch {
-            realtimeTask?.cancel()
-            realtimeTask = nil
+            realtimeTasks.forEach { $0.cancel() }
+            realtimeTasks = []
             realtimeChannel = nil
             await client.removeChannel(channel)
             throw error
@@ -318,8 +372,8 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
     }
 
     func stopObservingChanges() async {
-        realtimeTask?.cancel()
-        realtimeTask = nil
+        realtimeTasks.forEach { $0.cancel() }
+        realtimeTasks = []
         if let realtimeChannel {
             await client.removeChannel(realtimeChannel)
             self.realtimeChannel = nil
@@ -338,14 +392,23 @@ private enum SharedAppointmentServiceError: Error {
 @MainActor
 final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
     private var appointments: [SharedAppointment]
+    private var discussionSummaries: [SharedAppointmentDiscussionSummary]
     private var pendingEntries: [SharedAppointmentOutboxEntry] = []
     private var onChange: (@MainActor () async -> Void)?
 
-    init(appointments: [SharedAppointment] = []) {
+    init(
+        appointments: [SharedAppointment] = [],
+        discussionSummaries: [SharedAppointmentDiscussionSummary] = []
+    ) {
         self.appointments = appointments
+        self.discussionSummaries = discussionSummaries
     }
 
     func fetchAppointments() async throws -> [SharedAppointment] { appointments }
+
+    func fetchRecentDiscussionSummaries() async throws -> [SharedAppointmentDiscussionSummary] {
+        discussionSummaries
+    }
 
     func fetchPendingAppointments() async throws -> [SharedAppointment] {
         let failed = (pendingEntries.first?.attemptCount ?? 0) > 0

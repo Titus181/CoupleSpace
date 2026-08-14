@@ -416,6 +416,29 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testConversationOpensRecentlyUpdatedAppointmentDiscussion() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w11-discussion"]
+        app.launch()
+
+        app.tabBars.buttons["對話"].tap()
+        XCTAssertTrue(app.staticTexts["近期約定討論"].waitForExistence(timeout: 3))
+        let recentDiscussion = app.buttons[
+            "recent-appointment-discussion-a4000000-0000-0000-0000-000000000004"
+        ]
+        XCTAssertTrue(recentDiscussion.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["未讀 2 則"].exists)
+        recentDiscussion.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["appointment-discussion-screen"]
+                .waitForExistence(timeout: 2)
+        )
+        XCTAssertTrue(app.staticTexts["週末去看展"].exists)
+        XCTAssertTrue(app.images["聊天照片"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testSetsAndClearsCurrentStatusWithoutCreatingHistoryByDefault() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]

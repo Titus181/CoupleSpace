@@ -264,7 +264,7 @@ private struct SharedAppointmentCalendarView: View {
     }
 }
 
-private struct AppointmentDiscussionView: View {
+struct AppointmentDiscussionView: View {
     @StateObject private var discussionModel: ConversationModel
     @ObservedObject var sharedAppointmentModel: SharedAppointmentModel
     let appointmentTitle: String
@@ -310,6 +310,7 @@ private struct AppointmentDiscussionView: View {
             Task {
                 await discussionModel.setConversationVisible(false)
                 await discussionModel.stop()
+                await sharedAppointmentModel.refresh()
             }
         }
     }

@@ -164,6 +164,61 @@ struct AppSkeletonTests {
         #expect(model.nextAppointment?.deliveryState == .synced)
     }
 
+    @MainActor
+    @Test func sharedAppointmentModelOrdersRecentDiscussionsAndTotalsUnread() async throws {
+        let service = SharedAppointmentRemoteServiceFake()
+        let olderID = UUID()
+        let newerID = UUID()
+        let missingAppointmentID = UUID()
+        let additionalIDs = (0..<4).map { _ in UUID() }
+        let now = Date(timeIntervalSince1970: 1_500)
+        service.appointments = ([olderID, newerID] + additionalIDs).map { id in
+            SharedAppointment(
+                id: id,
+                creatorUserID: UUID(),
+                title: id == newerID ? "最新討論" : "較早討論",
+                startsAt: now.addingTimeInterval(3_600),
+                location: nil,
+                note: nil,
+                reminderAt: nil,
+                status: .scheduled,
+                sourceMessageID: nil,
+                createdAt: now,
+                updatedAt: now
+            )
+        }
+        service.discussionSummaries = [
+            SharedAppointmentDiscussionSummary(
+                appointmentID: olderID,
+                latestActivityAt: now,
+                unreadCount: 1
+            ),
+            SharedAppointmentDiscussionSummary(
+                appointmentID: missingAppointmentID,
+                latestActivityAt: now.addingTimeInterval(300),
+                unreadCount: 99
+            ),
+            SharedAppointmentDiscussionSummary(
+                appointmentID: newerID,
+                latestActivityAt: now.addingTimeInterval(100),
+                unreadCount: 2
+            ),
+        ] + additionalIDs.enumerated().map { index, id in
+            SharedAppointmentDiscussionSummary(
+                appointmentID: id,
+                latestActivityAt: now.addingTimeInterval(TimeInterval(-100 - index)),
+                unreadCount: 1
+            )
+        }
+        let model = SharedAppointmentModel(service: service, now: { now })
+
+        await model.refresh()
+
+        #expect(model.recentDiscussionSummaries.count == 6)
+        #expect(model.recentDiscussionSummaries.prefix(2).map(\.appointmentID) == [newerID, olderID])
+        #expect(model.discussionUnreadCount == 7)
+    }
+
     @Test func sharedAppointmentOutboxPersistsFIFOAcrossStoreRecreation() throws {
         let suiteName = "SharedAppointmentOutboxTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -1789,6 +1844,7 @@ struct AppSkeletonTests {
 @MainActor
 private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteServing {
     var appointments: [SharedAppointment] = []
+    var discussionSummaries: [SharedAppointmentDiscussionSummary] = []
     var pendingEntries: [SharedAppointmentOutboxEntry] = []
     var deliveryClientIDs: [UUID] = []
     var createFailuresRemaining = 0
@@ -1796,6 +1852,10 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
     private var onChange: (@MainActor () async -> Void)?
 
     func fetchAppointments() async throws -> [SharedAppointment] { appointments }
+
+    func fetchRecentDiscussionSummaries() async throws -> [SharedAppointmentDiscussionSummary] {
+        discussionSummaries
+    }
 
     func fetchPendingAppointments() async throws -> [SharedAppointment] {
         pendingEntries.map(\.appointment)
