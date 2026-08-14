@@ -65,6 +65,24 @@ struct NextSharedAppointmentSection: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("shared-appointment-status")
             }
+            if let reminderStatusMessage = model.reminderStatusMessage {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(reminderStatusMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    if model.reminderAuthorization == .notDetermined {
+                        Button("允許約定提醒") {
+                            Task { await model.prepareReminderAuthorization() }
+                        }
+                        .font(.footnote.weight(.semibold))
+                    } else if model.reminderAuthorization == .denied,
+                              let settingsURL = URL(string: UIApplication.openSettingsURLString) {
+                        Link("前往系統設定", destination: settingsURL)
+                            .font(.footnote.weight(.semibold))
+                    }
+                }
+                .accessibilityIdentifier("appointment-reminder-permission")
+            }
         }
         .sheet(isPresented: $isCreating) {
             SharedAppointmentComposerView(model: model)
@@ -552,12 +570,22 @@ struct SharedAppointmentComposerView: View {
 
                 Section("提醒") {
                     Toggle("設定一次提醒", isOn: $reminderEnabled)
+                        .onChange(of: reminderEnabled) { _, enabled in
+                            guard enabled else { return }
+                            Task { await model.prepareReminderAuthorization() }
+                        }
                     if reminderEnabled {
                         DatePicker(
                             "提醒時間",
                             selection: $reminderAt,
                             in: ...startsAt
                         )
+                        if let reminderStatusMessage = model.reminderStatusMessage {
+                            Text(reminderStatusMessage)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("appointment-reminder-status")
+                        }
                     }
                 }
 

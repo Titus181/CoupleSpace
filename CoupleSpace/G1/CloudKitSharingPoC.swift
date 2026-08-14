@@ -3,6 +3,7 @@ import CloudKit
 import Combine
 import SwiftUI
 import UIKit
+import UserNotifications
 
 @MainActor
 final class CloudKitSharingPoC: ObservableObject {
@@ -446,7 +447,31 @@ final class CloudKitShareSceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 }
 
-final class CloudKitShareAppDelegate: UIResponder, UIApplicationDelegate {
+final class CloudKitShareAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+    func application(
+        _ application: UIApplication,
+        didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
+    ) -> Bool {
+        UNUserNotificationCenter.current().delegate = self
+        return true
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        [.banner, .sound]
+    }
+
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse
+    ) async {
+        SharedAppointmentNotificationRoute.receive(
+            userInfo: response.notification.request.content.userInfo
+        )
+    }
+
     func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data

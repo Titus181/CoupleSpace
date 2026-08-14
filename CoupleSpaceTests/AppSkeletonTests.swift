@@ -84,6 +84,127 @@ struct AppSkeletonTests {
     }
 
     @MainActor
+    @Test func appointmentReminderPolicySchedulesOnlySyncedFutureAppointmentsPrivately() {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let futureID = UUID(uuidString: "A4000000-0000-0000-0000-0000000000A1")!
+        func appointment(
+            id: UUID = UUID(),
+            reminderAt: Date?,
+            status: SharedAppointmentStatus = .scheduled,
+            deliveryState: SharedAppointmentDeliveryState = .synced
+        ) -> SharedAppointment {
+            SharedAppointment(
+                id: id,
+                creatorUserID: UUID(),
+                title: "私人晚餐標題",
+                startsAt: now.addingTimeInterval(7_200),
+                location: "私人地點",
+                note: "私人註記",
+                reminderAt: reminderAt,
+                status: status,
+                sourceMessageID: nil,
+                createdAt: now,
+                updatedAt: now,
+                deliveryState: deliveryState
+            )
+        }
+
+        let requests = SharedAppointmentReminderPolicy.requests(
+            for: [
+                appointment(id: futureID, reminderAt: now.addingTimeInterval(3_600)),
+                appointment(reminderAt: now),
+                appointment(reminderAt: now.addingTimeInterval(3_600), status: .cancelled),
+                appointment(
+                    reminderAt: now.addingTimeInterval(3_600),
+                    deliveryState: .sending
+                ),
+            ],
+            identifierPrefix: "test.",
+            now: now
+        )
+
+        #expect(requests == [SharedAppointmentReminderRequest(
+            identifier: "test." + futureID.uuidString.lowercased(),
+            appointmentID: futureID,
+            fireDate: now.addingTimeInterval(3_600),
+            title: "共同約定提醒",
+            body: "你有一筆即將開始的共同約定。",
+            userInfo: [
+                "event_kind": "shared_appointment_reminder",
+                "event_id": futureID.uuidString.lowercased(),
+            ]
+        )])
+        #expect(requests[0].title.contains("私人晚餐標題") == false)
+        #expect(requests[0].body.contains("私人地點") == false)
+        #expect(requests[0].body.contains("私人註記") == false)
+        #expect(requests[0].userInfo.keys.sorted() == ["event_id", "event_kind"])
+    }
+
+    @MainActor
+    @Test func sharedAppointmentModelReconcilesRemindersAfterRemoteRefresh() async {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let appointment = SharedAppointment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            title: "晚餐",
+            startsAt: now.addingTimeInterval(7_200),
+            location: nil,
+            note: nil,
+            reminderAt: now.addingTimeInterval(3_600),
+            status: .scheduled,
+            sourceMessageID: nil,
+            createdAt: now,
+            updatedAt: now
+        )
+        let service = SharedAppointmentRemoteServiceFake()
+        service.appointments = [appointment]
+        let scheduler = SharedAppointmentReminderSchedulerFake()
+        let model = SharedAppointmentModel(
+            service: service,
+            now: { now },
+            reminderScheduler: scheduler
+        )
+
+        await model.refresh()
+
+        #expect(scheduler.reconciledAppointments == [[appointment]])
+        #expect(model.reminderStatusMessage == nil)
+    }
+
+    @MainActor
+    @Test func deniedAppointmentReminderPermissionIsExplicitButDoesNotBlockSync() async {
+        let scheduler = SharedAppointmentReminderSchedulerFake()
+        scheduler.authorization = .denied
+        let model = SharedAppointmentModel(
+            service: SharedAppointmentRemoteServiceFake(),
+            reminderScheduler: scheduler
+        )
+
+        await model.prepareReminderAuthorization()
+
+        #expect(scheduler.authorizationRequestCount == 1)
+        #expect(model.reminderStatusMessage?.contains("不會在指定時間提醒") == true)
+    }
+
+    @MainActor
+    @Test func appointmentReminderRouteAcceptsOnlyOpaqueAppointmentEvents() {
+        _ = SharedAppointmentNotificationRoute.consumePendingAppointmentID()
+        SharedAppointmentNotificationRoute.receive(userInfo: [
+            "event_kind": "message_created",
+            "event_id": UUID().uuidString,
+        ])
+        #expect(SharedAppointmentNotificationRoute.consumePendingAppointmentID() == nil)
+
+        let appointmentID = UUID()
+        SharedAppointmentNotificationRoute.receive(userInfo: [
+            "event_kind": "shared_appointment_reminder",
+            "event_id": appointmentID.uuidString.lowercased(),
+        ])
+        #expect(SharedAppointmentNotificationRoute.consumePendingAppointmentID() == appointmentID)
+        #expect(SharedAppointmentNotificationRoute.consumePendingAppointmentID() == nil)
+    }
+
+    @MainActor
     @Test func sharedAppointmentModelGroupsScheduledAndCancelledItemsByLocalDay() async throws {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
@@ -2391,6 +2512,31 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
     }
 
     func stopObservingChanges() async { onChange = nil }
+}
+
+@MainActor
+private final class SharedAppointmentReminderSchedulerFake: SharedAppointmentReminderScheduling {
+    var authorization: SharedAppointmentReminderAuthorization = .authorized
+    var authorizationRequestCount = 0
+    var reconciledAppointments: [[SharedAppointment]] = []
+    var removeAllCount = 0
+
+    func authorizationStatus() async -> SharedAppointmentReminderAuthorization {
+        authorization
+    }
+
+    func requestAuthorization() async -> SharedAppointmentReminderAuthorization {
+        authorizationRequestCount += 1
+        return authorization
+    }
+
+    func reconcile(_ appointments: [SharedAppointment]) async throws {
+        reconciledAppointments.append(appointments)
+    }
+
+    func removeAll() async {
+        removeAllCount += 1
+    }
 }
 
 @MainActor

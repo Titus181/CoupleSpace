@@ -7,6 +7,7 @@ struct RootTabView: View {
     @State private var conversationFocusMessageID: UUID?
     @State private var appointmentDiscussionFocus: AppointmentDiscussionFocus?
     @State private var sourceNavigationRequestID: UUID?
+    @State private var reminderAppointmentID: UUID?
     @StateObject private var networkRecoveryMonitor = NetworkRecoveryMonitor()
     @StateObject private var momentModel: MomentModel
     @StateObject private var togetherNowModel: TogetherNowModel
@@ -62,6 +63,9 @@ struct RootTabView: View {
                     service: SupabaseSharedAppointmentService(
                         client: technicalValidationClient,
                         currentUserID: accountUserID,
+                        relationshipID: relationshipID
+                    ),
+                    reminderScheduler: LocalSharedAppointmentReminderScheduler(
                         relationshipID: relationshipID
                     ),
                     discussionModelFactory: { appointmentID in
@@ -467,6 +471,25 @@ struct RootTabView: View {
             }
         }
         .tint(.accentColor)
+        .sheet(isPresented: Binding(
+            get: { reminderAppointmentID != nil },
+            set: { if !$0 { reminderAppointmentID = nil } }
+        )) {
+            if let reminderAppointmentID {
+                NavigationStack {
+                    SharedAppointmentDetailView(
+                        appointmentID: reminderAppointmentID,
+                        model: sharedAppointmentModel,
+                        onMomentSaved: { await momentModel.refresh() }
+                    )
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("關閉") { self.reminderAppointmentID = nil }
+                        }
+                    }
+                }
+            }
+        }
         .safeAreaInset(edge: .top, spacing: 0) {
             if isOffline {
                 Label("目前為離線模式，待送內容會在恢復網路後重試。", systemImage: "wifi.slash")
@@ -491,6 +514,19 @@ struct RootTabView: View {
                 sharedAppointmentStart,
                 conversationStart
             )
+            openPendingAppointmentReminder()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: SharedAppointmentNotificationRoute.didRequestOpen
+            )
+        ) { notification in
+            guard let appointmentID = notification.object as? UUID else { return }
+            Task {
+                await sharedAppointmentModel.refresh()
+                _ = SharedAppointmentNotificationRoute.consumePendingAppointmentID()
+                openAppointmentReminder(id: appointmentID)
+            }
         }
         .onChange(of: selection) { _, selection in
             Task {
@@ -562,6 +598,18 @@ struct RootTabView: View {
                 conversationFocusMessageID = source.messageID
             }
         }
+    }
+
+    private func openPendingAppointmentReminder() {
+        guard let appointmentID = SharedAppointmentNotificationRoute
+            .consumePendingAppointmentID()
+        else { return }
+        openAppointmentReminder(id: appointmentID)
+    }
+
+    private func openAppointmentReminder(id: UUID) {
+        selection = .today
+        reminderAppointmentID = id
     }
 }
 

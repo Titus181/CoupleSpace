@@ -107,6 +107,9 @@ final class SupabasePairingService: PairingRemoteServing {
                         userID: session.user.id,
                         relationshipID: previous.relationshipID
                     )
+                    await LocalSharedAppointmentReminderScheduler(
+                        relationshipID: previous.relationshipID
+                    ).removeAll()
                 }
                 relationshipSnapshotStore.clear(userID: session.user.id)
                 ConversationSnapshotStore().clearAll(userID: session.user.id)
@@ -129,6 +132,9 @@ final class SupabasePairingService: PairingRemoteServing {
                     userID: session.user.id,
                     relationshipID: previous.relationshipID
                 )
+                await LocalSharedAppointmentReminderScheduler(
+                    relationshipID: previous.relationshipID
+                ).removeAll()
                 ConversationSnapshotStore().clearAll(userID: session.user.id)
                 ConversationPhotoCacheStore().clearAll(userID: session.user.id)
                 TodaySnapshotStore().clearAll(userID: session.user.id)

@@ -202,6 +202,13 @@ final class SupabaseAppleAuthenticationModel: ObservableObject {
         do {
             try await client.auth.signOut()
             if let signedInUserID {
+                if let relationship = try? RelationshipSnapshotStore().load(
+                    userID: signedInUserID
+                ) {
+                    await LocalSharedAppointmentReminderScheduler(
+                        relationshipID: relationship.relationshipID
+                    ).removeAll()
+                }
                 ConversationSnapshotStore().clearAll(userID: signedInUserID)
                 ConversationPhotoCacheStore().clearAll(userID: signedInUserID)
                 TodaySnapshotStore().clearAll(userID: signedInUserID)

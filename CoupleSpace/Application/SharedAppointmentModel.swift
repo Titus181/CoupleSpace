@@ -9,8 +9,11 @@ final class SharedAppointmentModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var isSaving = false
     @Published private(set) var statusMessage: String?
+    @Published private(set) var reminderStatusMessage: String?
+    @Published private(set) var reminderAuthorization: SharedAppointmentReminderAuthorization = .notDetermined
 
     private let service: SharedAppointmentRemoteServing
+    private let reminderScheduler: SharedAppointmentReminderScheduling
     private let now: () -> Date
     private let discussionModelFactory: ((UUID) -> ConversationModel)?
     private var hasStarted = false
@@ -24,10 +27,12 @@ final class SharedAppointmentModel: ObservableObject {
     init(
         service: SharedAppointmentRemoteServing,
         now: @escaping () -> Date = Date.init,
+        reminderScheduler: SharedAppointmentReminderScheduling? = nil,
         discussionModelFactory: ((UUID) -> ConversationModel)? = nil
     ) {
         self.service = service
         self.now = now
+        self.reminderScheduler = reminderScheduler ?? DisabledSharedAppointmentReminderScheduler()
         self.discussionModelFactory = discussionModelFactory
     }
 
@@ -107,6 +112,14 @@ final class SharedAppointmentModel: ObservableObject {
         }
     }
 
+    func prepareReminderAuthorization() async {
+        let status = await reminderScheduler.requestAuthorization()
+        updateReminderStatus(for: status, userRequested: true)
+        if status == .authorized {
+            await reconcileReminders()
+        }
+    }
+
     func refresh() async {
         guard !isLoading else { return }
         isLoading = true
@@ -128,6 +141,7 @@ final class SharedAppointmentModel: ObservableObject {
                 operations,
                 to: remote + pending
             ).sorted(by: Self.appointmentOrder)
+            await reconcileReminders()
             replaceAppointmentEvents(events)
             recentDiscussionSummaries = summaries
                 .filter { remoteIDs.contains($0.appointmentID) }
@@ -148,6 +162,9 @@ final class SharedAppointmentModel: ObservableObject {
         guard !isSaving, let normalized = SharedAppointmentPolicy.normalizedDraft(draft) else {
             statusMessage = "請確認標題、時間與提醒設定。"
             return false
+        }
+        if normalized.reminderAt != nil {
+            await prepareReminderAuthorization()
         }
         let clientID = UUID()
         let localCreatedAt = now()
@@ -207,6 +224,9 @@ final class SharedAppointmentModel: ObservableObject {
             reminderAt: normalized.reminderAt,
             sourceMessageID: current.sourceMessageID
         )
+        if preservedSourceDraft.reminderAt != nil {
+            await prepareReminderAuthorization()
+        }
         isSaving = true
         defer { isSaving = false }
         let operationID = UUID()
@@ -318,6 +338,7 @@ final class SharedAppointmentModel: ObservableObject {
                     try await service.acknowledgePendingAppointment(clientID: entry.clientID)
                     appointments.removeAll { $0.id == entry.clientID }
                     mergeAppointments([saved])
+                    await reconcileReminders()
                     deliveryStatusMessage = nil
                     statusMessage = "共同約定已同步。"
                     resolved = true
@@ -399,6 +420,7 @@ final class SharedAppointmentModel: ObservableObject {
                         terminalOperationMessage = message
                         statusMessage = message
                     }
+                    await reconcileReminders()
                     resolved = true
                     break
                 } catch {
@@ -430,6 +452,37 @@ final class SharedAppointmentModel: ObservableObject {
     private func refreshAppointmentEvents() async {
         guard let events = try? await service.fetchAppointmentEvents() else { return }
         replaceAppointmentEvents(events)
+    }
+
+    private func reconcileReminders() async {
+        do {
+            try await reminderScheduler.reconcile(appointments)
+            updateReminderStatus(for: await reminderScheduler.authorizationStatus())
+        } catch {
+            reminderStatusMessage = "這支手機暫時無法更新約定提醒，稍後會再試。"
+        }
+    }
+
+    private func updateReminderStatus(
+        for status: SharedAppointmentReminderAuthorization,
+        userRequested: Bool = false
+    ) {
+        reminderAuthorization = status
+        let hasFutureReminder = appointments.contains {
+            $0.status == .scheduled && $0.reminderAt.map { $0 > now() } == true
+        }
+        switch status {
+        case .authorized:
+            reminderStatusMessage = nil
+        case .notDetermined:
+            reminderStatusMessage = (hasFutureReminder || userRequested)
+                ? "允許通知後，這支手機才會在指定時間提醒。"
+                : nil
+        case .denied:
+            reminderStatusMessage = (hasFutureReminder || userRequested)
+                ? "這支手機尚未允許通知；約定仍會同步，但不會在指定時間提醒。"
+                : nil
+        }
     }
 
     private func replaceAppointmentEvents(_ events: [SharedAppointmentEvent]) {
