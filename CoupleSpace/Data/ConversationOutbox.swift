@@ -542,6 +542,7 @@ private struct ConversationCachedMessage: Codable, Equatable {
 private struct ConversationCachedSnapshot: Codable, Equatable {
     let messages: [ConversationCachedMessage]
     let unreadCount: Int
+    let savedMomentMessageIDs: Set<UUID>?
 }
 
 struct ConversationSnapshotStore {
@@ -562,7 +563,8 @@ struct ConversationSnapshotStore {
         return ConversationSnapshot(
             currentUserID: userID,
             messages: cached.messages.map(\.message),
-            unreadCount: cached.unreadCount
+            unreadCount: cached.unreadCount,
+            savedMomentMessageIDs: cached.savedMomentMessageIDs ?? []
         )
     }
 
@@ -574,7 +576,8 @@ struct ConversationSnapshotStore {
         defaults.set(
             try JSONEncoder().encode(ConversationCachedSnapshot(
                 messages: messages,
-                unreadCount: snapshot.unreadCount
+                unreadCount: snapshot.unreadCount,
+                savedMomentMessageIDs: snapshot.savedMomentMessageIDs
             )),
             forKey: key(userID: userID, relationshipID: relationshipID)
         )

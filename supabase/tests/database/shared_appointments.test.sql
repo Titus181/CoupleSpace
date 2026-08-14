@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(19);
+select plan(25);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password)
 values
@@ -143,6 +143,7 @@ select results_eq(
         from public.update_shared_appointment(
             'e0000000-0000-0000-0000-000000000001',
             'e2000000-0000-0000-0000-000000000001',
+            'e3000000-0000-0000-0000-000000000001',
             '週日晚餐',
             '2026-08-17 19:30:00+08',
             '',
@@ -154,13 +155,109 @@ select results_eq(
     'either partner can edit the shared appointment in place'
 );
 
+reset role;
+update public.shared_appointments
+set updated_at = '2026-08-14 00:00:00+00'
+where relationship_id = 'e0000000-0000-0000-0000-000000000001'
+  and client_id = 'e2000000-0000-0000-0000-000000000001';
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e2', true);
+
+select results_eq(
+    $$
+        select updated_at::text
+        from public.update_shared_appointment(
+            'e0000000-0000-0000-0000-000000000001',
+            'e2000000-0000-0000-0000-000000000001',
+            'e3000000-0000-0000-0000-000000000001',
+            '週日晚餐',
+            '2026-08-17 19:30:00+08',
+            '',
+            '提早十分鐘',
+            null
+        )
+    $$,
+    array['2026-08-14 00:00:00+00'::text],
+    'replaying an identical edit does not refresh the server timestamp'
+);
+
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
+select results_eq(
+    $$
+        select title
+        from public.update_shared_appointment(
+            'e0000000-0000-0000-0000-000000000001',
+            'e2000000-0000-0000-0000-000000000001',
+            'e3000000-0000-0000-0000-000000000006',
+            '伴侶較新的編輯',
+            '2026-08-17 20:00:00+08'
+        )
+    $$,
+    array['伴侶較新的編輯'::text],
+    'a different stable operation can apply a newer edit'
+);
+
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e2', true);
+select results_eq(
+    $$
+        select title
+        from public.update_shared_appointment(
+            'e0000000-0000-0000-0000-000000000001',
+            'e2000000-0000-0000-0000-000000000001',
+            'e3000000-0000-0000-0000-000000000001',
+            '週日晚餐',
+            '2026-08-17 19:30:00+08',
+            '',
+            '提早十分鐘',
+            null
+        )
+    $$,
+    array['伴侶較新的編輯'::text],
+    'a lost-ack replay returns current state without overwriting a newer edit'
+);
+
+reset role;
+select results_eq(
+    $$
+        select count(*)::integer
+        from public.shared_appointment_operations
+        where relationship_id = 'e0000000-0000-0000-0000-000000000001'
+    $$,
+    array[2],
+    'one durable receipt is stored per accepted update operation'
+);
+
+select has_table(
+    'public',
+    'shared_appointment_operations',
+    'appointment operation receipts are durable server state'
+);
+
+select ok(
+    position(
+        'for share' in lower(pg_get_functiondef(
+            'public.update_shared_appointment(uuid,uuid,uuid,text,timestamptz,text,text,timestamptz)'::regprocedure
+        ))
+    ) > 0
+    and position(
+        'for share' in lower(pg_get_functiondef(
+            'public.cancel_shared_appointment(uuid,uuid,uuid)'::regprocedure
+        ))
+    ) > 0,
+    'edit and cancel hold a relationship lock through their write transaction'
+);
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e2', true);
+
 select results_eq(
     $$
         select status || '/' || (cancelled_by_user_id is not null)::text
             || '/' || (cancelled_at is not null)::text
         from public.cancel_shared_appointment(
             'e0000000-0000-0000-0000-000000000001',
-            'e2000000-0000-0000-0000-000000000001'
+            'e2000000-0000-0000-0000-000000000001',
+            'e3000000-0000-0000-0000-000000000002'
         )
     $$,
     array['cancelled/true/true'::text],
@@ -172,7 +269,8 @@ select results_eq(
         select status
         from public.cancel_shared_appointment(
             'e0000000-0000-0000-0000-000000000001',
-            'e2000000-0000-0000-0000-000000000001'
+            'e2000000-0000-0000-0000-000000000001',
+            'e3000000-0000-0000-0000-000000000002'
         )
     $$,
     array['cancelled'::text],
@@ -184,6 +282,7 @@ select throws_ok(
         select public.update_shared_appointment(
             'e0000000-0000-0000-0000-000000000001',
             'e2000000-0000-0000-0000-000000000001',
+            'e3000000-0000-0000-0000-000000000003',
             '不能復活',
             '2026-08-18 19:30:00+08'
         )
@@ -305,6 +404,7 @@ select throws_ok(
         select public.update_shared_appointment(
             'e0000000-0000-0000-0000-000000000001',
             'e2000000-0000-0000-0000-000000000007',
+            'e3000000-0000-0000-0000-000000000004',
             'too late',
             '2026-08-22 12:00:00+08'
         )
@@ -318,7 +418,8 @@ select throws_ok(
     $$
         select public.cancel_shared_appointment(
             'e0000000-0000-0000-0000-000000000001',
-            'e2000000-0000-0000-0000-000000000007'
+            'e2000000-0000-0000-0000-000000000007',
+            'e3000000-0000-0000-0000-000000000005'
         )
     $$,
     '23514',

@@ -5,6 +5,8 @@ struct RootTabView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var selection = PrimarySection.defaultSelection
     @State private var conversationFocusMessageID: UUID?
+    @State private var appointmentDiscussionFocus: AppointmentDiscussionFocus?
+    @State private var sourceNavigationRequestID: UUID?
     @StateObject private var networkRecoveryMonitor = NetworkRecoveryMonitor()
     @StateObject private var momentModel: MomentModel
     @StateObject private var togetherNowModel: TogetherNowModel
@@ -99,6 +101,60 @@ struct RootTabView: View {
                         createdAt: .now,
                         sourceMessageID: sourceMessageID
                     )]
+                )
+            } else if arguments.contains("--ui-testing-w11-discussion") {
+                service = InMemoryMomentService(
+                    userID: uiTestUserID,
+                    moments: [Moment(
+                        id: UUID(uuidString: "D1000000-0000-0000-0000-000000000011")!,
+                        creatorUserID: uiTestUserID,
+                        content: .text("從約定留下的 Moment"),
+                        createdAt: .now,
+                        sourceMessageID: UUID(
+                            uuidString: "D4000000-0000-0000-0000-000000000020"
+                        )!,
+                        sourceAppointmentID: UUID(
+                            uuidString: "A4000000-0000-0000-0000-000000000004"
+                        )!
+                    )]
+                )
+            } else if arguments.contains("--ui-testing-w11-source-routing") {
+                let appointmentID = UUID(
+                    uuidString: "A4000000-0000-0000-0000-000000000004"
+                )!
+                service = InMemoryMomentService(
+                    userID: uiTestUserID,
+                    moments: [
+                        Moment(
+                            id: UUID(uuidString: "D1000000-0000-0000-0000-000000000012")!,
+                            creatorUserID: uiTestUserID,
+                            content: .text("第一個約定來源"),
+                            createdAt: .now,
+                            sourceMessageID: UUID(
+                                uuidString: "D4000000-0000-0000-0000-000000000020"
+                            )!,
+                            sourceAppointmentID: appointmentID
+                        ),
+                        Moment(
+                            id: UUID(uuidString: "D1000000-0000-0000-0000-000000000013")!,
+                            creatorUserID: uiTestUserID,
+                            content: .text("一般聊天來源"),
+                            createdAt: .now.addingTimeInterval(-1),
+                            sourceMessageID: UUID(
+                                uuidString: "D4000000-0000-0000-0000-000000000030"
+                            )!
+                        ),
+                        Moment(
+                            id: UUID(uuidString: "D1000000-0000-0000-0000-000000000014")!,
+                            creatorUserID: uiTestUserID,
+                            content: .text("第二個約定來源"),
+                            createdAt: .now.addingTimeInterval(-2),
+                            sourceMessageID: UUID(
+                                uuidString: "D4000000-0000-0000-0000-000000000022"
+                            )!,
+                            sourceAppointmentID: appointmentID
+                        ),
+                    ]
                 )
             } else if arguments.contains("--ui-testing-photo-moment"),
                let photoData = Data(base64Encoded:
@@ -202,7 +258,8 @@ struct RootTabView: View {
                     createdAt: .now,
                     updatedAt: .now
                 )]
-            } else if arguments.contains("--ui-testing-w11-discussion") {
+            } else if arguments.contains("--ui-testing-w11-discussion")
+                        || arguments.contains("--ui-testing-w11-source-routing") {
                 seededAppointments = [SharedAppointment(
                     id: UUID(uuidString: "A4000000-0000-0000-0000-000000000004")!,
                     creatorUserID: uiTestUserID,
@@ -223,7 +280,8 @@ struct RootTabView: View {
                 uuidString: "A4000000-0000-0000-0000-000000000004"
             )!
             let seededDiscussionSummaries: [SharedAppointmentDiscussionSummary]
-            if arguments.contains("--ui-testing-w11-discussion") {
+                if arguments.contains("--ui-testing-w11-discussion")
+                    || arguments.contains("--ui-testing-w11-source-routing") {
                 seededDiscussionSummaries = [SharedAppointmentDiscussionSummary(
                     appointmentID: discussionAppointmentID,
                     latestActivityAt: .now,
@@ -241,7 +299,8 @@ struct RootTabView: View {
                     discussionModelFactory: { appointmentID in
                         let messages: [ChatMessage]
                         let photoDataByMessageID: [UUID: Data]
-                        if arguments.contains("--ui-testing-w11-discussion"),
+                        if (arguments.contains("--ui-testing-w11-discussion")
+                            || arguments.contains("--ui-testing-w11-source-routing")),
                            appointmentID == discussionAppointmentID {
                             let photoMessageID = UUID(
                                 uuidString: "D4000000-0000-0000-0000-000000000021"
@@ -262,6 +321,12 @@ struct RootTabView: View {
                                     body: "要不要先約下午兩點？",
                                     createdAt: .now
                                 ),
+                                ChatMessage(
+                                    id: UUID(uuidString: "D4000000-0000-0000-0000-000000000022")!,
+                                    senderUserID: uiTestPartnerID,
+                                    body: "第二個約定來源訊息",
+                                    createdAt: .now.addingTimeInterval(1)
+                                ),
                             ]
                             photoDataByMessageID = [photoMessageID: pixel]
                         } else {
@@ -281,7 +346,15 @@ struct RootTabView: View {
             )
             let seededMessages: [ChatMessage]
             let seededPhotoDataByMessageID: [UUID: Data]
-            if arguments.contains("--ui-testing-w10-chat") {
+            if arguments.contains("--ui-testing-w11-source-routing") {
+                seededMessages = [ChatMessage(
+                    id: UUID(uuidString: "D4000000-0000-0000-0000-000000000030")!,
+                    senderUserID: uiTestPartnerID,
+                    body: "一般聊天來源訊息",
+                    createdAt: .now
+                )]
+                seededPhotoDataByMessageID = [:]
+            } else if arguments.contains("--ui-testing-w10-chat") {
                 let sourceMessageID = UUID(uuidString: "D4000000-0000-0000-0000-000000000010")!
                 let photoMessageID = UUID(uuidString: "D4000000-0000-0000-0000-000000000011")!
                 seededMessages = [
@@ -357,6 +430,7 @@ struct RootTabView: View {
                     model: conversationModel,
                     sharedAppointmentModel: sharedAppointmentModel,
                     focusMessageID: $conversationFocusMessageID,
+                    appointmentDiscussionFocus: $appointmentDiscussionFocus,
                     savedMomentSourceIDs: Set(momentModel.moments.compactMap(\.sourceMessageID)),
                     onMomentSaved: { await momentModel.refresh() }
                 )
@@ -455,11 +529,23 @@ struct RootTabView: View {
         }
     }
 
-    private func openSourceMessage(_ messageID: UUID) {
+    private func openSourceMessage(_ source: MomentSource) {
+        let requestID = UUID()
+        sourceNavigationRequestID = requestID
+        conversationFocusMessageID = nil
+        appointmentDiscussionFocus = nil
         selection = .conversation
         Task { @MainActor in
             await Task.yield()
-            conversationFocusMessageID = messageID
+            guard sourceNavigationRequestID == requestID else { return }
+            if let appointmentID = source.appointmentID {
+                appointmentDiscussionFocus = AppointmentDiscussionFocus(
+                    appointmentID: appointmentID,
+                    messageID: source.messageID
+                )
+            } else {
+                conversationFocusMessageID = source.messageID
+            }
         }
     }
 }
@@ -474,7 +560,7 @@ private struct UsView: View {
     let accountStatusMessage: String?
     let relationshipToken: String?
     let technicalValidationClient: SupabaseClient?
-    let onOpenSourceMessage: (UUID) -> Void
+    let onOpenSourceMessage: (MomentSource) -> Void
     let onSignOut: () -> Void
 
     var body: some View {
@@ -524,7 +610,10 @@ private struct UsView: View {
                 )
             }
             .sheet(isPresented: $isShowingSharedSchedule) {
-                SharedAppointmentScheduleView(model: sharedAppointmentModel)
+                SharedAppointmentScheduleView(
+                    model: sharedAppointmentModel,
+                    onMomentSaved: { await momentModel.refresh() }
+                )
             }
         }
         .accessibilityIdentifier("us-screen")

@@ -4,6 +4,15 @@ import UIKit
 struct NextSharedAppointmentSection: View {
     @ObservedObject var model: SharedAppointmentModel
     @State private var isCreating = false
+    let onMomentSaved: @MainActor () async -> Void
+
+    init(
+        model: SharedAppointmentModel,
+        onMomentSaved: @escaping @MainActor () async -> Void = {}
+    ) {
+        self.model = model
+        self.onMomentSaved = onMomentSaved
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -27,7 +36,8 @@ struct NextSharedAppointmentSection: View {
                     NavigationLink {
                         SharedAppointmentDetailView(
                             appointmentID: appointment.id,
-                            model: model
+                            model: model,
+                            onMomentSaved: onMomentSaved
                         )
                     } label: {
                         SharedAppointmentCard(appointment: appointment, model: model)
@@ -108,13 +118,25 @@ struct SharedAppointmentScheduleView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var model: SharedAppointmentModel
     @State private var isCreating = false
+    let onMomentSaved: @MainActor () async -> Void
+
+    init(
+        model: SharedAppointmentModel,
+        onMomentSaved: @escaping @MainActor () async -> Void = {}
+    ) {
+        self.model = model
+        self.onMomentSaved = onMomentSaved
+    }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
                     NavigationLink {
-                        SharedAppointmentCalendarView(model: model)
+                        SharedAppointmentCalendarView(
+                            model: model,
+                            onMomentSaved: onMomentSaved
+                        )
                     } label: {
                         Label("查看月曆", systemImage: "calendar")
                     }
@@ -178,7 +200,8 @@ struct SharedAppointmentScheduleView: View {
         NavigationLink {
             SharedAppointmentDetailView(
                 appointmentID: appointment.id,
-                model: model
+                model: model,
+                onMomentSaved: onMomentSaved
             )
         } label: {
             VStack(alignment: .leading, spacing: 5) {
@@ -204,6 +227,15 @@ struct SharedAppointmentScheduleView: View {
 private struct SharedAppointmentCalendarView: View {
     @ObservedObject var model: SharedAppointmentModel
     @State private var selectedDate = Date()
+    let onMomentSaved: @MainActor () async -> Void
+
+    init(
+        model: SharedAppointmentModel,
+        onMomentSaved: @escaping @MainActor () async -> Void = {}
+    ) {
+        self.model = model
+        self.onMomentSaved = onMomentSaved
+    }
 
     private var selectedAppointments: [SharedAppointment] {
         model.appointments(on: selectedDate)
@@ -232,7 +264,8 @@ private struct SharedAppointmentCalendarView: View {
                         NavigationLink {
                             SharedAppointmentDetailView(
                                 appointmentID: appointment.id,
-                                model: model
+                                model: model,
+                                onMomentSaved: onMomentSaved
                             )
                         } label: {
                             VStack(alignment: .leading, spacing: 5) {
@@ -266,20 +299,28 @@ private struct SharedAppointmentCalendarView: View {
 
 struct AppointmentDiscussionView: View {
     @StateObject private var discussionModel: ConversationModel
+    @State private var focusMessageID: UUID?
     @ObservedObject var sharedAppointmentModel: SharedAppointmentModel
     let appointmentTitle: String
     let allowsSending: Bool
+    let initialFocusMessageID: UUID?
+    let onMomentSaved: @MainActor () async -> Void
 
     init(
         discussionModel: ConversationModel,
         sharedAppointmentModel: SharedAppointmentModel,
         appointmentTitle: String,
-        allowsSending: Bool
+        allowsSending: Bool,
+        initialFocusMessageID: UUID? = nil,
+        onMomentSaved: @escaping @MainActor () async -> Void = {}
     ) {
         _discussionModel = StateObject(wrappedValue: discussionModel)
         self.sharedAppointmentModel = sharedAppointmentModel
         self.appointmentTitle = appointmentTitle
         self.allowsSending = allowsSending
+        _focusMessageID = State(initialValue: nil)
+        self.initialFocusMessageID = initialFocusMessageID
+        self.onMomentSaved = onMomentSaved
     }
 
     var body: some View {
@@ -296,15 +337,21 @@ struct AppointmentDiscussionView: View {
             ConversationView(
                 model: discussionModel,
                 sharedAppointmentModel: sharedAppointmentModel,
+                focusMessageID: $focusMessageID,
                 mode: .appointmentDiscussion,
                 embedsNavigationStack: false,
-                allowsSending: allowsSending
+                allowsSending: allowsSending,
+                onMomentSaved: onMomentSaved
             )
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .task {
+        .task(id: initialFocusMessageID) {
             await discussionModel.start()
             await discussionModel.setConversationVisible(true)
+            if let initialFocusMessageID {
+                await discussionModel.focusSourceMessage(id: initialFocusMessageID)
+            }
+            focusMessageID = initialFocusMessageID
         }
         .onDisappear {
             Task {
@@ -321,10 +368,16 @@ struct SharedAppointmentDetailView: View {
     let appointmentID: UUID
     @State private var isEditing = false
     @State private var isConfirmingCancellation = false
+    let onMomentSaved: @MainActor () async -> Void
 
-    init(appointmentID: UUID, model: SharedAppointmentModel) {
+    init(
+        appointmentID: UUID,
+        model: SharedAppointmentModel,
+        onMomentSaved: @escaping @MainActor () async -> Void = {}
+    ) {
         self.appointmentID = appointmentID
         self.model = model
+        self.onMomentSaved = onMomentSaved
     }
 
     var body: some View {
@@ -365,14 +418,15 @@ struct SharedAppointmentDetailView: View {
                                     discussionModel: discussionModel,
                                     sharedAppointmentModel: model,
                                     appointmentTitle: appointment.title,
-                                    allowsSending: appointment.status == .scheduled
+                                    allowsSending: appointment.status == .scheduled,
+                                    onMomentSaved: onMomentSaved
                                 )
                             } label: {
                                 Label("開啟專屬討論", systemImage: "bubble.left.and.bubble.right")
                             }
                             .accessibilityIdentifier("open-appointment-discussion")
 
-                            Text("目前支援文字、照片與 Emoji；收藏將在後續切片接上。")
+                            Text("目前支援文字、照片、Emoji 與收藏為 Moment。")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }

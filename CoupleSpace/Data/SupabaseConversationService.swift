@@ -251,6 +251,14 @@ private struct SavedMomentRow: Decodable {
     }
 }
 
+private struct SavedMomentSourceRow: Decodable {
+    let sourceMessageID: UUID?
+
+    enum CodingKeys: String, CodingKey {
+        case sourceMessageID = "source_shared_item_client_id"
+    }
+}
+
 @MainActor
 final class SupabaseConversationService: ConversationRemoteServing {
     private static let photoBucket = "couplespace-w1-photos"
@@ -416,6 +424,15 @@ final class SupabaseConversationService: ConversationRemoteServing {
             uniqueKeysWithValues: reactionRows.map { ($0.messageClientID, try $0.reaction()) }
         )
         let messages = try rows.compactMap { try $0.message(reaction: reactions[$0.clientID]) }
+        let visibleMessageIDs = Set(messages.map(\.id))
+        let savedMomentRows: [SavedMomentSourceRow] = try await client
+            .from("moments")
+            .select("source_shared_item_client_id")
+            .eq("relationship_id", value: relationshipID)
+            .execute()
+            .value
+        let savedMomentMessageIDs = Set(savedMomentRows.compactMap(\.sourceMessageID))
+            .intersection(visibleMessageIDs)
         let unreadCount: Int
         switch scope {
         case .main:
@@ -435,7 +452,8 @@ final class SupabaseConversationService: ConversationRemoteServing {
         let snapshot = ConversationSnapshot(
             currentUserID: currentUserID,
             messages: messages,
-            unreadCount: unreadCount
+            unreadCount: unreadCount,
+            savedMomentMessageIDs: savedMomentMessageIDs
         )
         try snapshotStore.save(snapshot, userID: currentUserID, relationshipID: relationshipID)
         return snapshot
@@ -554,8 +572,14 @@ final class SupabaseConversationService: ConversationRemoteServing {
             table: "conversation_read_states",
             filter: .eq("relationship_id", value: relationshipID.uuidString.lowercased())
         )
+        let moments = channel.postgresChange(
+            AnyAction.self,
+            schema: "public",
+            table: "moments",
+            filter: .eq("relationship_id", value: relationshipID.uuidString.lowercased())
+        )
         realtimeChannel = channel
-        realtimeTasks = [messages, readState].map { stream in
+        realtimeTasks = [messages, readState, moments].map { stream in
             Task {
                 for await _ in stream {
                     guard !Task.isCancelled else { return }
@@ -798,7 +822,8 @@ final class InMemoryConversationService: ConversationRemoteServing {
             messages: messages.sorted {
                 ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString)
             },
-            unreadCount: unreadCount
+            unreadCount: unreadCount,
+            savedMomentMessageIDs: Set(savedMomentByMessageID.keys)
         )
     }
 

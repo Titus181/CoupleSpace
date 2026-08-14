@@ -144,3 +144,176 @@ enum SharedAppointmentOutboxError: Error {
     case clientIDCollision
     case unexpectedAcknowledgement
 }
+
+enum SharedAppointmentOperation: Codable, Equatable, Sendable {
+    case update(SharedAppointmentDraft)
+    case cancel
+}
+
+struct SharedAppointmentOperationOutboxEntry: Codable, Equatable, Sendable {
+    let userID: UUID
+    let relationshipID: UUID
+    let operationID: UUID
+    let appointmentID: UUID
+    let operation: SharedAppointmentOperation
+    let localCreatedAt: Date
+    var attemptCount: Int
+
+    func applying(to appointment: SharedAppointment) -> SharedAppointment {
+        guard appointment.id == appointmentID else { return appointment }
+        switch operation {
+        case let .update(draft):
+            return SharedAppointment(
+                id: appointment.id,
+                creatorUserID: appointment.creatorUserID,
+                title: draft.title,
+                startsAt: draft.startsAt,
+                location: draft.location,
+                note: draft.note,
+                reminderAt: draft.reminderAt,
+                status: appointment.status,
+                sourceMessageID: appointment.sourceMessageID,
+                createdAt: appointment.createdAt,
+                updatedAt: appointment.updatedAt,
+                deliveryState: appointment.deliveryState
+            )
+        case .cancel:
+            return SharedAppointment(
+                id: appointment.id,
+                creatorUserID: appointment.creatorUserID,
+                title: appointment.title,
+                startsAt: appointment.startsAt,
+                location: appointment.location,
+                note: appointment.note,
+                reminderAt: appointment.reminderAt,
+                status: .cancelled,
+                sourceMessageID: appointment.sourceMessageID,
+                createdAt: appointment.createdAt,
+                updatedAt: appointment.updatedAt,
+                deliveryState: appointment.deliveryState
+            )
+        }
+    }
+}
+
+struct SharedAppointmentOperationOutboxQueue: Codable, Equatable, Sendable {
+    private(set) var entries: [SharedAppointmentOperationOutboxEntry] = []
+
+    var isEmpty: Bool { entries.isEmpty }
+
+    mutating func enqueue(_ entry: SharedAppointmentOperationOutboxEntry) throws {
+        if let existing = entries.first(where: { $0.operationID == entry.operationID }) {
+            guard existing == entry else {
+                throw SharedAppointmentOperationOutboxError.operationIDCollision
+            }
+            return
+        }
+        if case .update = entry.operation,
+           entries.contains(where: {
+               $0.appointmentID == entry.appointmentID && $0.operation == .cancel
+           }) {
+            throw SharedAppointmentOperationOutboxError.appointmentAlreadyPendingCancellation
+        }
+        entries.append(entry)
+    }
+
+    mutating func beginFirstAttempt() -> SharedAppointmentOperationOutboxEntry? {
+        guard !entries.isEmpty else { return nil }
+        entries[0].attemptCount += 1
+        return entries[0]
+    }
+
+    mutating func acknowledgeFirst(operationID: UUID) throws {
+        guard entries.first?.operationID == operationID else {
+            throw SharedAppointmentOperationOutboxError.unexpectedAcknowledgement
+        }
+        entries.removeFirst()
+    }
+}
+
+struct SharedAppointmentOperationOutboxStore {
+    private let defaults: UserDefaults
+    private let keyPrefix = "couplespace.shared-appointment-operation-outbox.v1."
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    func load(
+        userID: UUID,
+        relationshipID: UUID
+    ) throws -> SharedAppointmentOperationOutboxQueue {
+        guard let data = defaults.data(forKey: key(userID: userID, relationshipID: relationshipID)) else {
+            return SharedAppointmentOperationOutboxQueue()
+        }
+        return try JSONDecoder().decode(SharedAppointmentOperationOutboxQueue.self, from: data)
+    }
+
+    func enqueue(
+        appointmentID: UUID,
+        operationID: UUID,
+        operation: SharedAppointmentOperation,
+        userID: UUID,
+        relationshipID: UUID,
+        localCreatedAt: Date
+    ) throws {
+        var queue = try load(userID: userID, relationshipID: relationshipID)
+        try queue.enqueue(SharedAppointmentOperationOutboxEntry(
+            userID: userID,
+            relationshipID: relationshipID,
+            operationID: operationID,
+            appointmentID: appointmentID,
+            operation: operation,
+            localCreatedAt: localCreatedAt,
+            attemptCount: 0
+        ))
+        try save(queue, userID: userID, relationshipID: relationshipID)
+    }
+
+    func beginFirstAttempt(
+        userID: UUID,
+        relationshipID: UUID
+    ) throws -> SharedAppointmentOperationOutboxEntry? {
+        var queue = try load(userID: userID, relationshipID: relationshipID)
+        guard let entry = queue.beginFirstAttempt() else { return nil }
+        try save(queue, userID: userID, relationshipID: relationshipID)
+        return entry
+    }
+
+    func acknowledgeFirst(
+        operationID: UUID,
+        userID: UUID,
+        relationshipID: UUID
+    ) throws {
+        var queue = try load(userID: userID, relationshipID: relationshipID)
+        try queue.acknowledgeFirst(operationID: operationID)
+        try save(queue, userID: userID, relationshipID: relationshipID)
+    }
+
+    func clear(userID: UUID, relationshipID: UUID) {
+        defaults.removeObject(forKey: key(userID: userID, relationshipID: relationshipID))
+    }
+
+    private func save(
+        _ queue: SharedAppointmentOperationOutboxQueue,
+        userID: UUID,
+        relationshipID: UUID
+    ) throws {
+        let key = key(userID: userID, relationshipID: relationshipID)
+        guard !queue.isEmpty else {
+            defaults.removeObject(forKey: key)
+            return
+        }
+        defaults.set(try JSONEncoder().encode(queue), forKey: key)
+    }
+
+    private func key(userID: UUID, relationshipID: UUID) -> String {
+        keyPrefix + userID.uuidString.lowercased() + "." + relationshipID.uuidString.lowercased()
+    }
+}
+
+enum SharedAppointmentOperationOutboxError: Error {
+    case operationIDCollision
+    case appointmentAlreadyPendingCancellation
+    case unexpectedAcknowledgement
+}

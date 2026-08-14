@@ -6,7 +6,7 @@ struct TodayMomentView: View {
     @ObservedObject var model: MomentModel
     @ObservedObject var togetherNowModel: TogetherNowModel
     @ObservedObject var sharedAppointmentModel: SharedAppointmentModel
-    let onOpenSourceMessage: (UUID) -> Void
+    let onOpenSourceMessage: (MomentSource) -> Void
     @State private var isCreatingMoment = false
     @State private var isCreatingQuestion = false
 
@@ -14,7 +14,7 @@ struct TodayMomentView: View {
         model: MomentModel,
         togetherNowModel: TogetherNowModel,
         sharedAppointmentModel: SharedAppointmentModel,
-        onOpenSourceMessage: @escaping (UUID) -> Void = { _ in }
+        onOpenSourceMessage: @escaping (MomentSource) -> Void = { _ in }
     ) {
         self.model = model
         self.togetherNowModel = togetherNowModel
@@ -57,7 +57,10 @@ struct TodayMomentView: View {
                     .controlSize(.large)
                     .accessibilityIdentifier("create-question-moment")
 
-                    NextSharedAppointmentSection(model: sharedAppointmentModel)
+                    NextSharedAppointmentSection(
+                        model: sharedAppointmentModel,
+                        onMomentSaved: { await model.refresh() }
+                    )
 
                     if model.isLoading && model.moments.isEmpty {
                         ProgressView("正在更新你們的此刻…")
@@ -113,12 +116,12 @@ struct TodayMomentView: View {
 struct MomentTimelineView: View {
     @ObservedObject var model: MomentModel
     @ObservedObject var togetherNowModel: TogetherNowModel
-    let onOpenSourceMessage: (UUID) -> Void
+    let onOpenSourceMessage: (MomentSource) -> Void
 
     init(
         model: MomentModel,
         togetherNowModel: TogetherNowModel,
-        onOpenSourceMessage: @escaping (UUID) -> Void = { _ in }
+        onOpenSourceMessage: @escaping (MomentSource) -> Void = { _ in }
     ) {
         self.model = model
         self.togetherNowModel = togetherNowModel
@@ -167,7 +170,7 @@ struct MomentCard: View {
     let authorLabel: String
     let names: TogetherNowSnapshot?
     @ObservedObject var model: MomentModel
-    let onOpenSourceMessage: (UUID) -> Void
+    let onOpenSourceMessage: (MomentSource) -> Void
     @State private var isWritingResponse = false
     @State private var isChoosingEmoji = false
     @State private var isAnsweringQuestion = false
@@ -219,10 +222,10 @@ struct MomentCard: View {
 
             interactionContent
 
-            if let sourceMessageID = moment.sourceMessageID {
+            if let source = moment.source {
                 Divider()
                 Button {
-                    onOpenSourceMessage(sourceMessageID)
+                    onOpenSourceMessage(source)
                 } label: {
                     Label("查看原對話", systemImage: "bubble.left.and.bubble.right")
                 }

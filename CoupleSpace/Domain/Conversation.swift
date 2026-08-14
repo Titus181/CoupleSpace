@@ -107,6 +107,19 @@ struct ConversationSnapshot: Equatable, Sendable {
     let currentUserID: UUID
     let messages: [ChatMessage]
     let unreadCount: Int
+    let savedMomentMessageIDs: Set<UUID>
+
+    init(
+        currentUserID: UUID,
+        messages: [ChatMessage],
+        unreadCount: Int,
+        savedMomentMessageIDs: Set<UUID> = []
+    ) {
+        self.currentUserID = currentUserID
+        self.messages = messages
+        self.unreadCount = unreadCount
+        self.savedMomentMessageIDs = savedMomentMessageIDs
+    }
 }
 
 enum ChatMessageDraft: Equatable, Sendable {

@@ -413,6 +413,94 @@ final class CoupleSpaceUITests: XCTestCase {
         XCTAssertTrue(heart.waitForExistence(timeout: 2))
         heart.tap()
         XCTAssertTrue(app.staticTexts["愛心"].waitForExistence(timeout: 2))
+
+        partnerMessage.press(forDuration: 1)
+        let saveMoment = app.buttons["收藏為 Moment"]
+        XCTAssertTrue(saveMoment.waitForExistence(timeout: 2))
+    }
+
+    @MainActor
+    func testMomentReturnsToExactAppointmentDiscussionMessage() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w11-discussion"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["從約定留下的 Moment"].waitForExistence(timeout: 3))
+        let openSource = app.buttons["查看原對話"]
+        XCTAssertTrue(openSource.waitForExistence(timeout: 2))
+        openSource.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["appointment-discussion-screen"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(
+            app.staticTexts["來源訊息"].waitForExistence(timeout: 3)
+        )
+        XCTAssertTrue(app.staticTexts["要不要先約下午兩點？"].exists)
+    }
+
+    @MainActor
+    func testSourceNavigationReplacesAppointmentAndMainConversationRoutes() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w11-source-routing"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["第一個約定來源"].waitForExistence(timeout: 3))
+        app.buttons["查看原對話"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["appointment-discussion-screen"]
+                .waitForExistence(timeout: 3)
+        )
+
+        app.tabBars.buttons["我們"].tap()
+        XCTAssertTrue(app.staticTexts["第二個約定來源"].waitForExistence(timeout: 2))
+        let sourceButtons = app.buttons.matching(
+            NSPredicate(format: "label == '查看原對話'")
+        )
+        XCTAssertEqual(sourceButtons.count, 3)
+        sourceButtons.element(boundBy: 2).tap()
+
+        let secondSourceMessage = app.staticTexts
+            .matching(identifier: "conversation-message-d4000000-0000-0000-0000-000000000022")
+            .matching(NSPredicate(format: "label == '第二個約定來源訊息'"))
+            .firstMatch
+        XCTAssertTrue(secondSourceMessage.waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.staticTexts
+                .matching(
+                    identifier: "conversation-message-d4000000-0000-0000-0000-000000000022"
+                )
+                .matching(NSPredicate(format: "label == '來源訊息'"))
+                .firstMatch
+                .exists
+        )
+
+        app.tabBars.buttons["我們"].tap()
+        XCTAssertTrue(app.staticTexts["一般聊天來源"].waitForExistence(timeout: 2))
+        app.buttons.matching(NSPredicate(format: "label == '查看原對話'"))
+            .element(boundBy: 1)
+            .tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["conversation-screen"]
+                .waitForExistence(timeout: 3)
+        )
+        XCTAssertFalse(app.descendants(matching: .any)["appointment-discussion-screen"].exists)
+        let mainSourceMessage = app.staticTexts
+            .matching(identifier: "conversation-message-d4000000-0000-0000-0000-000000000030")
+            .matching(NSPredicate(format: "label == '一般聊天來源訊息'"))
+            .firstMatch
+        XCTAssertTrue(mainSourceMessage.waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.staticTexts
+                .matching(
+                    identifier: "conversation-message-d4000000-0000-0000-0000-000000000030"
+                )
+                .matching(NSPredicate(format: "label == '來源訊息'"))
+                .firstMatch
+                .exists
+        )
     }
 
     @MainActor

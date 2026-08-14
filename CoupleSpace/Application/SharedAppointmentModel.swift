@@ -14,7 +14,10 @@ final class SharedAppointmentModel: ObservableObject {
     private let discussionModelFactory: ((UUID) -> ConversationModel)?
     private var hasStarted = false
     private var isDraining = false
+    private var isDrainingOperations = false
     private var deliveryStatusMessage: String?
+    private var operationDeliveryStatusMessage: String?
+    private var terminalOperationMessage: String?
     private var discussionModels: [UUID: ConversationModel] = [:]
 
     init(
@@ -85,6 +88,9 @@ final class SharedAppointmentModel: ObservableObject {
         await drainPendingAppointments(
             maximumAttemptsPerAppointment: ConversationRecoveryRetryPolicy.maximumAttempts
         )
+        await drainPendingAppointmentOperations(
+            maximumAttemptsPerOperation: ConversationRecoveryRetryPolicy.maximumAttempts
+        )
         await refresh()
     }
 
@@ -103,20 +109,27 @@ final class SharedAppointmentModel: ObservableObject {
         do {
             async let remoteAppointments = service.fetchAppointments()
             async let remoteDiscussionSummaries = service.fetchRecentDiscussionSummaries()
+            async let pendingOperations = service.fetchPendingAppointmentOperations()
             let remote = try await remoteAppointments
             let summaries = try await remoteDiscussionSummaries
+            let operations = try await pendingOperations
             let remoteIDs = Set(remote.map(\.id))
             let pending = appointments.filter {
                 $0.deliveryState != .synced && !remoteIDs.contains($0.id)
             }
-            appointments = (remote + pending).sorted(by: Self.appointmentOrder)
+            appointments = Self.applying(
+                operations,
+                to: remote + pending
+            ).sorted(by: Self.appointmentOrder)
             recentDiscussionSummaries = summaries
                 .filter { remoteIDs.contains($0.appointmentID) }
                 .sorted {
                     ($0.latestActivityAt, $0.appointmentID.uuidString)
                         > ($1.latestActivityAt, $1.appointmentID.uuidString)
                 }
-            statusMessage = deliveryStatusMessage
+            statusMessage = terminalOperationMessage
+                ?? operationDeliveryStatusMessage
+                ?? deliveryStatusMessage
         } catch {
             statusMessage = "無法更新共同約定，請稍後再試。"
         }
@@ -188,17 +201,31 @@ final class SharedAppointmentModel: ObservableObject {
         )
         isSaving = true
         defer { isSaving = false }
+        let operationID = UUID()
+        let localCreatedAt = now()
+        terminalOperationMessage = nil
         do {
-            replaceAppointment(try await service.updateAppointment(
-                id: id,
-                draft: preservedSourceDraft
-            ))
-            statusMessage = "共同約定已更新。"
-            return true
+            try await service.enqueueAppointmentOperation(
+                appointmentID: id,
+                operationID: operationID,
+                operation: .update(preservedSourceDraft),
+                localCreatedAt: localCreatedAt
+            )
+            replaceAppointment(SharedAppointmentOperationOutboxEntry(
+                userID: UUID(),
+                relationshipID: UUID(),
+                operationID: operationID,
+                appointmentID: id,
+                operation: .update(preservedSourceDraft),
+                localCreatedAt: localCreatedAt,
+                attemptCount: 0
+            ).applying(to: current))
         } catch {
-            statusMessage = "共同約定尚未更新；請確認連線後再試。"
+            statusMessage = "共同約定未保存到這支裝置，請再試一次。"
             return false
         }
+        await drainPendingAppointmentOperations(maximumAttemptsPerOperation: 1)
+        return true
     }
 
     @discardableResult
@@ -212,20 +239,40 @@ final class SharedAppointmentModel: ObservableObject {
         }
         isSaving = true
         defer { isSaving = false }
+        let operationID = UUID()
+        let localCreatedAt = now()
+        terminalOperationMessage = nil
         do {
-            replaceAppointment(try await service.cancelAppointment(id: id))
-            statusMessage = "共同約定已取消，原內容仍會保留。"
-            return true
+            try await service.enqueueAppointmentOperation(
+                appointmentID: id,
+                operationID: operationID,
+                operation: .cancel,
+                localCreatedAt: localCreatedAt
+            )
+            replaceAppointment(SharedAppointmentOperationOutboxEntry(
+                userID: UUID(),
+                relationshipID: UUID(),
+                operationID: operationID,
+                appointmentID: id,
+                operation: .cancel,
+                localCreatedAt: localCreatedAt,
+                attemptCount: 0
+            ).applying(to: current))
         } catch {
-            statusMessage = "共同約定尚未取消；請確認連線後再試。"
+            statusMessage = "取消操作未保存到這支裝置，請再試一次。"
             return false
         }
+        await drainPendingAppointmentOperations(maximumAttemptsPerOperation: 1)
+        return true
     }
 
     func recoverPendingAppointments() async {
         await loadPendingAppointments()
         await drainPendingAppointments(
             maximumAttemptsPerAppointment: ConversationRecoveryRetryPolicy.maximumAttempts
+        )
+        await drainPendingAppointmentOperations(
+            maximumAttemptsPerOperation: ConversationRecoveryRetryPolicy.maximumAttempts
         )
         await refresh()
     }
@@ -297,6 +344,80 @@ final class SharedAppointmentModel: ObservableObject {
         }
     }
 
+    private func drainPendingAppointmentOperations(maximumAttemptsPerOperation: Int) async {
+        guard !isDrainingOperations else { return }
+        isDrainingOperations = true
+        defer { isDrainingOperations = false }
+        while true {
+            var attempt = 0
+            var resolved = false
+            while attempt < maximumAttemptsPerOperation {
+                let entry: SharedAppointmentOperationOutboxEntry
+                do {
+                    guard let next = try await service.beginNextPendingAppointmentOperation() else {
+                        return
+                    }
+                    entry = next
+                    applyPendingOperation(entry)
+                } catch {
+                    statusMessage = "無法讀取待同步的約定操作，請稍後再試。"
+                    return
+                }
+
+                do {
+                    let result = try await service.deliverPendingAppointmentOperation(entry)
+                    try await service.acknowledgePendingAppointmentOperation(
+                        operationID: entry.operationID
+                    )
+                    switch result {
+                    case let .accepted(saved):
+                        replaceAppointment(saved)
+                        operationDeliveryStatusMessage = nil
+                        switch entry.operation {
+                        case .update:
+                            statusMessage = terminalOperationMessage ?? "共同約定已更新。"
+                        case .cancel:
+                            statusMessage = terminalOperationMessage
+                                ?? "共同約定已取消，原內容仍會保留。"
+                        }
+                    case let .rejected(remoteAppointment, message):
+                        if let remoteAppointment {
+                            replaceAppointment(remoteAppointment)
+                        } else {
+                            appointments.removeAll { $0.id == entry.appointmentID }
+                        }
+                        operationDeliveryStatusMessage = message
+                        terminalOperationMessage = message
+                        statusMessage = message
+                    }
+                    resolved = true
+                    break
+                } catch {
+                    attempt += 1
+                    applyPendingOperation(entry)
+                    let message = "約定變更已保存在這支裝置；請確認連線後重試。"
+                    operationDeliveryStatusMessage = message
+                    statusMessage = message
+                    guard attempt < maximumAttemptsPerOperation,
+                          let delay = ConversationRecoveryRetryPolicy.delayNanoseconds(
+                              afterAttempt: attempt
+                          ) else { return }
+                    do {
+                        try await Task.sleep(nanoseconds: delay)
+                    } catch {
+                        return
+                    }
+                }
+            }
+            if !resolved { return }
+        }
+    }
+
+    private func applyPendingOperation(_ entry: SharedAppointmentOperationOutboxEntry) {
+        guard let current = appointment(id: entry.appointmentID) else { return }
+        replaceAppointment(entry.applying(to: current))
+    }
+
     private func mergeAppointments(_ incoming: [SharedAppointment]) {
         var byID = Dictionary(uniqueKeysWithValues: appointments.map { ($0.id, $0) })
         for appointment in incoming {
@@ -317,5 +438,14 @@ final class SharedAppointmentModel: ObservableObject {
         _ rhs: SharedAppointment
     ) -> Bool {
         (lhs.startsAt, lhs.id.uuidString) < (rhs.startsAt, rhs.id.uuidString)
+    }
+
+    private static func applying(
+        _ operations: [SharedAppointmentOperationOutboxEntry],
+        to appointments: [SharedAppointment]
+    ) -> [SharedAppointment] {
+        operations.reduce(appointments) { current, operation in
+            current.map { operation.applying(to: $0) }
+        }
     }
 }

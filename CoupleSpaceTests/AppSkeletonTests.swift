@@ -278,6 +278,229 @@ struct AppSkeletonTests {
         #expect(model.nextAppointment?.deliveryState == .synced)
     }
 
+    @Test func sharedAppointmentOperationOutboxPersistsFIFOAndRejectsEditAfterCancellation() throws {
+        let suiteName = "SharedAppointmentOperationOutboxTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SharedAppointmentOperationOutboxStore(defaults: defaults)
+        let userID = UUID()
+        let relationshipID = UUID()
+        let appointmentID = UUID()
+        let editID = UUID()
+        let cancelID = UUID()
+        let localCreatedAt = Date(timeIntervalSince1970: 2_500)
+        let draft = SharedAppointmentDraft(
+            title: "更新後",
+            startsAt: localCreatedAt.addingTimeInterval(3_600),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            sourceMessageID: UUID()
+        )
+
+        try store.enqueue(
+            appointmentID: appointmentID,
+            operationID: editID,
+            operation: .update(draft),
+            userID: userID,
+            relationshipID: relationshipID,
+            localCreatedAt: localCreatedAt
+        )
+        try store.enqueue(
+            appointmentID: appointmentID,
+            operationID: cancelID,
+            operation: .cancel,
+            userID: userID,
+            relationshipID: relationshipID,
+            localCreatedAt: localCreatedAt.addingTimeInterval(1)
+        )
+
+        let restored = try SharedAppointmentOperationOutboxStore(defaults: defaults).load(
+            userID: userID,
+            relationshipID: relationshipID
+        )
+        #expect(restored.entries.map(\.operationID) == [editID, cancelID])
+        #expect(try store.load(userID: UUID(), relationshipID: relationshipID).isEmpty)
+        #expect(try store.load(userID: userID, relationshipID: UUID()).isEmpty)
+        #expect(throws: SharedAppointmentOperationOutboxError.self) {
+            try store.enqueue(
+                appointmentID: appointmentID,
+                operationID: UUID(),
+                operation: .update(draft),
+                userID: userID,
+                relationshipID: relationshipID,
+                localCreatedAt: localCreatedAt.addingTimeInterval(2)
+            )
+        }
+    }
+
+    @MainActor
+    @Test func sharedAppointmentEditLostAcknowledgementRetriesStableOperation() async throws {
+        let now = Date(timeIntervalSince1970: 2_700)
+        let appointmentID = UUID()
+        let service = SharedAppointmentRemoteServiceFake()
+        service.operationAcknowledgementFailuresRemaining = 1
+        service.appointments = [SharedAppointment(
+            id: appointmentID,
+            creatorUserID: UUID(),
+            title: "原本",
+            startsAt: now.addingTimeInterval(3_600),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            status: .scheduled,
+            sourceMessageID: UUID(),
+            createdAt: now,
+            updatedAt: now
+        )]
+        let model = SharedAppointmentModel(service: service, now: { now })
+        await model.refresh()
+
+        #expect(await model.update(
+            id: appointmentID,
+            draft: SharedAppointmentDraft(
+                title: "更新後",
+                startsAt: now.addingTimeInterval(7_200),
+                location: nil,
+                note: nil,
+                reminderAt: nil,
+                sourceMessageID: nil
+            )
+        ))
+        let operationID = try #require(service.pendingOperations.first?.operationID)
+        #expect(model.appointment(id: appointmentID)?.title == "更新後")
+
+        await model.recoverPendingAppointments()
+
+        #expect(service.deliveredOperationIDs == [operationID, operationID])
+        #expect(service.pendingOperations.isEmpty)
+        #expect(service.appointments.count == 1)
+        #expect(model.appointment(id: appointmentID)?.title == "更新後")
+    }
+
+    @MainActor
+    @Test func sharedAppointmentCancellationRecoversAfterModelRecreation() async throws {
+        let now = Date(timeIntervalSince1970: 2_900)
+        let appointmentID = UUID()
+        let service = SharedAppointmentRemoteServiceFake()
+        service.operationFailuresRemaining = 1
+        service.appointments = [SharedAppointment(
+            id: appointmentID,
+            creatorUserID: UUID(),
+            title: "待取消",
+            startsAt: now.addingTimeInterval(3_600),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            status: .scheduled,
+            sourceMessageID: nil,
+            createdAt: now,
+            updatedAt: now
+        )]
+        let firstModel = SharedAppointmentModel(service: service, now: { now })
+        await firstModel.refresh()
+
+        #expect(await firstModel.cancel(id: appointmentID))
+        #expect(firstModel.appointment(id: appointmentID)?.status == .cancelled)
+        #expect(service.appointments.first?.status == .scheduled)
+
+        let restoredModel = SharedAppointmentModel(service: service, now: { now })
+        await restoredModel.recoverPendingAppointments()
+
+        #expect(service.pendingOperations.isEmpty)
+        #expect(service.appointments.first?.status == .cancelled)
+        #expect(restoredModel.appointment(id: appointmentID)?.status == .cancelled)
+    }
+
+    @MainActor
+    @Test func terminalAppointmentOperationDoesNotBlockLaterFIFOEntries() async throws {
+        let now = Date(timeIntervalSince1970: 2_950)
+        let cancelledID = UUID()
+        let scheduledID = UUID()
+        let rejectedOperationID = UUID()
+        let acceptedOperationID = UUID()
+        let service = SharedAppointmentRemoteServiceFake()
+        service.appointments = [
+            SharedAppointment(
+                id: cancelledID,
+                creatorUserID: UUID(),
+                title: "已被伴侶取消",
+                startsAt: now.addingTimeInterval(3_600),
+                location: nil,
+                note: nil,
+                reminderAt: nil,
+                status: .cancelled,
+                sourceMessageID: nil,
+                createdAt: now,
+                updatedAt: now
+            ),
+            SharedAppointment(
+                id: scheduledID,
+                creatorUserID: UUID(),
+                title: "仍可編輯",
+                startsAt: now.addingTimeInterval(7_200),
+                location: nil,
+                note: nil,
+                reminderAt: nil,
+                status: .scheduled,
+                sourceMessageID: nil,
+                createdAt: now,
+                updatedAt: now
+            ),
+        ]
+        service.terminallyRejectedAppointmentIDs = [cancelledID]
+        service.pendingOperations = [
+            SharedAppointmentOperationOutboxEntry(
+                userID: UUID(),
+                relationshipID: UUID(),
+                operationID: rejectedOperationID,
+                appointmentID: cancelledID,
+                operation: .update(SharedAppointmentDraft(
+                    title: "不能復活",
+                    startsAt: now.addingTimeInterval(3_600),
+                    location: nil,
+                    note: nil,
+                    reminderAt: nil,
+                    sourceMessageID: nil
+                )),
+                localCreatedAt: now,
+                attemptCount: 0
+            ),
+            SharedAppointmentOperationOutboxEntry(
+                userID: UUID(),
+                relationshipID: UUID(),
+                operationID: acceptedOperationID,
+                appointmentID: scheduledID,
+                operation: .update(SharedAppointmentDraft(
+                    title: "後續操作已送達",
+                    startsAt: now.addingTimeInterval(7_200),
+                    location: nil,
+                    note: nil,
+                    reminderAt: nil,
+                    sourceMessageID: nil
+                )),
+                localCreatedAt: now.addingTimeInterval(1),
+                attemptCount: 0
+            ),
+        ]
+        let model = SharedAppointmentModel(service: service, now: { now })
+
+        await model.recoverPendingAppointments()
+
+        #expect(service.deliveredOperationIDs == [rejectedOperationID, acceptedOperationID])
+        #expect(service.pendingOperations.isEmpty)
+        #expect(model.appointment(id: cancelledID)?.status == .cancelled)
+        #expect(model.appointment(id: scheduledID)?.title == "後續操作已送達")
+        #expect(model.statusMessage == "這筆約定已取消，未再套用待送編輯。")
+    }
+
+    @MainActor
+    @Test func archivedRelationshipOperationFailureIsTerminal() {
+        #expect(SupabaseSharedAppointmentService.isTerminalOperationError(
+            "relationship_not_accessible"
+        ))
+    }
+
     @MainActor
     @Test func sharedAppointmentRecoveryKeepsOfflineDeliveryExplanation() async throws {
         let service = SharedAppointmentRemoteServiceFake()
@@ -1227,6 +1450,10 @@ struct AppSkeletonTests {
         #expect(service.savedMomentClientIDs.count == 2)
         #expect(service.savedMomentClientIDs[0] == service.savedMomentClientIDs[1])
         #expect(model.savedMomentMessageIDs == Set([message.id]))
+
+        let restoredModel = ConversationModel(service: service)
+        await restoredModel.start()
+        #expect(restoredModel.savedMomentMessageIDs == Set([message.id]))
     }
 
     @MainActor
@@ -1279,6 +1506,25 @@ struct AppSkeletonTests {
         #expect(decoded.id == legacy.id)
         #expect(decoded.content == legacy.content)
         #expect(decoded.sourceMessageID == nil)
+        #expect(decoded.sourceAppointmentID == nil)
+    }
+
+    @Test func appointmentDiscussionMomentKeepsAnExactSource() {
+        let sourceMessageID = UUID()
+        let sourceAppointmentID = UUID()
+        let moment = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .photo,
+            createdAt: .now,
+            sourceMessageID: sourceMessageID,
+            sourceAppointmentID: sourceAppointmentID
+        )
+
+        #expect(moment.source == MomentSource(
+            messageID: sourceMessageID,
+            appointmentID: sourceAppointmentID
+        ))
     }
 
     @Test func momentInteractionPoliciesKeepResponsesShortAndQuestionsFixed() {
@@ -1846,9 +2092,14 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
     var appointments: [SharedAppointment] = []
     var discussionSummaries: [SharedAppointmentDiscussionSummary] = []
     var pendingEntries: [SharedAppointmentOutboxEntry] = []
+    var pendingOperations: [SharedAppointmentOperationOutboxEntry] = []
     var deliveryClientIDs: [UUID] = []
+    var deliveredOperationIDs: [UUID] = []
     var createFailuresRemaining = 0
     var acknowledgementFailuresRemaining = 0
+    var operationFailuresRemaining = 0
+    var operationAcknowledgementFailuresRemaining = 0
+    var terminallyRejectedAppointmentIDs: Set<UUID> = []
     private var onChange: (@MainActor () async -> Void)?
 
     func fetchAppointments() async throws -> [SharedAppointment] { appointments }
@@ -1921,10 +2172,70 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
         pendingEntries.removeFirst()
     }
 
-    func updateAppointment(
+    func fetchPendingAppointmentOperations() async throws -> [SharedAppointmentOperationOutboxEntry] {
+        pendingOperations
+    }
+
+    func enqueueAppointmentOperation(
+        appointmentID: UUID,
+        operationID: UUID,
+        operation: SharedAppointmentOperation,
+        localCreatedAt: Date
+    ) async throws {
+        pendingOperations.append(SharedAppointmentOperationOutboxEntry(
+            userID: UUID(),
+            relationshipID: UUID(),
+            operationID: operationID,
+            appointmentID: appointmentID,
+            operation: operation,
+            localCreatedAt: localCreatedAt,
+            attemptCount: 0
+        ))
+    }
+
+    func beginNextPendingAppointmentOperation() async throws -> SharedAppointmentOperationOutboxEntry? {
+        guard !pendingOperations.isEmpty else { return nil }
+        pendingOperations[0].attemptCount += 1
+        return pendingOperations[0]
+    }
+
+    func deliverPendingAppointmentOperation(
+        _ entry: SharedAppointmentOperationOutboxEntry
+    ) async throws -> SharedAppointmentOperationDeliveryResult {
+        deliveredOperationIDs.append(entry.operationID)
+        if operationFailuresRemaining > 0 {
+            operationFailuresRemaining -= 1
+            throw CancellationError()
+        }
+        if terminallyRejectedAppointmentIDs.contains(entry.appointmentID) {
+            return .rejected(
+                appointments.first { $0.id == entry.appointmentID },
+                "這筆約定已取消，未再套用待送編輯。"
+            )
+        }
+        switch entry.operation {
+        case let .update(draft):
+            return .accepted(try performUpdateAppointment(id: entry.appointmentID, draft: draft))
+        case .cancel:
+            return .accepted(try performCancelAppointment(id: entry.appointmentID))
+        }
+    }
+
+    func acknowledgePendingAppointmentOperation(operationID: UUID) async throws {
+        if operationAcknowledgementFailuresRemaining > 0 {
+            operationAcknowledgementFailuresRemaining -= 1
+            throw CancellationError()
+        }
+        guard pendingOperations.first?.operationID == operationID else {
+            throw SharedAppointmentOperationOutboxError.unexpectedAcknowledgement
+        }
+        pendingOperations.removeFirst()
+    }
+
+    private func performUpdateAppointment(
         id: UUID,
         draft: SharedAppointmentDraft
-    ) async throws -> SharedAppointment {
+    ) throws -> SharedAppointment {
         guard let index = appointments.firstIndex(where: { $0.id == id }),
               appointments[index].status == .scheduled,
               let normalized = SharedAppointmentPolicy.normalizedDraft(draft) else {
@@ -1948,7 +2259,7 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
         return updated
     }
 
-    func cancelAppointment(id: UUID) async throws -> SharedAppointment {
+    private func performCancelAppointment(id: UUID) throws -> SharedAppointment {
         guard let index = appointments.firstIndex(where: { $0.id == id }) else {
             throw SharedAppointmentOutboxError.unexpectedAcknowledgement
         }
@@ -1987,6 +2298,7 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
     var cachedPhotoDataByMessageID: [UUID: Data] = [:]
     var reactionClientIDs: [UUID] = []
     var savedMomentClientIDs: [UUID] = []
+    var savedMomentMessageIDs: Set<UUID> = []
     var markedReadMessageIDs: [UUID] = []
     var sendFailuresRemaining = 0
     var fetchFailuresRemaining = 0
@@ -2025,7 +2337,8 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
         ConversationSnapshot(
             currentUserID: currentUserID,
             messages: messages,
-            unreadCount: unreadCount
+            unreadCount: unreadCount,
+            savedMomentMessageIDs: savedMomentMessageIDs
         )
     }
 
@@ -2085,7 +2398,8 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
         let snapshot = ConversationSnapshot(
             currentUserID: currentUserID,
             messages: messages,
-            unreadCount: unreadCount
+            unreadCount: unreadCount,
+            savedMomentMessageIDs: savedMomentMessageIDs
         )
         try await Task.sleep(for: fetchDelay)
         return snapshot
@@ -2174,6 +2488,7 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
         guard messages.contains(where: { $0.id == messageID }) else {
             throw TestServiceError.expected
         }
+        savedMomentMessageIDs.insert(messageID)
         return momentClientID
     }
 

@@ -12,6 +12,7 @@ final class ConversationModel: ObservableObject {
     @Published private(set) var photoDataByMessageID: [UUID: Data] = [:]
     @Published private(set) var activeReactionMessageIDs: Set<UUID> = []
     @Published private(set) var savedMomentMessageIDs: Set<UUID> = []
+    @Published private(set) var focusedSourceMessageID: UUID?
 
     private struct ReactionAttempt {
         let emojiValue: String?
@@ -82,6 +83,7 @@ final class ConversationModel: ObservableObject {
                     .sorted(by: Self.messageOrder)
                 applyPendingReactionAttempts()
                 unreadCount = snapshot.unreadCount
+                savedMomentMessageIDs = snapshot.savedMomentMessageIDs
                 statusMessage = terminalDeliveryMessage
                 loadCachedPhotos()
                 if isConversationVisible { await markVisibleMessagesReadIfNeeded() }
@@ -263,6 +265,7 @@ final class ConversationModel: ObservableObject {
             pendingMomentIDs[message.id] = nil
             savedMomentMessageIDs.insert(message.id)
             statusMessage = "已留在你們的共同時間線。"
+            await persistCurrentSnapshot()
             return true
         } catch {
             statusMessage = "尚未收藏為 Moment，請確認連線後再試。"
@@ -276,6 +279,13 @@ final class ConversationModel: ObservableObject {
         if messages.contains(where: { $0.id == id }) { return true }
         statusMessage = "連線後可查看原對話。"
         return false
+    }
+
+    @discardableResult
+    func focusSourceMessage(id: UUID) async -> Bool {
+        guard await ensureMessageAvailable(id: id) else { return false }
+        focusedSourceMessageID = id
+        return true
     }
 
     private func markVisibleMessagesReadIfNeeded() async {
@@ -475,7 +485,8 @@ final class ConversationModel: ObservableObject {
         await service.persistCachedSnapshot(ConversationSnapshot(
             currentUserID: currentUserID,
             messages: messages,
-            unreadCount: unreadCount
+            unreadCount: unreadCount,
+            savedMomentMessageIDs: savedMomentMessageIDs
         ))
     }
 

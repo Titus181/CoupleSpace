@@ -1,6 +1,11 @@
 import Foundation
 import Supabase
 
+enum SharedAppointmentOperationDeliveryResult: Equatable, Sendable {
+    case accepted(SharedAppointment)
+    case rejected(SharedAppointment?, String)
+}
+
 @MainActor
 protocol SharedAppointmentRemoteServing: AnyObject {
     func fetchPendingAppointments() async throws -> [SharedAppointment]
@@ -16,11 +21,18 @@ protocol SharedAppointmentRemoteServing: AnyObject {
         _ entry: SharedAppointmentOutboxEntry
     ) async throws -> SharedAppointment
     func acknowledgePendingAppointment(clientID: UUID) async throws
-    func updateAppointment(
-        id: UUID,
-        draft: SharedAppointmentDraft
-    ) async throws -> SharedAppointment
-    func cancelAppointment(id: UUID) async throws -> SharedAppointment
+    func fetchPendingAppointmentOperations() async throws -> [SharedAppointmentOperationOutboxEntry]
+    func enqueueAppointmentOperation(
+        appointmentID: UUID,
+        operationID: UUID,
+        operation: SharedAppointmentOperation,
+        localCreatedAt: Date
+    ) async throws
+    func beginNextPendingAppointmentOperation() async throws -> SharedAppointmentOperationOutboxEntry?
+    func deliverPendingAppointmentOperation(
+        _ entry: SharedAppointmentOperationOutboxEntry
+    ) async throws -> SharedAppointmentOperationDeliveryResult
+    func acknowledgePendingAppointmentOperation(operationID: UUID) async throws
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws
     func stopObservingChanges() async
 }
@@ -96,6 +108,7 @@ private struct CreateSharedAppointmentParameters: Encodable {
 private struct UpdateSharedAppointmentParameters: Encodable {
     let targetRelationshipID: UUID
     let targetAppointmentClientID: UUID
+    let targetOperationID: UUID
     let targetTitle: String
     let targetStartsAt: Date
     let targetLocation: String?
@@ -105,6 +118,7 @@ private struct UpdateSharedAppointmentParameters: Encodable {
     enum CodingKeys: String, CodingKey {
         case targetRelationshipID = "target_relationship_id"
         case targetAppointmentClientID = "target_appointment_client_id"
+        case targetOperationID = "target_operation_id"
         case targetTitle = "target_title"
         case targetStartsAt = "target_starts_at"
         case targetLocation = "target_location"
@@ -116,10 +130,12 @@ private struct UpdateSharedAppointmentParameters: Encodable {
 private struct CancelSharedAppointmentParameters: Encodable {
     let targetRelationshipID: UUID
     let targetAppointmentClientID: UUID
+    let targetOperationID: UUID
 
     enum CodingKeys: String, CodingKey {
         case targetRelationshipID = "target_relationship_id"
         case targetAppointmentClientID = "target_appointment_client_id"
+        case targetOperationID = "target_operation_id"
     }
 }
 
@@ -157,6 +173,7 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
     private let currentUserID: UUID
     private let relationshipID: UUID
     private let outboxStore: SharedAppointmentOutboxStore
+    private let operationOutboxStore: SharedAppointmentOperationOutboxStore
     private var realtimeChannel: RealtimeChannelV2?
     private var realtimeTasks: [Task<Void, Never>] = []
 
@@ -164,12 +181,14 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
         client: SupabaseClient,
         currentUserID: UUID,
         relationshipID: UUID,
-        outboxStore: SharedAppointmentOutboxStore
+        outboxStore: SharedAppointmentOutboxStore,
+        operationOutboxStore: SharedAppointmentOperationOutboxStore = .init()
     ) {
         self.client = client
         self.currentUserID = currentUserID
         self.relationshipID = relationshipID
         self.outboxStore = outboxStore
+        self.operationOutboxStore = operationOutboxStore
     }
 
     convenience init(
@@ -286,8 +305,83 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
         )
     }
 
-    func updateAppointment(
+    func fetchPendingAppointmentOperations() async throws -> [SharedAppointmentOperationOutboxEntry] {
+        try operationOutboxStore.load(
+            userID: currentUserID,
+            relationshipID: relationshipID
+        ).entries
+    }
+
+    func enqueueAppointmentOperation(
+        appointmentID: UUID,
+        operationID: UUID,
+        operation: SharedAppointmentOperation,
+        localCreatedAt: Date
+    ) async throws {
+        if case let .update(draft) = operation,
+           SharedAppointmentPolicy.normalizedDraft(draft) == nil {
+            throw SharedAppointmentServiceError.invalidDraft
+        }
+        try operationOutboxStore.enqueue(
+            appointmentID: appointmentID,
+            operationID: operationID,
+            operation: operation,
+            userID: currentUserID,
+            relationshipID: relationshipID,
+            localCreatedAt: localCreatedAt
+        )
+    }
+
+    func beginNextPendingAppointmentOperation() async throws -> SharedAppointmentOperationOutboxEntry? {
+        try operationOutboxStore.beginFirstAttempt(
+            userID: currentUserID,
+            relationshipID: relationshipID
+        )
+    }
+
+    func deliverPendingAppointmentOperation(
+        _ entry: SharedAppointmentOperationOutboxEntry
+    ) async throws -> SharedAppointmentOperationDeliveryResult {
+        guard entry.userID == currentUserID,
+              entry.relationshipID == relationshipID else {
+            throw SharedAppointmentServiceError.invalidOutboxIdentity
+        }
+        do {
+            let appointment: SharedAppointment
+            switch entry.operation {
+            case let .update(draft):
+                appointment = try await performUpdateAppointment(
+                    id: entry.appointmentID,
+                    operationID: entry.operationID,
+                    draft: draft
+                )
+            case .cancel:
+                appointment = try await performCancelAppointment(
+                    id: entry.appointmentID,
+                    operationID: entry.operationID
+                )
+            }
+            return .accepted(appointment)
+        } catch let error as PostgrestError where Self.isTerminalOperationError(error.message) {
+            let remoteAppointment = try? await fetchAppointment(id: entry.appointmentID)
+            return .rejected(
+                remoteAppointment,
+                Self.terminalOperationMessage(serverMessage: error.message)
+            )
+        }
+    }
+
+    func acknowledgePendingAppointmentOperation(operationID: UUID) async throws {
+        try operationOutboxStore.acknowledgeFirst(
+            operationID: operationID,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        )
+    }
+
+    private func performUpdateAppointment(
         id: UUID,
+        operationID: UUID,
         draft: SharedAppointmentDraft
     ) async throws -> SharedAppointment {
         let session = try await client.auth.session
@@ -302,6 +396,7 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
             params: UpdateSharedAppointmentParameters(
                 targetRelationshipID: relationshipID,
                 targetAppointmentClientID: id,
+                targetOperationID: operationID,
                 targetTitle: normalized.title,
                 targetStartsAt: normalized.startsAt,
                 targetLocation: normalized.location,
@@ -315,7 +410,10 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
         return try row.appointment()
     }
 
-    func cancelAppointment(id: UUID) async throws -> SharedAppointment {
+    private func performCancelAppointment(
+        id: UUID,
+        operationID: UUID
+    ) async throws -> SharedAppointment {
         let session = try await client.auth.session
         guard session.user.id == currentUserID else {
             throw SharedAppointmentServiceError.accountChanged
@@ -324,13 +422,51 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
             "cancel_shared_appointment",
             params: CancelSharedAppointmentParameters(
                 targetRelationshipID: relationshipID,
-                targetAppointmentClientID: id
+                targetAppointmentClientID: id,
+                targetOperationID: operationID
             )
         ).execute().value
         guard let row = rows.first else {
             throw SharedAppointmentServiceError.missingSavedAppointment
         }
         return try row.appointment()
+    }
+
+    private func fetchAppointment(id: UUID) async throws -> SharedAppointment? {
+        let rows: [SharedAppointmentRow] = try await client
+            .from("shared_appointments")
+            .select("client_id,creator_user_id,title,starts_at,location,note,reminder_at,status,source_shared_item_client_id,created_at,updated_at")
+            .eq("relationship_id", value: relationshipID)
+            .eq("client_id", value: id)
+            .limit(1)
+            .execute()
+            .value
+        return try rows.first.map { try $0.appointment() }
+    }
+
+    static func isTerminalOperationError(_ message: String) -> Bool {
+        [
+            "appointment_cancelled",
+            "appointment_not_found",
+            "relationship_not_active",
+            "relationship_not_accessible",
+            "appointment_operation_identity_collision",
+        ].contains(message)
+    }
+
+    private static func terminalOperationMessage(serverMessage: String) -> String {
+        switch serverMessage {
+        case "appointment_cancelled":
+            "這筆約定已取消，未再套用待送編輯。"
+        case "appointment_not_found":
+            "這筆約定已不存在，已停止待送操作。"
+        case "relationship_not_active":
+            "伴侶關係已停止共同寫入，未再套用待送操作。"
+        case "relationship_not_accessible":
+            "這段伴侶關係已結束，已停止並清除待送操作。"
+        default:
+            "這筆待送操作已失效，未再次改寫共同約定。"
+        }
     }
 
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
@@ -394,6 +530,7 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
     private var appointments: [SharedAppointment]
     private var discussionSummaries: [SharedAppointmentDiscussionSummary]
     private var pendingEntries: [SharedAppointmentOutboxEntry] = []
+    private var pendingOperations: [SharedAppointmentOperationOutboxEntry] = []
     private var onChange: (@MainActor () async -> Void)?
 
     init(
@@ -470,7 +607,55 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
         pendingEntries.removeFirst()
     }
 
-    func updateAppointment(
+    func fetchPendingAppointmentOperations() async throws -> [SharedAppointmentOperationOutboxEntry] {
+        pendingOperations
+    }
+
+    func enqueueAppointmentOperation(
+        appointmentID: UUID,
+        operationID: UUID,
+        operation: SharedAppointmentOperation,
+        localCreatedAt: Date
+    ) async throws {
+        pendingOperations.append(SharedAppointmentOperationOutboxEntry(
+            userID: UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!,
+            relationshipID: UUID(uuidString: "00000000-0000-0000-0000-0000000000A1")!,
+            operationID: operationID,
+            appointmentID: appointmentID,
+            operation: operation,
+            localCreatedAt: localCreatedAt,
+            attemptCount: 0
+        ))
+    }
+
+    func beginNextPendingAppointmentOperation() async throws -> SharedAppointmentOperationOutboxEntry? {
+        guard !pendingOperations.isEmpty else { return nil }
+        pendingOperations[0].attemptCount += 1
+        return pendingOperations[0]
+    }
+
+    func deliverPendingAppointmentOperation(
+        _ entry: SharedAppointmentOperationOutboxEntry
+    ) async throws -> SharedAppointmentOperationDeliveryResult {
+        switch entry.operation {
+        case let .update(draft):
+            return .accepted(try await performUpdateAppointment(
+                id: entry.appointmentID,
+                draft: draft
+            ))
+        case .cancel:
+            return .accepted(try await performCancelAppointment(id: entry.appointmentID))
+        }
+    }
+
+    func acknowledgePendingAppointmentOperation(operationID: UUID) async throws {
+        guard pendingOperations.first?.operationID == operationID else {
+            throw SharedAppointmentOperationOutboxError.unexpectedAcknowledgement
+        }
+        pendingOperations.removeFirst()
+    }
+
+    private func performUpdateAppointment(
         id: UUID,
         draft: SharedAppointmentDraft
     ) async throws -> SharedAppointment {
@@ -498,7 +683,7 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
         return updated
     }
 
-    func cancelAppointment(id: UUID) async throws -> SharedAppointment {
+    private func performCancelAppointment(id: UUID) async throws -> SharedAppointment {
         guard let index = appointments.firstIndex(where: { $0.id == id }) else {
             throw SharedAppointmentServiceError.missingSavedAppointment
         }

@@ -20,6 +20,13 @@ private struct RecentAppointmentDiscussionEntry: Identifiable {
     var id: UUID { summary.id }
 }
 
+struct AppointmentDiscussionFocus: Identifiable, Hashable {
+    let appointmentID: UUID
+    let messageID: UUID
+
+    var id: String { appointmentID.uuidString + ":" + messageID.uuidString }
+}
+
 private enum ConversationTimelineItemID: Hashable {
     case message(UUID)
     case appointment(UUID)
@@ -73,13 +80,14 @@ enum ConversationPresentationMode: Equatable {
     }
 
     var showsAppointmentFeatures: Bool { self == .main }
-    var allowsMomentSaving: Bool { self == .main }
+    var allowsMomentSaving: Bool { true }
 }
 
 struct ConversationView: View {
     @ObservedObject var model: ConversationModel
     @ObservedObject var sharedAppointmentModel: SharedAppointmentModel
     @Binding private var focusMessageID: UUID?
+    @Binding private var appointmentDiscussionFocus: AppointmentDiscussionFocus?
     private let savedMomentSourceIDs: Set<UUID>
     private let onMomentSaved: @MainActor () async -> Void
     private let mode: ConversationPresentationMode
@@ -98,6 +106,7 @@ struct ConversationView: View {
         model: ConversationModel,
         sharedAppointmentModel: SharedAppointmentModel,
         focusMessageID: Binding<UUID?> = .constant(nil),
+        appointmentDiscussionFocus: Binding<AppointmentDiscussionFocus?> = .constant(nil),
         savedMomentSourceIDs: Set<UUID> = [],
         mode: ConversationPresentationMode = .main,
         embedsNavigationStack: Bool = true,
@@ -107,6 +116,7 @@ struct ConversationView: View {
         self.model = model
         self.sharedAppointmentModel = sharedAppointmentModel
         _focusMessageID = focusMessageID
+        _appointmentDiscussionFocus = appointmentDiscussionFocus
         self.savedMomentSourceIDs = savedMomentSourceIDs
         self.mode = mode
         self.embedsNavigationStack = embedsNavigationStack
@@ -117,7 +127,12 @@ struct ConversationView: View {
     var body: some View {
         Group {
             if embedsNavigationStack {
-                NavigationStack { conversationLayout }
+                NavigationStack {
+                    conversationLayout
+                        .navigationDestination(item: $appointmentDiscussionFocus) { focus in
+                            appointmentDiscussionDestination(focus)
+                        }
+                }
                     .accessibilityIdentifier("conversation-screen")
             } else {
                 conversationLayout
@@ -159,6 +174,27 @@ struct ConversationView: View {
                 model: sharedAppointmentModel,
                 initialTitle: seed.title,
                 sourceMessageID: seed.sourceMessageID
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func appointmentDiscussionDestination(_ focus: AppointmentDiscussionFocus) -> some View {
+        if let appointment = sharedAppointmentModel.appointment(id: focus.appointmentID),
+           let discussionModel = sharedAppointmentModel.discussionModel(for: focus.appointmentID) {
+            AppointmentDiscussionView(
+                discussionModel: discussionModel,
+                sharedAppointmentModel: sharedAppointmentModel,
+                appointmentTitle: appointment.title,
+                allowsSending: appointment.status == .scheduled,
+                initialFocusMessageID: focus.messageID,
+                onMomentSaved: onMomentSaved
+            )
+        } else {
+            ContentUnavailableView(
+                "找不到原討論",
+                systemImage: "calendar.badge.exclamationmark",
+                description: Text("這筆約定目前無法開啟。")
             )
         }
     }
@@ -218,7 +254,8 @@ struct ConversationView: View {
                                     discussionModel: discussionModel,
                                     sharedAppointmentModel: sharedAppointmentModel,
                                     appointmentTitle: entry.appointment.title,
-                                    allowsSending: entry.appointment.status == .scheduled
+                                    allowsSending: entry.appointment.status == .scheduled,
+                                    onMomentSaved: onMomentSaved
                                 )
                             }
                         } label: {
@@ -315,9 +352,9 @@ struct ConversationView: View {
                     guard focusMessageID == nil else { return }
                     scrollToLatest(using: proxy)
                 }
-                .task(id: focusMessageID) {
-                    guard let focusMessageID else { return }
-                    await focus(on: focusMessageID, using: proxy)
+                .onChange(of: focusMessageID, initial: true) { _, messageID in
+                    guard let messageID else { return }
+                    Task { await focus(on: messageID, using: proxy) }
                 }
             }
         }
@@ -339,7 +376,8 @@ struct ConversationView: View {
             NavigationLink {
                 SharedAppointmentDetailView(
                     appointmentID: appointment.id,
-                    model: sharedAppointmentModel
+                    model: sharedAppointmentModel,
+                    onMomentSaved: onMomentSaved
                 )
             } label: {
                 conversationAppointmentCard(appointment)
@@ -469,7 +507,7 @@ struct ConversationView: View {
             if isCurrentUser { Spacer(minLength: 52) }
             VStack(alignment: isCurrentUser ? .trailing : .leading, spacing: 4) {
                 VStack(alignment: isCurrentUser ? .trailing : .leading, spacing: 4) {
-                    if highlightedMessageID == message.id {
+                    if isHighlighted(message) {
                         Text("來源訊息")
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.tint)
@@ -501,7 +539,7 @@ struct ConversationView: View {
         }
         .padding(4)
         .background(
-            highlightedMessageID == message.id ? Color.accentColor.opacity(0.16) : Color.clear,
+            isHighlighted(message) ? Color.accentColor.opacity(0.16) : Color.clear,
             in: RoundedRectangle(cornerRadius: 18)
         )
         .onLongPressGesture(minimumDuration: 0.45) {
@@ -853,13 +891,18 @@ struct ConversationView: View {
     }
 
     private func deliveryAccessibilityValue(for message: ChatMessage) -> String {
-        if highlightedMessageID == message.id { return "來源訊息" }
+        if isHighlighted(message) { return "來源訊息" }
         guard message.senderUserID == model.currentUserID else { return "" }
         switch message.deliveryState {
         case .sending: return "傳送中"
         case .failed: return "傳送失敗"
         case .synced: return "已同步"
         }
+    }
+
+    private func isHighlighted(_ message: ChatMessage) -> Bool {
+        highlightedMessageID == message.id
+            || model.focusedSourceMessageID == message.id
     }
 
     private func sendDraft() {

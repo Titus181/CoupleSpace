@@ -96,6 +96,7 @@ struct Moment: Codable, Identifiable, Equatable, Sendable {
     let content: MomentContent
     let createdAt: Date
     var sourceMessageID: UUID? = nil
+    var sourceAppointmentID: UUID? = nil
     var responses: [MomentResponse] = []
     var questionAnswers: [MomentQuestionAnswer] = []
 
@@ -107,6 +108,17 @@ struct Moment: Codable, Identifiable, Equatable, Sendable {
             !responses.isEmpty
         }
     }
+
+    var source: MomentSource? {
+        sourceMessageID.map {
+            MomentSource(messageID: $0, appointmentID: sourceAppointmentID)
+        }
+    }
+}
+
+struct MomentSource: Codable, Equatable, Sendable {
+    let messageID: UUID
+    let appointmentID: UUID?
 }
 
 enum MomentDraft: Equatable, Sendable {

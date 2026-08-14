@@ -39,6 +39,7 @@ private struct MomentRow: Decodable {
     let questionKey: String?
     let questionPrompt: String?
     let sourceMessageID: UUID?
+    let sourceAppointmentID: UUID?
     let createdAt: Date
 
     enum CodingKeys: String, CodingKey {
@@ -50,6 +51,7 @@ private struct MomentRow: Decodable {
         case questionKey = "question_key"
         case questionPrompt = "question_prompt"
         case sourceMessageID = "source_shared_item_client_id"
+        case sourceAppointmentID = "source_appointment_client_id"
         case createdAt = "created_at"
     }
 
@@ -84,6 +86,7 @@ private struct MomentRow: Decodable {
             content: content,
             createdAt: createdAt,
             sourceMessageID: sourceMessageID,
+            sourceAppointmentID: sourceAppointmentID,
             responses: responses,
             questionAnswers: questionAnswers
         )
@@ -293,7 +296,7 @@ final class SupabaseMomentService: MomentRemoteServing {
         let rows: [MomentRow] = try await client
             .from("moments")
             .select(
-                "client_id,creator_user_id,kind,mood_value,text_content,question_key,question_prompt,source_shared_item_client_id,created_at"
+                "client_id,creator_user_id,kind,mood_value,text_content,question_key,question_prompt,source_shared_item_client_id,source_appointment_client_id,created_at"
             )
             .eq("relationship_id", value: relationshipID)
             .order("created_at", ascending: false)
