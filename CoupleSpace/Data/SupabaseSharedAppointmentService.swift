@@ -10,6 +10,7 @@ enum SharedAppointmentOperationDeliveryResult: Equatable, Sendable {
 protocol SharedAppointmentRemoteServing: AnyObject {
     func fetchPendingAppointments() async throws -> [SharedAppointment]
     func fetchAppointments() async throws -> [SharedAppointment]
+    func fetchAppointmentEvents() async throws -> [SharedAppointmentEvent]
     func fetchRecentDiscussionSummaries() async throws -> [SharedAppointmentDiscussionSummary]
     func enqueueAppointment(
         _ draft: SharedAppointmentDraft,
@@ -167,6 +168,51 @@ private struct SharedAppointmentDiscussionSummaryRow: Decodable {
     }
 }
 
+private struct SharedAppointmentEventRow: Decodable {
+    let operationID: UUID
+    let appointmentClientID: UUID
+    let actorUserID: UUID
+    let eventKind: String
+    let previousStartsAt: Date?
+    let startsAt: Date?
+    let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case operationID = "operation_id"
+        case appointmentClientID = "appointment_client_id"
+        case actorUserID = "actor_user_id"
+        case eventKind = "event_kind"
+        case previousStartsAt = "previous_starts_at"
+        case startsAt = "starts_at"
+        case createdAt = "created_at"
+    }
+
+    func event() throws -> SharedAppointmentEvent {
+        guard let kind = SharedAppointmentEventKind(rawValue: eventKind) else {
+            throw SharedAppointmentServiceError.invalidServerState
+        }
+        switch kind {
+        case .rescheduled:
+            guard let previousStartsAt, let startsAt, previousStartsAt != startsAt else {
+                throw SharedAppointmentServiceError.invalidServerState
+            }
+        case .cancelled:
+            guard previousStartsAt == nil, startsAt == nil else {
+                throw SharedAppointmentServiceError.invalidServerState
+            }
+        }
+        return SharedAppointmentEvent(
+            id: operationID,
+            appointmentID: appointmentClientID,
+            actorUserID: actorUserID,
+            kind: kind,
+            previousStartsAt: previousStartsAt,
+            startsAt: startsAt,
+            createdAt: createdAt
+        )
+    }
+}
+
 @MainActor
 final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
     private let client: SupabaseClient
@@ -224,6 +270,22 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
             .execute()
             .value
         return try rows.map { try $0.appointment() }
+    }
+
+    func fetchAppointmentEvents() async throws -> [SharedAppointmentEvent] {
+        let session = try await client.auth.session
+        guard session.user.id == currentUserID else {
+            throw SharedAppointmentServiceError.accountChanged
+        }
+        let rows: [SharedAppointmentEventRow] = try await client
+            .from("shared_appointment_events")
+            .select("operation_id,appointment_client_id,actor_user_id,event_kind,previous_starts_at,starts_at,created_at")
+            .eq("relationship_id", value: relationshipID)
+            .order("created_at", ascending: true)
+            .order("operation_id", ascending: true)
+            .execute()
+            .value
+        return try rows.map { try $0.event() }
     }
 
     func fetchRecentDiscussionSummaries() async throws -> [SharedAppointmentDiscussionSummary] {
@@ -528,6 +590,7 @@ private enum SharedAppointmentServiceError: Error {
 @MainActor
 final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
     private var appointments: [SharedAppointment]
+    private var events: [SharedAppointmentEvent]
     private var discussionSummaries: [SharedAppointmentDiscussionSummary]
     private var pendingEntries: [SharedAppointmentOutboxEntry] = []
     private var pendingOperations: [SharedAppointmentOperationOutboxEntry] = []
@@ -535,13 +598,17 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
 
     init(
         appointments: [SharedAppointment] = [],
+        events: [SharedAppointmentEvent] = [],
         discussionSummaries: [SharedAppointmentDiscussionSummary] = []
     ) {
         self.appointments = appointments
+        self.events = events
         self.discussionSummaries = discussionSummaries
     }
 
     func fetchAppointments() async throws -> [SharedAppointment] { appointments }
+
+    func fetchAppointmentEvents() async throws -> [SharedAppointmentEvent] { events }
 
     func fetchRecentDiscussionSummaries() async throws -> [SharedAppointmentDiscussionSummary] {
         discussionSummaries
@@ -641,10 +708,16 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
         case let .update(draft):
             return .accepted(try await performUpdateAppointment(
                 id: entry.appointmentID,
+                operationID: entry.operationID,
+                actorUserID: entry.userID,
                 draft: draft
             ))
         case .cancel:
-            return .accepted(try await performCancelAppointment(id: entry.appointmentID))
+            return .accepted(try await performCancelAppointment(
+                id: entry.appointmentID,
+                operationID: entry.operationID,
+                actorUserID: entry.userID
+            ))
         }
     }
 
@@ -657,6 +730,8 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
 
     private func performUpdateAppointment(
         id: UUID,
+        operationID: UUID,
+        actorUserID: UUID,
         draft: SharedAppointmentDraft
     ) async throws -> SharedAppointment {
         guard let index = appointments.firstIndex(where: { $0.id == id }),
@@ -679,11 +754,27 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
             updatedAt: .now
         )
         appointments[index] = updated
+        if current.startsAt != updated.startsAt,
+           !events.contains(where: { $0.id == operationID }) {
+            events.append(SharedAppointmentEvent(
+                id: operationID,
+                appointmentID: id,
+                actorUserID: actorUserID,
+                kind: .rescheduled,
+                previousStartsAt: current.startsAt,
+                startsAt: updated.startsAt,
+                createdAt: .now
+            ))
+        }
         await onChange?()
         return updated
     }
 
-    private func performCancelAppointment(id: UUID) async throws -> SharedAppointment {
+    private func performCancelAppointment(
+        id: UUID,
+        operationID: UUID,
+        actorUserID: UUID
+    ) async throws -> SharedAppointment {
         guard let index = appointments.firstIndex(where: { $0.id == id }) else {
             throw SharedAppointmentServiceError.missingSavedAppointment
         }
@@ -703,6 +794,17 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
             updatedAt: .now
         )
         appointments[index] = cancelled
+        if !events.contains(where: { $0.id == operationID }) {
+            events.append(SharedAppointmentEvent(
+                id: operationID,
+                appointmentID: id,
+                actorUserID: actorUserID,
+                kind: .cancelled,
+                previousStartsAt: nil,
+                startsAt: nil,
+                createdAt: .now
+            ))
+        }
         await onChange?()
         return cancelled
     }

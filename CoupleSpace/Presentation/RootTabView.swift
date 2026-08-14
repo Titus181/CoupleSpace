@@ -290,10 +290,25 @@ struct RootTabView: View {
             } else {
                 seededDiscussionSummaries = []
             }
+            let seededAppointmentEvents: [SharedAppointmentEvent]
+            if arguments.contains("--ui-testing-w11-discussion") {
+                seededAppointmentEvents = [SharedAppointmentEvent(
+                    id: UUID(uuidString: "A5000000-0000-0000-0000-000000000001")!,
+                    appointmentID: discussionAppointmentID,
+                    actorUserID: uiTestPartnerID,
+                    kind: .rescheduled,
+                    previousStartsAt: .now.addingTimeInterval(82_800),
+                    startsAt: .now.addingTimeInterval(86_400),
+                    createdAt: .now.addingTimeInterval(-60)
+                )]
+            } else {
+                seededAppointmentEvents = []
+            }
             _sharedAppointmentModel = StateObject(
                 wrappedValue: SharedAppointmentModel(
                     service: InMemorySharedAppointmentService(
                         appointments: seededAppointments,
+                        events: seededAppointmentEvents,
                         discussionSummaries: seededDiscussionSummaries
                     ),
                     discussionModelFactory: { appointmentID in

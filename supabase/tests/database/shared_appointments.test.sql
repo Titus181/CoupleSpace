@@ -1,7 +1,7 @@
 begin;
 
 create extension if not exists pgtap with schema extensions;
-select plan(25);
+select plan(36);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password)
 values
@@ -155,6 +155,26 @@ select results_eq(
     'either partner can edit the shared appointment in place'
 );
 
+select has_table(
+    'public',
+    'shared_appointment_events',
+    'major appointment changes have durable immutable records'
+);
+
+select results_eq(
+    $$
+        select event_kind || '/' || actor_user_id::text || '/'
+            || previous_starts_at::text || '/' || starts_at::text
+        from public.shared_appointment_events
+        where relationship_id = 'e0000000-0000-0000-0000-000000000001'
+          and operation_id = 'e3000000-0000-0000-0000-000000000001'
+    $$,
+    array[
+        'rescheduled/00000000-0000-0000-0000-0000000000e2/2026-08-16 11:00:00+00/2026-08-17 11:30:00+00'::text
+    ],
+    'a start-time change records actor plus previous and new server timestamps'
+);
+
 reset role;
 update public.shared_appointments
 set updated_at = '2026-08-14 00:00:00+00'
@@ -179,6 +199,16 @@ select results_eq(
     $$,
     array['2026-08-14 00:00:00+00'::text],
     'replaying an identical edit does not refresh the server timestamp'
+);
+
+select results_eq(
+    $$
+        select count(*)::integer
+        from public.shared_appointment_events
+        where relationship_id = 'e0000000-0000-0000-0000-000000000001'
+    $$,
+    array[1],
+    'replaying a stable edit operation does not duplicate its status record'
 );
 
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000000e1', true);
@@ -216,6 +246,17 @@ select results_eq(
     'a lost-ack replay returns current state without overwriting a newer edit'
 );
 
+select results_eq(
+    $$
+        select count(*)::integer
+        from public.shared_appointment_events
+        where relationship_id = 'e0000000-0000-0000-0000-000000000001'
+          and event_kind = 'rescheduled'
+    $$,
+    array[2],
+    'a newer start-time operation records one additional reschedule only'
+);
+
 reset role;
 select results_eq(
     $$
@@ -231,6 +272,45 @@ select has_table(
     'public',
     'shared_appointment_operations',
     'appointment operation receipts are durable server state'
+);
+
+select results_eq(
+    $$
+        select title
+        from public.update_shared_appointment(
+            'e0000000-0000-0000-0000-000000000001',
+            'e2000000-0000-0000-0000-000000000001',
+            'e3000000-0000-0000-0000-000000000007',
+            '只改文字內容',
+            '2026-08-17 20:00:00+08',
+            '新的地點',
+            '只改備註',
+            null
+        )
+    $$,
+    array['只改文字內容'::text],
+    'ordinary title location and note edits remain supported'
+);
+
+select results_eq(
+    $$
+        select count(*)::integer
+        from public.shared_appointment_events
+        where relationship_id = 'e0000000-0000-0000-0000-000000000001'
+    $$,
+    array[2],
+    'ordinary content edits do not create noisy system records'
+);
+
+select results_eq(
+    $$
+        select appointment_client_id::text || '/' || unread_count::text
+        from public.recent_appointment_discussions(
+            'e0000000-0000-0000-0000-000000000001'
+        )
+    $$,
+    array['e2000000-0000-0000-0000-000000000001/0'::text],
+    'a major status record makes its appointment visible as recent activity without fake unread'
 );
 
 select ok(
@@ -266,6 +346,17 @@ select results_eq(
 
 select results_eq(
     $$
+        select event_kind || '/' || actor_user_id::text
+        from public.shared_appointment_events
+        where relationship_id = 'e0000000-0000-0000-0000-000000000001'
+          and operation_id = 'e3000000-0000-0000-0000-000000000002'
+    $$,
+    array['cancelled/00000000-0000-0000-0000-0000000000e2'::text],
+    'cancellation records the partner who performed it'
+);
+
+select results_eq(
+    $$
         select status
         from public.cancel_shared_appointment(
             'e0000000-0000-0000-0000-000000000001',
@@ -275,6 +366,37 @@ select results_eq(
     $$,
     array['cancelled'::text],
     'cancellation retries are idempotent'
+);
+
+select results_eq(
+    $$
+        select count(*)::integer
+        from public.shared_appointment_events
+        where relationship_id = 'e0000000-0000-0000-0000-000000000001'
+    $$,
+    array[3],
+    'a cancellation retry does not duplicate its permanent record'
+);
+
+select throws_ok(
+    $$
+        insert into public.shared_appointment_events (
+            relationship_id,
+            operation_id,
+            appointment_client_id,
+            actor_user_id,
+            event_kind
+        ) values (
+            'e0000000-0000-0000-0000-000000000001',
+            'e3000000-0000-0000-0000-000000000099',
+            'e2000000-0000-0000-0000-000000000001',
+            '00000000-0000-0000-0000-0000000000e2',
+            'cancelled'
+        )
+    $$,
+    '42501',
+    null,
+    'authenticated clients cannot forge permanent appointment records'
 );
 
 select throws_ok(
@@ -354,6 +476,16 @@ select results_eq(
     $$,
     array[0],
     'a third user cannot read private shared appointments'
+);
+
+select results_eq(
+    $$
+        select count(*)::integer
+        from public.shared_appointment_events
+        where relationship_id = 'e0000000-0000-0000-0000-000000000001'
+    $$,
+    array[0],
+    'a third user cannot read private appointment status records'
 );
 
 select throws_ok(

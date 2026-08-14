@@ -34,6 +34,21 @@ struct SharedAppointmentDiscussionSummary: Identifiable, Equatable, Sendable {
     var id: UUID { appointmentID }
 }
 
+enum SharedAppointmentEventKind: String, Sendable {
+    case rescheduled
+    case cancelled
+}
+
+struct SharedAppointmentEvent: Identifiable, Equatable, Sendable {
+    let id: UUID
+    let appointmentID: UUID
+    let actorUserID: UUID
+    let kind: SharedAppointmentEventKind
+    let previousStartsAt: Date?
+    let startsAt: Date?
+    let createdAt: Date
+}
+
 struct SharedAppointmentDraft: Codable, Equatable, Sendable {
     let title: String
     let startsAt: Date

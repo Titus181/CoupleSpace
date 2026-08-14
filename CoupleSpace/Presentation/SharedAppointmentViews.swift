@@ -301,6 +301,7 @@ struct AppointmentDiscussionView: View {
     @StateObject private var discussionModel: ConversationModel
     @State private var focusMessageID: UUID?
     @ObservedObject var sharedAppointmentModel: SharedAppointmentModel
+    let appointmentID: UUID
     let appointmentTitle: String
     let allowsSending: Bool
     let initialFocusMessageID: UUID?
@@ -309,6 +310,7 @@ struct AppointmentDiscussionView: View {
     init(
         discussionModel: ConversationModel,
         sharedAppointmentModel: SharedAppointmentModel,
+        appointmentID: UUID,
         appointmentTitle: String,
         allowsSending: Bool,
         initialFocusMessageID: UUID? = nil,
@@ -316,6 +318,7 @@ struct AppointmentDiscussionView: View {
     ) {
         _discussionModel = StateObject(wrappedValue: discussionModel)
         self.sharedAppointmentModel = sharedAppointmentModel
+        self.appointmentID = appointmentID
         self.appointmentTitle = appointmentTitle
         self.allowsSending = allowsSending
         _focusMessageID = State(initialValue: nil)
@@ -338,7 +341,7 @@ struct AppointmentDiscussionView: View {
                 model: discussionModel,
                 sharedAppointmentModel: sharedAppointmentModel,
                 focusMessageID: $focusMessageID,
-                mode: .appointmentDiscussion,
+                mode: .appointmentDiscussion(appointmentID),
                 embedsNavigationStack: false,
                 allowsSending: allowsSending,
                 onMomentSaved: onMomentSaved
@@ -417,6 +420,7 @@ struct SharedAppointmentDetailView: View {
                                 AppointmentDiscussionView(
                                     discussionModel: discussionModel,
                                     sharedAppointmentModel: model,
+                                    appointmentID: appointment.id,
                                     appointmentTitle: appointment.title,
                                     allowsSending: appointment.status == .scheduled,
                                     onMomentSaved: onMomentSaved

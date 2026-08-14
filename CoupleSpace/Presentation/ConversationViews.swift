@@ -30,16 +30,19 @@ struct AppointmentDiscussionFocus: Identifiable, Hashable {
 private enum ConversationTimelineItemID: Hashable {
     case message(UUID)
     case appointment(UUID)
+    case appointmentEvent(UUID)
 }
 
 private enum ConversationTimelineItem: Identifiable {
     case message(ChatMessage)
     case appointment(SharedAppointment)
+    case appointmentEvent(SharedAppointmentEvent)
 
     var id: ConversationTimelineItemID {
         switch self {
         case let .message(message): .message(message.id)
         case let .appointment(appointment): .appointment(appointment.id)
+        case let .appointmentEvent(event): .appointmentEvent(event.id)
         }
     }
 
@@ -47,6 +50,7 @@ private enum ConversationTimelineItem: Identifiable {
         switch self {
         case let .message(message): message.createdAt
         case let .appointment(appointment): appointment.createdAt
+        case let .appointmentEvent(event): event.createdAt
         }
     }
 
@@ -54,14 +58,20 @@ private enum ConversationTimelineItem: Identifiable {
         switch id {
         case let .message(id): "message-\(id.uuidString)"
         case let .appointment(id): "appointment-\(id.uuidString)"
+        case let .appointmentEvent(id): "appointment-event-\(id.uuidString)"
         }
     }
 
     static func ordered(
         messages: [ChatMessage],
-        appointments: [SharedAppointment]
+        appointments: [SharedAppointment],
+        appointmentEvents: [SharedAppointmentEvent]
     ) -> [ConversationTimelineItem] {
-        (messages.map(Self.message) + appointments.map(Self.appointment))
+        (
+            messages.map(Self.message)
+                + appointments.map(Self.appointment)
+                + appointmentEvents.map(Self.appointmentEvent)
+        )
             .sorted { lhs, rhs in
                 (lhs.createdAt, lhs.stableOrderKey) < (rhs.createdAt, rhs.stableOrderKey)
             }
@@ -70,7 +80,7 @@ private enum ConversationTimelineItem: Identifiable {
 
 enum ConversationPresentationMode: Equatable {
     case main
-    case appointmentDiscussion
+    case appointmentDiscussion(UUID)
 
     var navigationTitle: String {
         switch self {
@@ -81,6 +91,11 @@ enum ConversationPresentationMode: Equatable {
 
     var showsAppointmentFeatures: Bool { self == .main }
     var allowsMomentSaving: Bool { true }
+
+    var appointmentID: UUID? {
+        guard case let .appointmentDiscussion(id) = self else { return nil }
+        return id
+    }
 }
 
 struct ConversationView: View {
@@ -185,6 +200,7 @@ struct ConversationView: View {
             AppointmentDiscussionView(
                 discussionModel: discussionModel,
                 sharedAppointmentModel: sharedAppointmentModel,
+                appointmentID: appointment.id,
                 appointmentTitle: appointment.title,
                 allowsSending: appointment.status == .scheduled,
                 initialFocusMessageID: focus.messageID,
@@ -253,6 +269,7 @@ struct ConversationView: View {
                                 AppointmentDiscussionView(
                                     discussionModel: discussionModel,
                                     sharedAppointmentModel: sharedAppointmentModel,
+                                    appointmentID: entry.appointment.id,
                                     appointmentTitle: entry.appointment.title,
                                     allowsSending: entry.appointment.status == .scheduled,
                                     onMomentSaved: onMomentSaved
@@ -367,7 +384,42 @@ struct ConversationView: View {
             messageRow(message)
         case let .appointment(appointment):
             appointmentRow(appointment)
+        case let .appointmentEvent(event):
+            appointmentEventRow(event)
         }
+    }
+
+    private func appointmentEventRow(_ event: SharedAppointmentEvent) -> some View {
+        let actor = event.actorUserID == model.currentUserID ? "你" : "伴侶"
+        return VStack(spacing: 5) {
+            switch event.kind {
+            case .rescheduled:
+                Label("\(actor)調整了約定時間", systemImage: "calendar.badge.clock")
+                    .font(.caption.weight(.semibold))
+                if let previousStartsAt = event.previousStartsAt,
+                   let startsAt = event.startsAt {
+                    Text(
+                        previousStartsAt.formatted(date: .abbreviated, time: .shortened)
+                            + " → "
+                            + startsAt.formatted(date: .abbreviated, time: .shortened)
+                    )
+                    .font(.caption2)
+                }
+            case .cancelled:
+                Label("\(actor)取消了這筆約定", systemImage: "calendar.badge.exclamationmark")
+                    .font(.caption.weight(.semibold))
+            }
+        }
+        .foregroundStyle(.secondary)
+        .multilineTextAlignment(.center)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(.thinMaterial, in: Capsule())
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier(
+            "appointment-event-\(event.id.uuidString.lowercased())"
+        )
     }
 
     @ViewBuilder
@@ -605,11 +657,18 @@ struct ConversationView: View {
     }
 
     private var timelineItems: [ConversationTimelineItem] {
-        ConversationTimelineItem.ordered(
+        let events: [SharedAppointmentEvent]
+        if let appointmentID = mode.appointmentID {
+            events = sharedAppointmentModel.events(for: appointmentID)
+        } else {
+            events = sharedAppointmentModel.appointmentEvents
+        }
+        return ConversationTimelineItem.ordered(
             messages: model.messages,
             appointments: mode.showsAppointmentFeatures
                 ? sharedAppointmentModel.appointments
-                : []
+                : [],
+            appointmentEvents: events
         )
     }
 

@@ -395,6 +395,11 @@ final class CoupleSpaceUITests: XCTestCase {
             app.descendants(matching: .any)["appointment-discussion-screen"]
                 .waitForExistence(timeout: 2)
         )
+        XCTAssertTrue(
+            app.descendants(matching: .any)[
+                "appointment-event-a5000000-0000-0000-0000-000000000001"
+            ].waitForExistence(timeout: 2)
+        )
         let partnerMessage = app.staticTexts["要不要先約下午兩點？"]
         XCTAssertTrue(partnerMessage.waitForExistence(timeout: 2))
         XCTAssertTrue(app.images["聊天照片"].waitForExistence(timeout: 2))
@@ -417,6 +422,32 @@ final class CoupleSpaceUITests: XCTestCase {
         partnerMessage.press(forDuration: 1)
         let saveMoment = app.buttons["收藏為 Moment"]
         XCTAssertTrue(saveMoment.waitForExistence(timeout: 2))
+    }
+
+    @MainActor
+    func testAppointmentStatusEventAppearsInMainAndDedicatedDiscussion() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w11-discussion"]
+        app.launch()
+
+        app.tabBars.buttons["對話"].tap()
+        let eventID = "appointment-event-a5000000-0000-0000-0000-000000000001"
+        XCTAssertTrue(
+            app.descendants(matching: .any)[eventID].waitForExistence(timeout: 3)
+        )
+
+        let recentDiscussion = app.buttons[
+            "recent-appointment-discussion-a4000000-0000-0000-0000-000000000004"
+        ]
+        XCTAssertTrue(recentDiscussion.waitForExistence(timeout: 2))
+        recentDiscussion.tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["appointment-discussion-screen"]
+                .waitForExistence(timeout: 2)
+        )
+        XCTAssertTrue(
+            app.descendants(matching: .any)[eventID].waitForExistence(timeout: 2)
+        )
     }
 
     @MainActor

@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class SharedAppointmentModel: ObservableObject {
     @Published private(set) var appointments: [SharedAppointment] = []
+    @Published private(set) var appointmentEvents: [SharedAppointmentEvent] = []
     @Published private(set) var recentDiscussionSummaries: [SharedAppointmentDiscussionSummary] = []
     @Published private(set) var isLoading = false
     @Published private(set) var isSaving = false
@@ -57,6 +58,10 @@ final class SharedAppointmentModel: ObservableObject {
         appointments.first { $0.id == id }
     }
 
+    func events(for appointmentID: UUID) -> [SharedAppointmentEvent] {
+        appointmentEvents.filter { $0.appointmentID == appointmentID }
+    }
+
     func appointments(
         on date: Date,
         calendar: Calendar = .autoupdatingCurrent
@@ -108,9 +113,11 @@ final class SharedAppointmentModel: ObservableObject {
         defer { isLoading = false }
         do {
             async let remoteAppointments = service.fetchAppointments()
+            async let remoteEvents = service.fetchAppointmentEvents()
             async let remoteDiscussionSummaries = service.fetchRecentDiscussionSummaries()
             async let pendingOperations = service.fetchPendingAppointmentOperations()
             let remote = try await remoteAppointments
+            let events = try await remoteEvents
             let summaries = try await remoteDiscussionSummaries
             let operations = try await pendingOperations
             let remoteIDs = Set(remote.map(\.id))
@@ -121,6 +128,7 @@ final class SharedAppointmentModel: ObservableObject {
                 operations,
                 to: remote + pending
             ).sorted(by: Self.appointmentOrder)
+            replaceAppointmentEvents(events)
             recentDiscussionSummaries = summaries
                 .filter { remoteIDs.contains($0.appointmentID) }
                 .sorted {
@@ -372,6 +380,7 @@ final class SharedAppointmentModel: ObservableObject {
                     switch result {
                     case let .accepted(saved):
                         replaceAppointment(saved)
+                        await refreshAppointmentEvents()
                         operationDeliveryStatusMessage = nil
                         switch entry.operation {
                         case .update:
@@ -416,6 +425,20 @@ final class SharedAppointmentModel: ObservableObject {
     private func applyPendingOperation(_ entry: SharedAppointmentOperationOutboxEntry) {
         guard let current = appointment(id: entry.appointmentID) else { return }
         replaceAppointment(entry.applying(to: current))
+    }
+
+    private func refreshAppointmentEvents() async {
+        guard let events = try? await service.fetchAppointmentEvents() else { return }
+        replaceAppointmentEvents(events)
+    }
+
+    private func replaceAppointmentEvents(_ events: [SharedAppointmentEvent]) {
+        let appointmentIDs = Set(appointments.map(\.id))
+        appointmentEvents = events
+            .filter { appointmentIDs.contains($0.appointmentID) }
+            .sorted {
+                ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString)
+            }
     }
 
     private func mergeAppointments(_ incoming: [SharedAppointment]) {

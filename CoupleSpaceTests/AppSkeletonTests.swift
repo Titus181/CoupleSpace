@@ -140,6 +140,66 @@ struct AppSkeletonTests {
     }
 
     @MainActor
+    @Test func sharedAppointmentModelLoadsOnlyEventsForVisibleAppointmentsInServerOrder() async {
+        let appointmentID = UUID()
+        let missingAppointmentID = UUID()
+        let actorID = UUID()
+        let firstEventID = UUID()
+        let secondEventID = UUID()
+        let now = Date(timeIntervalSince1970: 900)
+        let service = SharedAppointmentRemoteServiceFake()
+        service.appointments = [SharedAppointment(
+            id: appointmentID,
+            creatorUserID: actorID,
+            title: "有永久紀錄的約定",
+            startsAt: now.addingTimeInterval(7_200),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            status: .cancelled,
+            sourceMessageID: nil,
+            createdAt: now,
+            updatedAt: now
+        )]
+        service.appointmentEvents = [
+            SharedAppointmentEvent(
+                id: secondEventID,
+                appointmentID: appointmentID,
+                actorUserID: actorID,
+                kind: .cancelled,
+                previousStartsAt: nil,
+                startsAt: nil,
+                createdAt: now.addingTimeInterval(2)
+            ),
+            SharedAppointmentEvent(
+                id: UUID(),
+                appointmentID: missingAppointmentID,
+                actorUserID: actorID,
+                kind: .cancelled,
+                previousStartsAt: nil,
+                startsAt: nil,
+                createdAt: now.addingTimeInterval(3)
+            ),
+            SharedAppointmentEvent(
+                id: firstEventID,
+                appointmentID: appointmentID,
+                actorUserID: actorID,
+                kind: .rescheduled,
+                previousStartsAt: now.addingTimeInterval(3_600),
+                startsAt: now.addingTimeInterval(7_200),
+                createdAt: now.addingTimeInterval(1)
+            ),
+        ]
+        let model = SharedAppointmentModel(service: service, now: { now })
+
+        await model.refresh()
+
+        #expect(model.appointmentEvents.map(\.id) == [firstEventID, secondEventID])
+        #expect(model.events(for: appointmentID).map(\.kind) == [.rescheduled, .cancelled])
+        #expect(model.events(for: missingAppointmentID).isEmpty)
+    }
+
+    @MainActor
     @Test func sharedAppointmentModelReusesStableIdentityAfterFailedCreate() async throws {
         let service = SharedAppointmentRemoteServiceFake()
         service.createFailuresRemaining = 1
@@ -566,9 +626,11 @@ struct AppSkeletonTests {
         ))
         #expect(model.appointment(id: appointmentID)?.title == "更新後的約定")
         #expect(model.appointment(id: appointmentID)?.sourceMessageID == sourceMessageID)
+        #expect(model.events(for: appointmentID).map(\.kind) == [.rescheduled])
 
         #expect(await model.cancel(id: appointmentID))
         #expect(model.appointment(id: appointmentID)?.status == .cancelled)
+        #expect(model.events(for: appointmentID).map(\.kind) == [.rescheduled, .cancelled])
         #expect(model.nextAppointment == nil)
         #expect(model.pastOrCancelledAppointments.map(\.id) == [appointmentID])
 
@@ -2090,6 +2152,7 @@ struct AppSkeletonTests {
 @MainActor
 private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteServing {
     var appointments: [SharedAppointment] = []
+    var appointmentEvents: [SharedAppointmentEvent] = []
     var discussionSummaries: [SharedAppointmentDiscussionSummary] = []
     var pendingEntries: [SharedAppointmentOutboxEntry] = []
     var pendingOperations: [SharedAppointmentOperationOutboxEntry] = []
@@ -2103,6 +2166,10 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
     private var onChange: (@MainActor () async -> Void)?
 
     func fetchAppointments() async throws -> [SharedAppointment] { appointments }
+
+    func fetchAppointmentEvents() async throws -> [SharedAppointmentEvent] {
+        appointmentEvents
+    }
 
     func fetchRecentDiscussionSummaries() async throws -> [SharedAppointmentDiscussionSummary] {
         discussionSummaries
@@ -2215,9 +2282,18 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
         }
         switch entry.operation {
         case let .update(draft):
-            return .accepted(try performUpdateAppointment(id: entry.appointmentID, draft: draft))
+            return .accepted(try performUpdateAppointment(
+                id: entry.appointmentID,
+                operationID: entry.operationID,
+                actorUserID: entry.userID,
+                draft: draft
+            ))
         case .cancel:
-            return .accepted(try performCancelAppointment(id: entry.appointmentID))
+            return .accepted(try performCancelAppointment(
+                id: entry.appointmentID,
+                operationID: entry.operationID,
+                actorUserID: entry.userID
+            ))
         }
     }
 
@@ -2234,6 +2310,8 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
 
     private func performUpdateAppointment(
         id: UUID,
+        operationID: UUID,
+        actorUserID: UUID,
         draft: SharedAppointmentDraft
     ) throws -> SharedAppointment {
         guard let index = appointments.firstIndex(where: { $0.id == id }),
@@ -2256,10 +2334,26 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
             updatedAt: .now
         )
         appointments[index] = updated
+        if current.startsAt != updated.startsAt,
+           !appointmentEvents.contains(where: { $0.id == operationID }) {
+            appointmentEvents.append(SharedAppointmentEvent(
+                id: operationID,
+                appointmentID: id,
+                actorUserID: actorUserID,
+                kind: .rescheduled,
+                previousStartsAt: current.startsAt,
+                startsAt: updated.startsAt,
+                createdAt: .now
+            ))
+        }
         return updated
     }
 
-    private func performCancelAppointment(id: UUID) throws -> SharedAppointment {
+    private func performCancelAppointment(
+        id: UUID,
+        operationID: UUID,
+        actorUserID: UUID
+    ) throws -> SharedAppointment {
         guard let index = appointments.firstIndex(where: { $0.id == id }) else {
             throw SharedAppointmentOutboxError.unexpectedAcknowledgement
         }
@@ -2278,6 +2372,17 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
             updatedAt: .now
         )
         appointments[index] = cancelled
+        if !appointmentEvents.contains(where: { $0.id == operationID }) {
+            appointmentEvents.append(SharedAppointmentEvent(
+                id: operationID,
+                appointmentID: id,
+                actorUserID: actorUserID,
+                kind: .cancelled,
+                previousStartsAt: nil,
+                startsAt: nil,
+                createdAt: .now
+            ))
+        }
         return cancelled
     }
 
