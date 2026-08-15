@@ -1,7 +1,7 @@
 ---
 title: 上市、客服與版本發布營運
 status: active
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 ---
 
 # 上市、客服與版本發布營運
@@ -138,6 +138,7 @@ helpdesk 保留原文與回覆；產品 backlog 只保留去識別摘要、canon
 ## 正式上市檢查
 
 - 依[版本發布閘門](../../quality/release-gates.md)建立本次 release record；最後行為變更後的全部自動化測試，以及所有適用真機／資料生命週期 gate 均通過。
+- 依 PD-038 完成「方心」品牌落地：重新確認 App Store Connect 名稱可用性、台灣相關類別商標／品牌近似性及主要網域／社群帳號；App Store 名稱「方心｜情侶的私密日常」、副標題「聊天、回憶與共享約定」，以及 App 顯示名稱、icon、onboarding、伴侶邀請、通知、設定、客服與公開素材一致。內部 `CoupleSpace` 技術識別不因對外改名而臨時變更。
 - 四語 UI、App Store metadata、版本說明、FAQ 與關鍵流程 QA 完成。
 - 只啟動繁中市場投放；沒有中國大陸商店供應或市場活動。
 - 單一客服 queue、案件識別、搜尋欄位、隱私同意、自動確認與狀態頁可用。

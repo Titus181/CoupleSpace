@@ -1,16 +1,17 @@
 ---
-title: CoupleSpace 產品文件索引
+title: 方心（CoupleSpace）產品文件索引
 status: active
-last_updated: 2026-08-13
+last_updated: 2026-08-15
 ---
 
-# CoupleSpace 產品文件
+# 方心（CoupleSpace）產品文件
 
-本目錄是 CoupleSpace 的產品規劃 SSOT（Single Source of Truth）。目前以 iPhone 首版為主要範圍；尚未確認的技術方案不會在此假設為既定事實。
+本目錄是方心的產品規劃 SSOT（Single Source of Truth）；`CoupleSpace` 保留為目前的內部專案名稱與歷史決策識別。目前以 iPhone 首版為主要範圍；尚未確認的技術方案不會在此假設為既定事實。
 
 ## 快速摘要
 
 - **產品定位：** 給忙碌情侶維持生活互動、分享日常並保持連結的私人共同空間。
+- **繁中品牌名稱：** `方心`；規劃中的 App Store 名稱為「方心｜情侶的私密日常」，副標題為「聊天、回憶與共享約定」。
 - **核心承諾：** 再忙，也能每天留一點位置給彼此。
 - **品牌延伸句：** 把零碎日常，慢慢變成我們的生活。
 - **品牌氣質：** 80% 溫柔成熟的共同生活，20% 可愛療癒感。
