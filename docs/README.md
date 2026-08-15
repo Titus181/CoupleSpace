@@ -36,7 +36,8 @@ last_updated: 2026-08-15
 11. [一人營運災難復原規格](architecture/01-disaster-recovery.md)
 12. [品牌識別與角色宇宙](design/01-brand-identity.md)
 13. [iPhone 核心畫面與功能佈局概念](design/02-iphone-core-screen-concepts.md)
-14. [上市、客服與版本發布營運](operations/03-launch-support-and-release.md)
+14. [伴侶邀請、短配對碼與配對儀式](design/03-partner-invitation-and-pairing.md)
+15. [上市、客服與版本發布營運](operations/03-launch-support-and-release.md)
 
 ## 文件維護原則
 
