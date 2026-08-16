@@ -1,14 +1,18 @@
 ---
 title: iPhone 首版範圍
 status: active
-last_updated: 2026-08-15
+last_updated: 2026-08-16
 ---
 
 # iPhone 首版範圍
 
 ## 平台策略
 
-iPhone 是主要開發與驗證平台。其他 Apple 平台可以保留未來擴充可能，但不得延遲 iPhone 核心循環的完成與驗證。
+iPhone 是目前唯一的主要開發與驗證平台。其他 Apple 平台可以保留未來擴充可能，但不得延遲 iPhone 核心循環的完成與驗證。
+
+Android 不納入首版、TestFlight 或 iPhone 上市初期範圍；待產品上線一段時間並取得真實留存、跨平台需求與一人營運容量證據後，再另立版本評估。若未來開放 Android，產品目標是讓 iOS 與 Android 使用者使用同一段 relationship、共同歷史與關係級權益自由配對，不建立平台隔離的第二套關係或資料。
+
+現階段的新功能不預先實作 Android client、共用 UI framework 或尚未需要的跨平台 abstraction；但在不增加 iPhone 交付範圍與複雜度時，Domain、遠端資料契約、relationship membership、邀請、內容 identity、同步、資料生命週期與 entitlement 應保持平台中立，Apple 專屬登入、推播、深連結、App Lock、購買及背景能力留在平台 adapter。完整邊界以 PD-042 為準。
 
 正式上市時，App UI 預計同時支援繁體中文、簡體中文、英文與日文；繁體中文是產品文案與翻譯的 source of truth。首輪市場投放只面向繁中市場，其他三種語言先提供產品可用性，不代表同時投入當地行銷、客服 SLA 或市場營運。簡體中文只代表語言支援，不在中國大陸 App Store 上架，也不把中國大陸納入首輪市場。
 

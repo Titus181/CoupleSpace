@@ -37,6 +37,10 @@ There is no standalone linter configured yet. Do not claim lint passed; the Swif
 ## Project Boundaries
 
 - iPhone is the MVP development and verification priority. Watch, macOS, visionOS, Widget, StoreKit, and AI features must not delay the iPhone core loop.
+- Android is a post-launch expansion candidate, not current implementation scope. Do not create an Android client, choose a cross-platform UI stack, add a second auth provider, or build speculative adapters before an accepted Android roadmap.
+- When the current iPhone slice already requires a Domain or remote contract, keep relationship membership, invitations, content identity, idempotency, sync state, data lifecycle, and entitlements platform-neutral when doing so does not add scope or complexity. Never use Apple ID, bundle identifiers, APNs tokens, or StoreKit transactions as shared product-data identity.
+- Keep Apple-only authentication, push, deep links, App Lock, purchases, background execution, and UI behavior behind Data／Platform boundaries. A future Android adapter must be able to use the same Supabase user／relationship contracts, but do not introduce protocols solely for a hypothetical second implementation.
+- Preserve stable Supabase user UUIDs across any future auth-provider expansion. Adding Google, LINE, Email, or another login requires an accepted identity-linking and recovery plan before implementation so an existing relationship or personal archive cannot appear lost.
 - Keep product-specific architecture, permissions, Skills, tests, and Evals in this repository.
 - Do not edit vendored files under `.harness/shared/` or the shared Skill files directly.
 - Prefer Xcode-managed project changes. If `project.pbxproj` must change, keep the diff minimal and verify target membership and both Debug and test builds.

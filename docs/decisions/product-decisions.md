@@ -1,7 +1,7 @@
 ---
 title: 產品決策紀錄
 status: active
-last_updated: 2026-08-15
+last_updated: 2026-08-16
 ---
 
 # 產品決策紀錄
@@ -424,6 +424,17 @@ last_updated: 2026-08-15
 - **排程影響：** 新增 `G4A` 立即短碼修正，插入目前 G10 最終雙機複驗之前，先降低開發期間頻繁解除／重新配對的成本；不得等待 Universal Link、落地頁或動畫。品牌化連結、分享預覽、確認畫面與成功動畫列為 `G4B`，最晚於 G15 TestFlight 候選版前完成，不得以視覺範圍延後 G4A。
 - **詳細規格：** 畫面、三種邀請文案、短碼契約、動畫、社群邊界及測試情境以 `docs/design/03-partner-invitation-and-pairing.md` 為準。
 
+### PD-042：Android 延後至上市驗證後評估，現行架構保留跨平台整合路徑
+
+- **狀態：** accepted
+- **日期：** 2026-08-16
+- **產品順序：** Android 不納入目前 iPhone MVP、TestFlight 或上市初期範圍，也不設定承諾版本或日期。只有在 iPhone 上線一段時間後，真實使用顯示跨平台伴侶需求、relationship-level 留存價值及一人營運容量足以承擔第二個 client，才另立 Android roadmap 與 release gates。
+- **跨平台目標：** 若 Android 正式開放，iOS 與 Android 使用者可自由建立同一段一對一 relationship，雙方讀寫同一份共同歷史、資料生命週期與 relationship-scoped entitlement；不得建立 iOS-only／Android-only 的平行關係、資料副本或平台轉移流程。
+- **架構原則：** Supabase Auth、Postgres／RLS／RPC、Realtime、Private Storage 與遠端資料生命週期維持平台中立的共同 SSOT。relationship membership、邀請 token、內容 identity、冪等 operation UUID、同步狀態與權益不得以 Apple ID、bundle、APNs token 或 StoreKit transaction 作為共同資料主鍵；Apple／Android 專屬能力由各自 platform adapter 接入同一產品契約。
+- **身分延續：** 目前登入政策維持 Sign in with Apple，不因未來可能支援 Android 而提前增加 Google、LINE、Email 或匿名登入。Android 立項時須先定義 provider identity linking、解除連結、重複帳號處理與原 Supabase user UUID 延續，確保既有使用者不因改用另一登入方式而看似失去 relationship、共同歷史或個人封存。
+- **避免預建：** 本決策不授權現在建立 Android 專案、選定 Kotlin／跨平台 UI 技術、加入第二套推播或商店計費，也不要求為單一 iPhone 實作預建沒有當前測試價值的 protocol。只有在相同成本與複雜度下，才優先選擇不把 Domain、伺服器契約與資料生命週期綁死 Apple framework 的方案；不得以未來相容性延後目前 iPhone 核心循環。
+- **未來驗證：** Android release gate 至少須覆蓋 iOS↔Android、Android↔Android 的邀請／配對、雙向同步、Realtime、離線 Outbox、推播隱私、換機恢復、解除配對、刪除／匯出與 relationship entitlement；單一 Android build、登入成功或同平台 happy path 不足以證明跨平台成立。
+
 ## 待決策事項
 
 以下項目仍為 `proposed`，不得視為已確認規格：
@@ -446,6 +457,7 @@ last_updated: 2026-08-15
 - 「最近刪除」的最終畫面文案與是否顯示剩餘天數；Moment 建立者刪除、30 天復原、來源保留、最後引用 GC、解除配對邊界與非付費原則已由 PD-037 定案。
 - Widget 是否納入首版或第一個小版本。
 - Apple Watch、iPad、Mac 與 Apple TV 的正式版本、日期、最低系統版本、同步／登入技術及各平台 Free／Plus 最終分界；平台角色、隱私原則與建議驗證順序已由 PD-032 定案。
+- Android 是否立項、正式版本、最低系統版本、client 技術、登入方式、推播與商店計費方案；延後至 iPhone 上市驗證後評估、自由配對目標與現行架構相容原則已由 PD-042 定案。
 - 「資料與恢復」畫面的最終文案、同步時間顯示精度、歷史分頁大小、縮圖策略、裝置命名方式與 session 撤銷保留期間；PD-033 的同步恢復、非付費、漸進載入與舊裝置撤銷原則已定案。
 - 共同約定的基本提醒預設值、取消後通知方式，以及活動後建立 Moment 的具體文案。
 - 輕量生活提醒原型的通過門檻、正式名稱與實作版本；三向聯動、低壓邊界及不納入目前 MVP 已由 PD-027 定案。
