@@ -10,10 +10,12 @@ import Supabase
 
 struct ContentView: View {
 #if os(iOS)
+    @Environment(\.scenePhase) private var scenePhase
     @ObservedObject private var authModel: SupabaseAppleAuthenticationModel
     @ObservedObject private var pairingModel: PairingModel
     private let supabaseClient: SupabaseClient
     @State private var isShowingLaunchAnimation: Bool
+    @StateObject private var appLockModel = AppLockModel()
     private let bypassesAuthentication: Bool
     private let bypassesPairing: Bool
 
@@ -56,6 +58,12 @@ struct ContentView: View {
                 .accessibilityIdentifier("main-content")
                 .accessibilityHidden(isShowingLaunchAnimation)
 
+            if appLockModel.isLocked {
+                AppLockView(model: appLockModel)
+                    .transition(.opacity)
+                    .zIndex(2)
+            }
+
             if isShowingLaunchAnimation {
                 LaunchAnimationView {
                     withAnimation(.easeOut(duration: 0.15)) {
@@ -66,11 +74,59 @@ struct ContentView: View {
                 .zIndex(1)
             }
         }
+        .environmentObject(appLockModel)
+        .onChange(of: scenePhase) { _, phase in
+            let lifecyclePhase: AppLockLifecyclePhase
+            switch phase {
+            case .active:
+                lifecyclePhase = .active
+            case .inactive:
+                lifecyclePhase = .inactive
+            case .background:
+                lifecyclePhase = .background
+            @unknown default:
+                lifecyclePhase = .inactive
+            }
+            Task { await appLockModel.handleLifecyclePhase(lifecyclePhase) }
+        }
 #else
         RootTabView()
 #endif
     }
 }
+
+#if os(iOS)
+private struct AppLockView: View {
+    @ObservedObject var model: AppLockModel
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 34))
+            Text("CoupleSpace 已鎖定")
+                .font(.title3.weight(.semibold))
+            Text("使用 Face ID 或裝置密碼繼續")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            Button("解鎖") {
+                Task { await model.unlockIfNeeded() }
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(model.isAuthenticating)
+            if let statusMessage = model.statusMessage {
+                Text(statusMessage)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(uiColor: .systemBackground))
+        .accessibilityIdentifier("app-lock-screen")
+    }
+}
+#endif
 
 #Preview {
     ContentView(

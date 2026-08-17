@@ -889,6 +889,7 @@ private struct UsView: View {
 
 private struct AccountSettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var appLockModel: AppLockModel
     @State private var isConfirmingSignOut = false
     @State private var isShowingTechnicalValidation = false
     @ObservedObject var togetherNowModel: TogetherNowModel
@@ -908,6 +909,20 @@ private struct AccountSettingsView: View {
                     LabeledContent("帳號識別碼", value: userToken ?? "無法取得")
                         .accessibilityIdentifier("account-user-token")
                     Text("識別碼只顯示前 8 碼，可用來確認重新登入後是否仍是同一個 CoupleSpace 帳號。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("App Lock") {
+                    Toggle(
+                        "使用 Face ID 或裝置密碼解鎖",
+                        isOn: Binding(
+                            get: { appLockModel.isEnabled },
+                            set: { appLockModel.setEnabled($0) }
+                        )
+                    )
+                    .accessibilityIdentifier("app-lock-toggle")
+                    Text("啟用後，CoupleSpace 進入背景時會遮蔽私密內容；回到 App 時需要重新解鎖。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -990,4 +1005,5 @@ private struct AccountSettingsView: View {
 
 #Preview {
     RootTabView()
+        .environmentObject(AppLockModel(initiallyEnabled: false))
 }

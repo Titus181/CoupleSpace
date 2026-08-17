@@ -44,6 +44,7 @@ last_updated: 2026-08-17
 | CHAT-005 | W12 聊天長期分頁 | 相同建立時間跨頁遺漏／重複、Realtime 最新頁重讀丟失舊頁、載入舊頁後捲動跳位，或 Moment 無法返回尚未載入的來源訊息 | Unit／UI＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | APPOINTMENT-001 | W11 基本共同約定／W12 過往入口 | 非伴侶讀寫、建立或編輯／取消 Outbox 在離線／重啟／ack 遺失後造成遺失、重複、錯序或重複刷新時間、來源訊息產生重複卡片、長按未確認便建立、取消後被較晚編輯復活、提醒晚於開始時間、未授權卻假裝已排程、編輯／取消／解除配對後留下舊提醒、通知洩漏標題／地點／註記或點擊開錯約定，或專屬討論文字／照片跨約定／主對話串線、未讀游標混用、近期入口排序／未讀／取消保留錯誤或洩漏內容、過期／已取消約定未保留或排序錯誤、無法返回原討論、已取消討論仍可輸入、照片繞過私有 Storage／quota、closing 清除 scoped Outbox 造成 orphan、離線混合 FIFO 遺失／重複／錯序、重大時間變更／取消紀錄可被偽造／遺失／重複或一般文字編輯造成洗版，收藏後遺失約定來源、重複 Moment、無法返回原討論訊息，或解除配對封存遺失約定、來源、討論 scope、原建立者及重大事件關聯／洩漏另一 owner 封存 | pgTAP／Unit／UI＋真機 | `shared_appointments.test.sql`、`appointment_discussions.test.sql`、`appointment_discussion_photos.test.sql`、`recent_appointment_discussions.test.sql`、`appointment_discussion_moments.test.sql`、`appointment_archive_lifecycle.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md`、`manual/weak-network.md`、`manual/deletion-and-unpairing.md` | A、B、D |
 | TODAY-001 | W9 離線 Today 顯示 | 離線冷啟動只顯示載入、Moment／照片／狀態消失、過期狀態重現、錯帳號或錯 relationship 快照外洩、重連後不校正 | Unit＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`manual/weak-network.md` | A、B、D |
+| LOCK-001 | W13 App Lock | 未啟用時改變既有啟動、進入 inactive／background 時未遮蔽私密畫面、驗證失敗後顯示內容、或驗證流程改變登入／relationship／待送內容 | Unit／UI＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/app-lock-and-background.md` | A、B、D |
 | DR-001 | G15／G17 雲端災難復原 | 備份存在但無法還原、Database／Storage 不一致、刪除復活、RLS／Auth／設定缺失、雙主分叉、manifest 遭竄改或切換後要求重新配對 | Integration＋restore drill＋真機 | `manual/disaster-recovery.md`、`manual/upgrade-and-recovery.md`、`docs/architecture/01-disaster-recovery.md` | C、D |
 | EVAL-001 | Agent 行為 | 未讀文件、越權遠端寫入、跳過測試或洩漏私人資料 | Agent Eval／Harness | `evals/README.md`、`.harness/` | B、D |
 
@@ -69,7 +70,7 @@ W8–W11 的跨 catalog 完整改版順序見 `manual/w8-w11-regression.md`；�
 
 - Production／TestFlight push 不能由 development sandbox 證據取代。
 - 大型真機封存、實際低磁碟與中斷續傳尚需對應 release gate。
-- App Lock 尚未因文件存在而視為已實作或通過。
+- App Lock 已有本機實作與自動化接縫，但 Face ID／裝置密碼、App switcher snapshot、冷啟動及背景返回仍須依 `LOCK-001` 以真實 iPhone 驗收；尚未通過前不能關閉 G12。
 - `DR-001` 尚未完成；Database／Storage／設定／刪除 journal restore drill 必須使用同一 recovery point，並實測 signed manifest、異區冷重建、RLS、checksum 與清空本機狀態真機恢復，不能用單純「備份已開啟」代替。
 - W9 的本機自動化不得取代兩支真實 iPhone 的離線、force-quit、重連、去重與 FIFO 證據。
 - W10 的本機自動化不得取代兩支真實 iPhone 對 mixed FIFO、reaction 即時同步、來源跳轉與私有照片讀取的證據。

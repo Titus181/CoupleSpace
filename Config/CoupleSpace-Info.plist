@@ -6,6 +6,8 @@
 	<string>$(APP_ENVIRONMENT)</string>
 	<key>CKSharingSupported</key>
 	<true/>
+	<key>NSFaceIDUsageDescription</key>
+	<string>CoupleSpace 使用 Face ID 保護你們的私密內容。</string>
 	<key>SupabasePublishableKey</key>
 	<string>$(SUPABASE_PUBLISHABLE_KEY)</string>
 	<key>SupabaseURL</key>

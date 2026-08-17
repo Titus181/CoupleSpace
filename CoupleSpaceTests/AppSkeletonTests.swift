@@ -6,6 +6,49 @@ import UIKit
 @testable import CoupleSpace
 
 struct AppSkeletonTests {
+    @MainActor
+    @Test func appLockLocksOnBackgroundAndOnlyUnlocksAfterDeviceAuthentication() async {
+        let preferences = UserDefaults(suiteName: "AppSkeletonTests.appLock")!
+        preferences.removePersistentDomain(forName: "AppSkeletonTests.appLock")
+        let authenticator = AppLockAuthenticatorFake(result: .authenticated)
+        let model = AppLockModel(
+            preferences: preferences,
+            preferenceKey: "enabled",
+            authenticator: authenticator,
+            initiallyEnabled: false
+        )
+
+        model.setEnabled(true)
+        #expect(model.isLocked)
+
+        await model.unlockIfNeeded()
+        #expect(model.isLocked == false)
+
+        await model.handleLifecyclePhase(.background)
+        #expect(model.isLocked)
+
+        authenticator.result = .failed
+        await model.handleLifecyclePhase(.active)
+        #expect(model.isLocked)
+        #expect(model.statusMessage == "尚未驗證，內容仍受保護。")
+    }
+
+    @MainActor
+    @Test func disablingAppLockImmediatelyRestoresContentAndPersistsPreference() {
+        let preferences = UserDefaults(suiteName: "AppSkeletonTests.appLockPreference")!
+        preferences.removePersistentDomain(forName: "AppSkeletonTests.appLockPreference")
+        let model = AppLockModel(
+            preferences: preferences,
+            preferenceKey: "enabled",
+            authenticator: AppLockAuthenticatorFake(result: .unavailable),
+            initiallyEnabled: true
+        )
+
+        model.setEnabled(false)
+        #expect(model.isLocked == false)
+        #expect(preferences.bool(forKey: "enabled") == false)
+    }
+
     @Test func uiTestingLaunchOptionIsExplicitAndOrderIndependent() {
         #expect(AppLaunchOptions(arguments: []).isUITesting == false)
         #expect(AppLaunchOptions(arguments: ["--other", "--ui-testing"]).isUITesting)
@@ -2773,6 +2816,19 @@ struct AppSkeletonTests {
 
         #expect(model.state == .paired(relationship))
         #expect(model.statusMessage != nil)
+    }
+}
+
+@MainActor
+private final class AppLockAuthenticatorFake: AppLockAuthenticating {
+    var result: AppLockAuthenticationResult
+
+    init(result: AppLockAuthenticationResult) {
+        self.result = result
+    }
+
+    func authenticate(reason _: String) async -> AppLockAuthenticationResult {
+        result
     }
 }
 

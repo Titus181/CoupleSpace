@@ -1030,6 +1030,23 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testAccountSettingsOffersPrivateAppLock() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        app.buttons["account-settings"].tap()
+
+        let appLockToggle = app.switches["app-lock-toggle"]
+        if !appLockToggle.waitForExistence(timeout: 1) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(appLockToggle.waitForExistence(timeout: 2))
+        XCTAssertFalse(appLockToggle.value as? String == "1")
+    }
+
+    @MainActor
     func testPairingEntryAcceptsAnEightCharacterShortCode() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-pairing"]

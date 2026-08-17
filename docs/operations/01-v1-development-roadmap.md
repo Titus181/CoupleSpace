@@ -95,6 +95,11 @@ last_updated: 2026-08-15
 - 第九個本機切片在「我們 → 時間線」加入最小規則式每週回顧：依裝置本地 calendar 取今天與前六個日曆日、只納入目前時間以前且已載入的 Moment，維持新到舊並顯示總數及心情／文字／照片／我們的一題類型計數。回顧直接重用 Moment 與既有來源、互動、照片可見載入及舊頁分頁，不儲存第二份摘要；明示不評分、不比較彼此，零筆時以「不用補進度」呈現。日期邊界／未來排除／類型計數 unit 與有內容／空狀態 UI regressions 通過。本切片不新增 schema、migration、AI 摘要、自動通知或分析事件。
 - W12 功能範圍已由九個本機切片實作；完整 iPhone Gate 與兩支真實 iPhone 驗收尚未執行，因此 G11／W12 尚未關閉。
 
+### G12／W13 開發證據（進行中，2026-08-17）
+
+- 第一個本機切片提供 opt-in App Lock：帳號設定可啟用 Face ID／裝置密碼保護；啟用後 app 進入 inactive 或 background 立即以不含內容的鎖定畫面遮蔽，回到 active 時透過 `.deviceOwnerAuthentication` 驗證才回到既有流程。驗證取消、失敗或此裝置無法驗證時維持遮蔽；關閉設定立即恢復內容，偏好保留於本機。功能不改變 Supabase session、relationship、內容或待送佇列。
+- 已加入 Face ID usage description、App Lock lifecycle／失敗保留遮蔽的 unit，以及帳號設定入口 UI regression。iPhone Simulator build 成功；Face ID／裝置密碼、冷啟動、App switcher snapshot 與背景返回仍必須由 `LOCK-001` 真實 iPhone 驗收。跨裝置 session inventory／遠端撤銷與 production APNs 隱私尚未開始，G12 尚未關閉。
+
 ### G10 完成證據（2026-08-17）
 
 - 第一個共同約定垂直切片已建立 relationship-scoped `shared_appointments` 唯一資料來源，包含穩定 client UUID、標題、開始時間、選填地點／短註記、一次提醒、來源訊息、scheduled／cancelled 狀態與 Realtime 變更提示；RLS 只允許目前伴侶讀取，建立、編輯與取消只能經過 server 驗證 RPC。
