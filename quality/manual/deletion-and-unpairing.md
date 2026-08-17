@@ -10,7 +10,7 @@
 6. 解除配對／closing 後禁止新增共同內容，雙方結果一致且舊 relationship 不會被新內容重用。
 7. 實際低磁碟、大型封存與中斷續傳在相關版本重測；合成小樣本不能代替真機壓力證據。
 
-## W11 約定與專屬討論加驗（尚未執行）
+## W11 約定與專屬討論加驗（已完成）
 
 1. 在解除配對前建立一筆有來源訊息的約定，加入雙方文字、照片及 Emoji，接著改期並取消；記錄 appointment、來源 message、discussion message、operation 與重大事件 ID 前 8 碼。
 2. A、B 各自完成個人封存後，在 Debug「W1 技術驗證工具」重新整理資料生命週期狀態；兩台各自顯示正確的「封存共同約定／封存專屬討論項目／封存重大事件」數量及「約定封存關聯完整」。來源訊息、專屬討論文字／照片、原始建立者與改期／取消事件須仍指向同一 appointment UUID，seal 重試不得增加副本。
@@ -20,3 +20,5 @@
 ## 通過證據
 
 記錄 fixture 數量、兩位 owner 的可見範圍、匯出核對、刪除前後 metadata／object count 與 relationship 最終狀態；W11 另記錄上述穩定 ID 前 8 碼、每份封存的 appointment／discussion／event count 及 archive-local 關聯核對。越權、資料遺失、關聯斷裂、重複、過早 GC 或雙方不一致都阻擋發布。
+
+2026-08-17 W11 第四輪實機驗收：兩支真實 iPhone 在解除配對前完成含來源訊息的共同約定、雙方專屬討論文字、照片、Emoji、改期與取消 fixture；兩位 owner 建立個人封存後均顯示封存共同約定 12、封存專屬討論項目 5、封存重大事件 16，且 archive-local audit 為「約定封存關聯完整」。A 刪除自己的封存後三項歸零並回到未核定狀態，B 仍維持 12／5／16 與完整 audit，沒有異常畫面或過早影響另一份封存。產品 UI 未顯示穩定 ID 前 8 碼，本輪以兩台相同計數、內建關聯 audit、25-case archive pgTAP 與既有 owner-only RLS 證據核對 identity／關聯，不把未顯示的 ID 虛構為已記錄。

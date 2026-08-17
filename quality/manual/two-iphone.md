@@ -26,7 +26,7 @@
 5. 分別將一則已同步文字與照片收藏為 Moment；兩台只建立一次，Today 與「我們」均可看到來源關聯。
 6. 從 Today 與「我們」各點一次來源入口；App 切到「對話」、捲動至正確來源訊息並短暫高亮，不可跳到相鄰或另一段 relationship 的訊息。
 
-## W11 加驗（尚未執行）
+## W11 加驗（已完成）
 
 1. A 只修改一筆共同約定的標題、地點、備註或提醒；兩台卡片與詳情就地更新，但主對話及專屬討論不得新增重大狀態紀錄。
 2. A 修改同一筆約定的開始時間；兩台主對話與該約定專屬討論各顯示同一筆「A 調整時間」紀錄，包含正確的前後時間，近期討論活動時間更新但未讀數不虛增。
@@ -40,3 +40,5 @@
 記錄 build、兩台 iOS、relationship 前 8 碼、每一步 PASS／FAIL，以及不含私人正文／完整身分識別碼的必要截圖。W10 另記錄照片 quota 前後值、reaction set／replace／remove 時點、收藏後 Moment ID 與來源 client ID 前 8 碼；W11 另記錄 appointment、operation 與重大紀錄 ID 前 8 碼。任一資料錯交、提前揭曉、消失、重複、錯序、來源錯誤、偽造／遺失重大紀錄或越權照片讀取都阻擋發布。
 
 2026-08-13 W10 實機複驗：`CoupleSpace 1.0 (1)`、兩支 iOS 26.6 真實 iPhone、`CoupleSpace-W1-Dev`（migration 021）完成步驟 1、3–6。雙方聊天照片可載入、全螢幕開啟並以下滑或右上角關閉；待送訊息不提供互動；已同步文字／照片可 set／replace／remove 常用與自訂 Emoji，`＋` 沿用 Today 的分類 picker；文字／照片收藏 Moment 不重複，來源可返回正確對話且顯示收藏標記。relationship、Moment 與 source client ID 前 8 碼未記錄。步驟 2 的近 quota 真機邊界與拒絕後 orphan 證據尚未執行，因此本清單仍為部分完成。
+
+2026-08-17 W11 四輪實機驗收：兩支真實 iPhone 已完成共同約定建立／編輯／取消、主對話與專屬討論重大紀錄、離線改期跨啟動恢復、提醒去重／通用內容／來源跳轉／取消清理，以及解除配對後雙 owner 封存。A、B 封存均顯示共同約定 12、專屬討論項目 5、重大事件 16 與「約定封存關聯完整」；刪除 A 封存後 B 維持相同計數與完整 audit。產品 UI 未顯示 appointment／operation／event ID 前 8 碼，本輪不虛構未記錄值，opaque identity 另由 27 份 pgTAP／441 項及內建 archive-local audit 覆蓋。G10／W11 的雙機核心、弱網、提醒及封存 gate 通過。

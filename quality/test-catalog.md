@@ -41,7 +41,7 @@ last_updated: 2026-08-14
 | DR-001 | G15／G17 雲端災難復原 | 備份存在但無法還原、Database／Storage 不一致、刪除復活、RLS／Auth／設定缺失、雙主分叉、manifest 遭竄改或切換後要求重新配對 | Integration＋restore drill＋真機 | `manual/disaster-recovery.md`、`manual/upgrade-and-recovery.md`、`docs/architecture/01-disaster-recovery.md` | C、D |
 | EVAL-001 | Agent 行為 | 未讀文件、越權遠端寫入、跳過測試或洩漏私人資料 | Agent Eval／Harness | `evals/README.md`、`.harness/` | B、D |
 
-Gate A／B／D 定義見 [版本發布閘門](release-gates.md)。`CHAT-001` 只代表 W8 基本聊天；W9 的正式持久 Outbox、離線重送、可靠重試與傳送狀態由 `CHAT-002` 獨立關閉。`CHAT-002`、`TODAY-001` 與兩支真實 iPhone 的 `NETWORK-001` 已於 2026-08-13 通過，G8／W9 已完成。`CHAT-003`、`CHAT-004`、`MOMENT-003` 的本機自動化、Dev migrations 020–022 與兩支真實 iPhone 核心流程已於 2026-08-13 通過；近 quota 拒絕／orphan 與上傳成功但 ack 遺失的故障注入尚未取得真機證據，因此 W10 release gate 仍不能視為完整 PASS。
+Gate A／B／D 定義見 [版本發布閘門](release-gates.md)。`CHAT-001` 只代表 W8 基本聊天；W9 的正式持久 Outbox、離線重送、可靠重試與傳送狀態由 `CHAT-002` 獨立關閉。`CHAT-002`、`TODAY-001` 與兩支真實 iPhone 的 `NETWORK-001` 已於 2026-08-13 通過，G8／W9 已完成。`CHAT-003`、`CHAT-004`、`MOMENT-003` 的本機自動化、Dev migrations 020–022 與兩支真實 iPhone 核心流程已於 2026-08-13 通過；近 quota 拒絕／orphan 與上傳成功但 ack 遺失的故障注入尚未取得真機證據，因此 W10 release gate 仍不能視為完整 PASS。`APPOINTMENT-001` 的 migrations 023–031、27 份 pgTAP／441 項、131 個串行 iPhone unit tests、focused UI／archive audit、linked schema lint，以及四輪兩支真實 iPhone 的核心、弱網、提醒與 owner-only 封存驗收已於 2026-08-17 通過；G10／W11 已完成。
 
 ## 目前必須保留的人工證據
 
