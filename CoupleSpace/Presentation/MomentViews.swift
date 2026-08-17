@@ -199,6 +199,19 @@ struct MomentTimelineView: View {
                                         )
                                     }
                                 }
+                                if model.hasMoreMoments {
+                                    Button {
+                                        Task { await model.loadMoreMoments() }
+                                    } label: {
+                                        if model.isLoadingMore {
+                                            ProgressView()
+                                        } else {
+                                            Text("載入更早的 Moment")
+                                        }
+                                    }
+                                    .disabled(model.isLoadingMore)
+                                    .accessibilityIdentifier("load-older-moments")
+                                }
                             }
                             .padding()
                         }
@@ -253,6 +266,20 @@ struct MomentPhotoGridView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 16) {
+                            if model.hasMoreMoments {
+                                Button {
+                                    Task { await model.loadMoreMoments() }
+                                } label: {
+                                    if model.isLoadingMore {
+                                        ProgressView()
+                                    } else {
+                                        Text("載入更早的照片")
+                                    }
+                                }
+                                .frame(maxWidth: .infinity)
+                                .disabled(model.isLoadingMore)
+                                .accessibilityIdentifier("load-older-photo-moments")
+                            }
                             ForEach(photoSections) { section in
                                 VStack(alignment: .leading, spacing: 8) {
                                     Text(monthTitle(section.monthStart))

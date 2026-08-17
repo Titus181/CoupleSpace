@@ -86,7 +86,8 @@ last_updated: 2026-08-15
 - 三個固定月份的 UI fixture 已驗證月份區段與跳轉至較舊月份；月份排序 unit 及既有「建立 Moment → 我們」UI regression 通過。此切片不新增 schema 或平行時間線資料模型。
 - 第二個本機切片在「我們」加入時間線／照片切換；照片頁只篩選既有 `.photo` Moment，以三欄網格按月份及照片舊到新排列，首次定位底部最新照片。照片詳情顯示建立者與建立時間；具 `MomentSource` 才顯示返回來源，並沿用既有主對話／約定討論定位，不建立第二套來源路由。sheet 關閉後原網格仍在同一 navigation state，保留月份與捲動位置。
 - 完整 `CoupleSpaceTests` bundle、照片只含 Moment／舊到新 unit、月份跳轉 UI、照片最新定位／詳情／來源返回 UI 均通過。此切片仍使用 `MomentModel` 已載入的照片資料，不提前宣稱可見範圍下載或遠端歷史分頁。
-- 日期級跳轉、內容類型篩選、聊天／Moment 穩定游標分頁、媒體依可見範圍載入、過往約定入口及規則式每週回顧仍待後續切片；G11／W12 尚未關閉。
+- 第三個本機切片為 Moment 遠端歷史加入每頁 50 筆的 `(created_at, client_id)` 複合游標；Supabase 使用同一組降冪排序、多取一筆判定是否仍有舊頁，且回應／共同問答只查詢當頁 Moment。App 載入舊頁及 Realtime 首頁重讀時以 client UUID 合併去重，保留已載入歷史；時間線底部與照片頁頂部可明確載入更早內容。55 筆 fixture 的 unit 與 UI regression、完整 `CoupleSpaceTests` bundle，以及既有月份／照片 W12 UI regressions 均通過。本切片不新增 schema 或 migration。
+- 日期級跳轉、內容類型篩選、聊天穩定游標分頁、媒體依可見範圍載入、過往約定入口及規則式每週回顧仍待後續切片；G11／W12 尚未關閉。
 
 ### G10 完成證據（2026-08-17）
 

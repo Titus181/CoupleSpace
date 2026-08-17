@@ -334,6 +334,27 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testSharedTimelineLoadsAnOlderCursorPage() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w12-pagination"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        let loadOlder = app.buttons["load-older-moments"]
+        for _ in 0..<12 where !loadOlder.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(loadOlder.waitForExistence(timeout: 2))
+        loadOlder.tap()
+
+        let oldest = app.staticTexts["分頁 Moment 54"]
+        for _ in 0..<4 where !oldest.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(oldest.waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testCreatesSharedAppointmentFromToday() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]

@@ -1970,6 +1970,44 @@ struct AppSkeletonTests {
     }
 
     @MainActor
+    @Test func momentModelLoadsStablePagesAndKeepsOlderHistoryDuringRefresh() async throws {
+        let creatorID = UUID()
+        let remoteMoments = (0..<55).map { index in
+            Moment(
+                id: UUID(),
+                creatorUserID: creatorID,
+                content: .text("Moment \(index)"),
+                createdAt: Date(timeIntervalSince1970: TimeInterval(1_000 - index))
+            )
+        }
+        let service = MomentRemoteServiceFake(moments: remoteMoments)
+        let model = MomentModel(service: service)
+
+        await model.start()
+        #expect(model.moments.count == 50)
+        #expect(model.hasMoreMoments)
+
+        await model.loadMoreMoments()
+        #expect(model.moments.count == 55)
+        #expect(!model.hasMoreMoments)
+        #expect(Set(model.moments.map(\.id)).count == 55)
+
+        let newest = Moment(
+            id: UUID(),
+            creatorUserID: creatorID,
+            content: .text("Realtime 新增"),
+            createdAt: Date(timeIntervalSince1970: 2_000)
+        )
+        service.moments.insert(newest, at: 0)
+        await model.refresh()
+
+        #expect(model.moments.count == 56)
+        #expect(model.moments.first?.id == newest.id)
+        #expect(model.moments.last?.id == remoteMoments.last?.id)
+        #expect(!model.hasMoreMoments)
+    }
+
+    @MainActor
     @Test func momentModelDisplaysCachedContentBeforeDelayedOfflineRefreshFinishes() async throws {
         let cachedMoment = Moment(
             id: UUID(),

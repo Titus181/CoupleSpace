@@ -128,6 +128,16 @@ struct MomentMonthSection: Identifiable, Equatable, Sendable {
     var id: Date { monthStart }
 }
 
+struct MomentPageCursor: Equatable, Sendable {
+    let createdAt: Date
+    let clientID: UUID
+}
+
+struct MomentPage: Equatable, Sendable {
+    let moments: [Moment]
+    let hasMore: Bool
+}
+
 enum MomentTimelinePolicy {
     static func monthSections(
         from moments: [Moment],

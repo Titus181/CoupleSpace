@@ -160,6 +160,18 @@ struct RootTabView: View {
                         ),
                     ]
                 )
+            } else if arguments.contains("--ui-testing-w12-pagination") {
+                service = InMemoryMomentService(
+                    userID: uiTestUserID,
+                    moments: (0..<55).map { index in
+                        Moment(
+                            id: UUID(),
+                            creatorUserID: uiTestUserID,
+                            content: .text("分頁 Moment \(index)"),
+                            createdAt: Date(timeIntervalSince1970: TimeInterval(10_000 - index))
+                        )
+                    }
+                )
             } else if arguments.contains("--ui-testing-w12-monthly-timeline") {
                 var calendar = Calendar(identifier: .gregorian)
                 calendar.timeZone = TimeZone(secondsFromGMT: 0)!

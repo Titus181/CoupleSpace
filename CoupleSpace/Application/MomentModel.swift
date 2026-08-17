@@ -6,6 +6,8 @@ final class MomentModel: ObservableObject {
     @Published private(set) var moments: [Moment] = []
     @Published private(set) var photoDataByMomentID: [UUID: Data] = [:]
     @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingMore = false
+    @Published private(set) var hasMoreMoments = false
     @Published private(set) var isSaving = false
     @Published private(set) var activeInteractionMomentIDs: Set<UUID> = []
     @Published private(set) var statusMessage: String?
@@ -17,6 +19,7 @@ final class MomentModel: ObservableObject {
     private var optimisticResponses: [UUID: MomentResponse] = [:]
     private var pendingAnswerAttempts: [UUID: (answer: String, clientID: UUID)] = [:]
     private var pendingQuestionAttempt: (draft: MomentQuestionDraft, momentID: UUID, answerID: UUID)?
+    private let pageSize = 50
 
     init(service: MomentRemoteServing) {
         self.service = service
@@ -84,12 +87,34 @@ final class MomentModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         do {
-            moments = try await service.fetchMoments()
+            let page = try await service.fetchMomentsPage(before: nil, limit: pageSize)
+            let hadLoadedOlderPages = moments.count > page.moments.count
+            let previousHasMore = hasMoreMoments
+            moments = merge(page.moments, with: moments)
+            hasMoreMoments = hadLoadedOlderPages ? previousHasMore : page.hasMore
             mergeOptimisticResponses()
             statusMessage = nil
             await loadMissingPhotos()
         } catch {
             statusMessage = "無法更新 Moment，請稍後再試。"
+        }
+    }
+
+    func loadMoreMoments() async {
+        guard !isLoadingMore, hasMoreMoments, let oldest = moments.last else { return }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            let page = try await service.fetchMomentsPage(
+                before: MomentPageCursor(createdAt: oldest.createdAt, clientID: oldest.id),
+                limit: pageSize
+            )
+            moments = merge(moments, with: page.moments)
+            hasMoreMoments = page.hasMore
+            statusMessage = nil
+            await loadMissingPhotos()
+        } catch {
+            statusMessage = "無法載入更早的 Moment，請稍後再試。"
         }
     }
 
@@ -263,6 +288,15 @@ final class MomentModel: ObservableObject {
                   !moments[index].responses.contains(where: { $0.id == response.id })
             else { continue }
             moments[index].responses.append(response)
+        }
+    }
+
+    private func merge(_ first: [Moment], with second: [Moment]) -> [Moment] {
+        var byID = Dictionary(uniqueKeysWithValues: second.map { ($0.id, $0) })
+        for moment in first { byID[moment.id] = moment }
+        return byID.values.sorted {
+            if $0.createdAt != $1.createdAt { return $0.createdAt > $1.createdAt }
+            return $0.id.uuidString > $1.id.uuidString
         }
     }
 

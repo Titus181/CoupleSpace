@@ -7,6 +7,7 @@ protocol MomentRemoteServing: AnyObject {
     func cachedMoments() -> [Moment]?
     func cachedPhotoData(for momentID: UUID) -> Data?
     func fetchMoments() async throws -> [Moment]
+    func fetchMomentsPage(before cursor: MomentPageCursor?, limit: Int) async throws -> MomentPage
     func createMoment(_ draft: MomentDraft, clientID: UUID) async throws -> Moment
     func createQuestion(
         _ draft: MomentQuestionDraft,
@@ -28,6 +29,23 @@ protocol MomentRemoteServing: AnyObject {
 extension MomentRemoteServing {
     func cachedMoments() -> [Moment]? { nil }
     func cachedPhotoData(for momentID: UUID) -> Data? { nil }
+
+    func fetchMomentsPage(before cursor: MomentPageCursor?, limit: Int) async throws -> MomentPage {
+        let ordered = try await fetchMoments().sorted {
+            if $0.createdAt != $1.createdAt { return $0.createdAt > $1.createdAt }
+            return $0.id.uuidString > $1.id.uuidString
+        }
+        let remaining = ordered.filter { moment in
+            guard let cursor else { return true }
+            return moment.createdAt < cursor.createdAt
+                || (moment.createdAt == cursor.createdAt
+                    && moment.id.uuidString < cursor.clientID.uuidString)
+        }
+        return MomentPage(
+            moments: Array(remaining.prefix(limit)),
+            hasMore: remaining.count > limit
+        )
+    }
 }
 
 private struct MomentRow: Decodable {
@@ -288,6 +306,41 @@ final class SupabaseMomentService: MomentRemoteServing {
         }
     }
 
+    func fetchMomentsPage(before cursor: MomentPageCursor?, limit: Int) async throws -> MomentPage {
+        let session = try await client.auth.session
+        guard session.user.id == currentUserIDValue else {
+            throw MomentServiceError.accountChanged
+        }
+        var query = client
+            .from("moments")
+            .select(
+                "client_id,creator_user_id,kind,mood_value,text_content,question_key,question_prompt,source_shared_item_client_id,source_appointment_client_id,created_at"
+            )
+            .eq("relationship_id", value: relationshipID)
+        if let cursor {
+            let timestamp = Self.cursorDateFormatter.string(from: cursor.createdAt)
+            query = query.or(
+                "created_at.lt.\(timestamp),and(created_at.eq.\(timestamp),client_id.lt.\(cursor.clientID.uuidString))"
+            )
+        }
+        let rows: [MomentRow] = try await query
+            .order("created_at", ascending: false)
+            .order("client_id", ascending: false)
+            .limit(limit + 1)
+            .execute()
+            .value
+        let pageRows = Array(rows.prefix(limit))
+        let moments = try await hydrate(pageRows)
+        let cached = cursor == nil ? [] : (cachedMoments() ?? [])
+        let merged = Self.mergeMoments(moments, with: cached)
+        try? snapshotStore.saveMoments(
+            merged,
+            userID: currentUserIDValue,
+            relationshipID: relationshipID
+        )
+        return MomentPage(moments: moments, hasMore: rows.count > limit)
+    }
+
     private func fetchRemoteMoments() async throws -> [Moment] {
         let session = try await client.auth.session
         guard session.user.id == currentUserIDValue else {
@@ -303,12 +356,19 @@ final class SupabaseMomentService: MomentRemoteServing {
             .order("client_id", ascending: false)
             .execute()
             .value
+        return try await hydrate(rows)
+    }
+
+    private func hydrate(_ rows: [MomentRow]) async throws -> [Moment] {
+        guard !rows.isEmpty else { return [] }
+        let momentIDs = rows.map(\.clientID)
         let responseRows: [MomentResponseRow] = try await client
             .from("moment_responses")
             .select(
                 "moment_client_id,client_id,responder_user_id,kind,emoji_value,text_content,created_at"
             )
             .eq("relationship_id", value: relationshipID)
+            .in("moment_client_id", values: momentIDs)
             .order("created_at", ascending: true)
             .execute()
             .value
@@ -316,6 +376,7 @@ final class SupabaseMomentService: MomentRemoteServing {
             .from("moment_question_answers")
             .select("moment_client_id,client_id,answerer_user_id,answer_content,created_at")
             .eq("relationship_id", value: relationshipID)
+            .in("moment_client_id", values: momentIDs)
             .order("created_at", ascending: true)
             .execute()
             .value
@@ -329,6 +390,21 @@ final class SupabaseMomentService: MomentRemoteServing {
                 responses: responses[$0.clientID] ?? [],
                 questionAnswers: answers[$0.clientID] ?? []
             )
+        }
+    }
+
+    private static let cursorDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    private static func mergeMoments(_ first: [Moment], with second: [Moment]) -> [Moment] {
+        var byID = Dictionary(uniqueKeysWithValues: second.map { ($0.id, $0) })
+        for moment in first { byID[moment.id] = moment }
+        return byID.values.sorted {
+            if $0.createdAt != $1.createdAt { return $0.createdAt > $1.createdAt }
+            return $0.id.uuidString > $1.id.uuidString
         }
     }
 
