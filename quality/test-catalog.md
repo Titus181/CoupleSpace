@@ -29,6 +29,7 @@ last_updated: 2026-08-17
 | MOMENT-001 | W5 Moment 建立 | 空白／過長內容、client ID 碰撞、非 active relationship 寫入 | pgTAP／Unit／UI | `moment_vertical_slice.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift` | A、B、D |
 | MOMENT-002 | W5 照片 Moment UI | 展示照片攔截 composer、時間線顯示與建立者標示錯誤 | Unit／UI＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | MOMENT-003 | W10 聊天收藏為 Moment | 待送訊息可被收藏、重試重複建立、文字／照片來源斷裂，或無法由 Today／我們返回正確對話訊息 | pgTAP／Unit／UI＋真機 | `message_save_as_moment.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
+| TIMELINE-001 | W12 共同時間線 | Moment 未按建立者當地月份穩定分組、同月順序錯誤，或月份快速跳轉未定位目前已載入內容 | Unit／UI＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | INTERACT-001 | W6 Moment 回應 | 非伴侶回應、重試重複、回應長度或類型繞過 | pgTAP／Unit／UI | `moment_interactions.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift` | A、B、D |
 | QUESTION-001 | W6 共同問答 | 第一份答案提前洩漏、共同揭曉不一致 | pgTAP／Unit／UI＋真機 | `moment_interactions.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | STATUS-001 | W7 名稱與私人稱呼 | 私人稱呼被伴侶讀取、清除與 fallback 錯誤 | pgTAP／Unit／UI＋真機 | `together_now.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |

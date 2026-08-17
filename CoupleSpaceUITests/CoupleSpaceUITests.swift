@@ -286,6 +286,28 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testSharedTimelineGroupsMomentsAndJumpsToAnOlderMonth() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w12-monthly-timeline"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        XCTAssertTrue(app.staticTexts["八月一起散步"].waitForExistence(timeout: 3))
+        let monthJump = app.buttons["跳到月份"]
+        XCTAssertTrue(monthJump.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.descendants(matching: .any)["moment-month-2026-08"].exists)
+
+        monthJump.tap()
+        let june = app.buttons["跳到 2026-06"]
+        XCTAssertTrue(june.waitForExistence(timeout: 1))
+        june.tap()
+
+        let juneMoment = app.staticTexts["六月第一天"]
+        XCTAssertTrue(juneMoment.waitForExistence(timeout: 2))
+        XCTAssertTrue(juneMoment.isHittable)
+    }
+
+    @MainActor
     func testCreatesSharedAppointmentFromToday() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]

@@ -1790,6 +1790,42 @@ struct AppSkeletonTests {
         ])
     }
 
+    @Test func momentTimelineGroupsMonthsNewestFirstWithStableMomentOrder() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        let june = try #require(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 6,
+            day: 15
+        )))
+        let julyEarlier = try #require(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 2
+        )))
+        let julyLater = try #require(calendar.date(from: DateComponents(
+            year: 2026,
+            month: 7,
+            day: 20
+        )))
+        let earlierID = try #require(UUID(uuidString: "A1000000-0000-0000-0000-000000000001"))
+        let laterID = try #require(UUID(uuidString: "A1000000-0000-0000-0000-000000000002"))
+        let juneID = try #require(UUID(uuidString: "A1000000-0000-0000-0000-000000000003"))
+        let moments = [
+            Moment(id: earlierID, creatorUserID: UUID(), content: .text("七月初"), createdAt: julyEarlier),
+            Moment(id: juneID, creatorUserID: UUID(), content: .text("六月"), createdAt: june),
+            Moment(id: laterID, creatorUserID: UUID(), content: .text("七月下旬"), createdAt: julyLater),
+        ]
+
+        let sections = MomentTimelinePolicy.monthSections(from: moments, calendar: calendar)
+
+        #expect(sections.count == 2)
+        #expect(calendar.component(.month, from: sections[0].monthStart) == 7)
+        #expect(sections[0].moments.map(\.id) == [laterID, earlierID])
+        #expect(calendar.component(.month, from: sections[1].monthStart) == 6)
+        #expect(sections[1].moments.map(\.id) == [juneID])
+    }
+
     @Test func legacyMomentSnapshotDecodesWithoutSourceMessageID() throws {
         let legacy = LegacyMoment(
             id: UUID(),

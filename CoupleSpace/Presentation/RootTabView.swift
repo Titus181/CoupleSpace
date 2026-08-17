@@ -160,6 +160,33 @@ struct RootTabView: View {
                         ),
                     ]
                 )
+            } else if arguments.contains("--ui-testing-w12-monthly-timeline") {
+                var calendar = Calendar(identifier: .gregorian)
+                calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+                let fixture: [(String, Int, Int, String)] = [
+                    ("C1000000-0000-0000-0000-000000000001", 8, 17, "八月一起散步"),
+                    ("C1000000-0000-0000-0000-000000000002", 8, 3, "八月的晚餐"),
+                    ("C1000000-0000-0000-0000-000000000003", 7, 21, "七月的小旅行"),
+                    ("C1000000-0000-0000-0000-000000000004", 7, 2, "七月一起看電影"),
+                    ("C1000000-0000-0000-0000-000000000005", 6, 18, "六月雨天"),
+                    ("C1000000-0000-0000-0000-000000000006", 6, 1, "六月第一天"),
+                ]
+                service = InMemoryMomentService(
+                    userID: uiTestUserID,
+                    moments: fixture.map { id, month, day, text in
+                        Moment(
+                            id: UUID(uuidString: id)!,
+                            creatorUserID: uiTestUserID,
+                            content: .text(text),
+                            createdAt: calendar.date(from: DateComponents(
+                                year: 2026,
+                                month: month,
+                                day: day,
+                                hour: 12
+                            ))!
+                        )
+                    }
+                )
             } else if arguments.contains("--ui-testing-photo-moment"),
                let photoData = Data(base64Encoded:
                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="

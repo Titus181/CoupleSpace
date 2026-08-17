@@ -139,28 +139,92 @@ struct MomentTimelineView: View {
                     description: Text("你們留下的 Moment 會依時間出現在這裡。")
                 )
             } else {
-                ScrollView {
-                    LazyVStack(spacing: 16) {
-                        ForEach(model.moments) { moment in
-                            MomentCard(
-                                moment: moment,
-                                photoData: model.photoDataByMomentID[moment.id],
-                                authorLabel: model.authorLabel(
-                                    for: moment,
-                                    names: togetherNowModel.snapshot
-                                ),
-                                names: togetherNowModel.snapshot,
-                                model: model,
-                                onOpenSourceMessage: onOpenSourceMessage
-                            )
+                ScrollViewReader { proxy in
+                    VStack(spacing: 0) {
+                        HStack {
+                            Menu {
+                                ForEach(monthSections) { section in
+                                    Button(monthTitle(section.monthStart)) {
+                                        withAnimation {
+                                            proxy.scrollTo(section.id, anchor: .top)
+                                        }
+                                    }
+                                    .accessibilityLabel(
+                                        "跳到 \(monthAccessibilityValue(section.monthStart))"
+                                    )
+                                    .accessibilityIdentifier(
+                                        "jump-to-\(monthIdentifier(section.monthStart))"
+                                    )
+                                }
+                            } label: {
+                                Label("跳到月份", systemImage: "calendar")
+                            }
+                            .accessibilityLabel("跳到月份")
+                            .accessibilityIdentifier("moment-month-jump")
+                            Spacer()
                         }
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+
+                        Divider()
+
+                        ScrollView {
+                            LazyVStack(spacing: 16, pinnedViews: [.sectionHeaders]) {
+                                ForEach(monthSections) { section in
+                                    Section {
+                                        ForEach(section.moments) { moment in
+                                            MomentCard(
+                                                moment: moment,
+                                                photoData: model.photoDataByMomentID[moment.id],
+                                                authorLabel: model.authorLabel(
+                                                    for: moment,
+                                                    names: togetherNowModel.snapshot
+                                                ),
+                                                names: togetherNowModel.snapshot,
+                                                model: model,
+                                                onOpenSourceMessage: onOpenSourceMessage
+                                            )
+                                        }
+                                    } header: {
+                                        HStack {
+                                            Text(monthTitle(section.monthStart))
+                                                .font(.headline)
+                                            Spacer()
+                                        }
+                                        .padding(.vertical, 6)
+                                        .background(.background)
+                                        .id(section.id)
+                                        .accessibilityIdentifier(
+                                            monthIdentifier(section.monthStart)
+                                        )
+                                    }
+                                }
+                            }
+                            .padding()
+                        }
+                        .refreshable { await model.refresh() }
                     }
-                    .padding()
                 }
-                .refreshable { await model.refresh() }
             }
         }
         .accessibilityIdentifier("moment-timeline")
+    }
+
+    private var monthSections: [MomentMonthSection] {
+        MomentTimelinePolicy.monthSections(from: model.moments)
+    }
+
+    private func monthTitle(_ date: Date) -> String {
+        date.formatted(.dateTime.year().month(.wide))
+    }
+
+    private func monthIdentifier(_ date: Date) -> String {
+        let components = Calendar.current.dateComponents([.year, .month], from: date)
+        return String(format: "moment-month-%04d-%02d", components.year ?? 0, components.month ?? 0)
+    }
+
+    private func monthAccessibilityValue(_ date: Date) -> String {
+        monthIdentifier(date).replacingOccurrences(of: "moment-month-", with: "")
     }
 }
 

@@ -80,6 +80,12 @@ last_updated: 2026-08-15
 - client 只顯示 `XXXX-XXXX`，可接受大小寫、空格、連字號、明確標示邀請碼的完整分享文字及舊完整 UUID；不從任意一般文字擷取疑似短碼。Universal Link、落地頁、品牌預覽、接受確認及動畫仍屬 G4B，未在此切片提前實作。
 - 本機由空資料庫套用 migrations 001–032，28 份 pgTAP 共 460 項與 local schema lint 通過；focused short-code contract 為 19／19，涵蓋格式、確定性碰撞重試、短碼／UUID 接受、拒絕、輪替失效、限流與視窗恢復。2026-08-17 全新 DerivedData 的完整 Gate B 記錄 163 個測試定義、動態 launch matrix 展開後 166 次 executions，0 failure、0 skip；5 個 APNs tests、Harness v0.2.1 與 diff hygiene 亦通過。首次全套執行揭露兩個既有 Moment Emoji UI tests 未在 LazyVGrid 尚未載入時捲動，補上與同區文字回應案例一致的條件式 `swipeUp` 後，聚焦 2／2 與完整套件均通過。linked migration 032 已部署並通過歷史與 schema lint 驗證；兩支真實 iPhone 已完成五輪重新配對、原格式／小寫無連字號／完整分享文字輸入、拒絕／取消／輪替、同時邀請、弱網／重啟、舊碼失效、五次無效後第六次有效仍限流、十分鐘視窗恢復，以及受控過期後舊碼不可用／新碼可用。G4A 正式完成；Universal Link、App Store 落地頁與自動帶入仍屬 G4B。
 
+### G11／W12 開發證據（2026-08-17）
+
+- 第一個本機切片將「我們」的已載入 Moment 依裝置 calendar 分成月份區段，月份與同月內容維持新到舊；相同建立時間以 Moment UUID 穩定排序，避免 Realtime 重讀後順序漂移。畫面提供「跳到月份」選單並只列出目前已下載的月份，不對尚未取得的歷史做虛假跳轉。
+- 三個固定月份的 UI fixture 已驗證月份區段與跳轉至較舊月份；月份排序 unit 及既有「建立 Moment → 我們」UI regression 通過。此切片不新增 schema 或平行時間線資料模型。
+- 照片三欄網格、日期級跳轉、內容類型篩選、聊天／Moment 穩定游標分頁、媒體依可見範圍載入、過往約定入口及規則式每週回顧仍待後續切片；G11／W12 尚未關閉。
+
 ### G10 完成證據（2026-08-17）
 
 - 第一個共同約定垂直切片已建立 relationship-scoped `shared_appointments` 唯一資料來源，包含穩定 client UUID、標題、開始時間、選填地點／短註記、一次提醒、來源訊息、scheduled／cancelled 狀態與 Realtime 變更提示；RLS 只允許目前伴侶讀取，建立、編輯與取消只能經過 server 驗證 RPC。

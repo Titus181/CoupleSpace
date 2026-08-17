@@ -121,6 +121,35 @@ struct MomentSource: Codable, Equatable, Sendable {
     let appointmentID: UUID?
 }
 
+struct MomentMonthSection: Identifiable, Equatable, Sendable {
+    let monthStart: Date
+    let moments: [Moment]
+
+    var id: Date { monthStart }
+}
+
+enum MomentTimelinePolicy {
+    static func monthSections(
+        from moments: [Moment],
+        calendar: Calendar = .current
+    ) -> [MomentMonthSection] {
+        let orderedMoments = moments.sorted {
+            if $0.createdAt != $1.createdAt {
+                return $0.createdAt > $1.createdAt
+            }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+        let grouped = Dictionary(grouping: orderedMoments) { moment in
+            calendar.dateInterval(of: .month, for: moment.createdAt)?.start
+        }
+
+        return grouped.compactMap { monthStart, moments in
+            monthStart.map { MomentMonthSection(monthStart: $0, moments: moments) }
+        }
+        .sorted { $0.monthStart > $1.monthStart }
+    }
+}
+
 enum MomentDraft: Equatable, Sendable {
     case mood(MomentMood)
     case text(String)
