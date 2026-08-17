@@ -147,24 +147,41 @@ struct MomentTimelineView: View {
                     VStack(spacing: 0) {
                         HStack {
                             Menu {
-                                ForEach(monthSections) { section in
-                                    Button(monthTitle(section.monthStart)) {
-                                        withAnimation {
-                                            proxy.scrollTo(section.id, anchor: .top)
+                                Section("月份") {
+                                    ForEach(monthSections) { section in
+                                        Button(monthTitle(section.monthStart)) {
+                                            withAnimation {
+                                                proxy.scrollTo(section.id, anchor: .top)
+                                            }
                                         }
+                                        .accessibilityLabel(
+                                            "跳到月份 \(monthAccessibilityValue(section.monthStart))"
+                                        )
+                                        .accessibilityIdentifier(
+                                            "jump-to-\(monthIdentifier(section.monthStart))"
+                                        )
                                     }
-                                    .accessibilityLabel(
-                                        "跳到 \(monthAccessibilityValue(section.monthStart))"
-                                    )
-                                    .accessibilityIdentifier(
-                                        "jump-to-\(monthIdentifier(section.monthStart))"
-                                    )
+                                }
+                                Section("日期") {
+                                    ForEach(dayDestinations) { destination in
+                                        Button(dayTitle(destination.dayStart)) {
+                                            withAnimation {
+                                                proxy.scrollTo(destination.momentID, anchor: .top)
+                                            }
+                                        }
+                                        .accessibilityLabel(
+                                            "跳到日期 \(dayAccessibilityValue(destination.dayStart))"
+                                        )
+                                        .accessibilityIdentifier(
+                                            "jump-to-day-\(dayAccessibilityValue(destination.dayStart))"
+                                        )
+                                    }
                                 }
                             } label: {
-                                Label("跳到月份", systemImage: "calendar")
+                                Label("快速跳轉", systemImage: "calendar")
                             }
-                            .accessibilityLabel("跳到月份")
-                            .accessibilityIdentifier("moment-month-jump")
+                            .accessibilityLabel("快速跳轉")
+                            .accessibilityIdentifier("moment-timeline-jump")
                             .disabled(monthSections.isEmpty)
                             Spacer()
                             Menu {
@@ -219,6 +236,7 @@ struct MomentTimelineView: View {
                                                 model: model,
                                                 onOpenSourceMessage: onOpenSourceMessage
                                             )
+                                            .id(moment.id)
                                             .task(id: moment.id) {
                                                 await model.loadPhotoIfNeeded(moment)
                                             }
@@ -263,8 +281,16 @@ struct MomentTimelineView: View {
 
     private var monthSections: [MomentMonthSection] {
         MomentTimelinePolicy.monthSections(
-            from: model.moments.filter(contentFilter.includes)
+            from: filteredMoments
         )
+    }
+
+    private var dayDestinations: [MomentDayDestination] {
+        MomentTimelinePolicy.dayDestinations(from: filteredMoments)
+    }
+
+    private var filteredMoments: [Moment] {
+        model.moments.filter(contentFilter.includes)
     }
 
     private func monthTitle(_ date: Date) -> String {
@@ -278,6 +304,20 @@ struct MomentTimelineView: View {
 
     private func monthAccessibilityValue(_ date: Date) -> String {
         monthIdentifier(date).replacingOccurrences(of: "moment-month-", with: "")
+    }
+
+    private func dayTitle(_ date: Date) -> String {
+        date.formatted(.dateTime.year().month().day())
+    }
+
+    private func dayAccessibilityValue(_ date: Date) -> String {
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(
+            format: "%04d-%02d-%02d",
+            components.year ?? 0,
+            components.month ?? 0,
+            components.day ?? 0
+        )
     }
 }
 

@@ -293,18 +293,39 @@ final class CoupleSpaceUITests: XCTestCase {
 
         app.tabBars.buttons["我們"].tap()
         XCTAssertTrue(app.staticTexts["八月一起散步"].waitForExistence(timeout: 3))
-        let monthJump = app.buttons["跳到月份"]
+        let monthJump = app.buttons["快速跳轉"]
         XCTAssertTrue(monthJump.waitForExistence(timeout: 3))
         XCTAssertTrue(app.descendants(matching: .any)["moment-month-2026-08"].exists)
 
         monthJump.tap()
-        let june = app.buttons["跳到 2026-06"]
+        let june = app.buttons["跳到月份 2026-06"]
         XCTAssertTrue(june.waitForExistence(timeout: 1))
         june.tap()
 
         let juneMoment = app.staticTexts["六月雨天"]
         XCTAssertTrue(juneMoment.waitForExistence(timeout: 2))
         XCTAssertTrue(juneMoment.isHittable)
+    }
+
+    @MainActor
+    func testSharedTimelineJumpsToAnExactLoadedDate() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w12-monthly-timeline"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        XCTAssertTrue(app.staticTexts["八月一起散步"].waitForExistence(timeout: 3))
+        let jump = app.buttons["快速跳轉"]
+        XCTAssertTrue(jump.waitForExistence(timeout: 2))
+        jump.tap()
+
+        let juneFirst = app.buttons["跳到日期 2026-06-01"]
+        XCTAssertTrue(juneFirst.waitForExistence(timeout: 1))
+        juneFirst.tap()
+
+        let moment = app.staticTexts["六月第一天"]
+        XCTAssertTrue(moment.waitForExistence(timeout: 2))
+        XCTAssertTrue(moment.isHittable)
     }
 
     @MainActor

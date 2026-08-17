@@ -1850,6 +1850,45 @@ struct AppSkeletonTests {
         #expect(sections.flatMap(\.moments).map(\.id) == [juneID, julyID, augustID])
     }
 
+    @Test func momentTimelineDayDestinationsUseTheNewestMomentOnEachLoadedDay() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        func date(day: Int, hour: Int) throws -> Date {
+            try #require(calendar.date(from: DateComponents(
+                year: 2026,
+                month: 8,
+                day: day,
+                hour: hour
+            )))
+        }
+        let newestSameDayID = UUID()
+        let olderSameDayID = UUID()
+        let previousDayID = UUID()
+        let destinations = MomentTimelinePolicy.dayDestinations(from: [
+            Moment(
+                id: olderSameDayID,
+                creatorUserID: UUID(),
+                content: .text("早上"),
+                createdAt: try date(day: 17, hour: 8)
+            ),
+            Moment(
+                id: previousDayID,
+                creatorUserID: UUID(),
+                content: .text("昨天"),
+                createdAt: try date(day: 16, hour: 20)
+            ),
+            Moment(
+                id: newestSameDayID,
+                creatorUserID: UUID(),
+                content: .text("晚上"),
+                createdAt: try date(day: 17, hour: 21)
+            ),
+        ], calendar: calendar)
+
+        #expect(destinations.map(\.momentID) == [newestSameDayID, previousDayID])
+        #expect(destinations.map { calendar.component(.day, from: $0.dayStart) } == [17, 16])
+    }
+
     @Test func momentContentFilterKeepsOnlyTheSelectedContentType() {
         let moments = [
             Moment(id: UUID(), creatorUserID: UUID(), content: .mood(.happy), createdAt: .now),

@@ -128,6 +128,13 @@ struct MomentMonthSection: Identifiable, Equatable, Sendable {
     var id: Date { monthStart }
 }
 
+struct MomentDayDestination: Identifiable, Equatable, Sendable {
+    let dayStart: Date
+    let momentID: UUID
+
+    var id: Date { dayStart }
+}
+
 struct MomentPageCursor: Equatable, Sendable {
     let createdAt: Date
     let clientID: UUID
@@ -187,6 +194,20 @@ enum MomentTimelinePolicy {
             monthStart.map { MomentMonthSection(monthStart: $0, moments: moments) }
         }
         .sorted { $0.monthStart > $1.monthStart }
+    }
+
+    static func dayDestinations(
+        from moments: [Moment],
+        calendar: Calendar = .current
+    ) -> [MomentDayDestination] {
+        var seenDays: Set<Date> = []
+        return monthSections(from: moments, calendar: calendar)
+            .flatMap(\.moments)
+            .compactMap { moment in
+                let dayStart = calendar.startOfDay(for: moment.createdAt)
+                guard seenDays.insert(dayStart).inserted else { return nil }
+                return MomentDayDestination(dayStart: dayStart, momentID: moment.id)
+            }
     }
 
     static func photoMonthSections(
