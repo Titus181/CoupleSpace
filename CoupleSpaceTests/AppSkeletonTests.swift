@@ -1850,6 +1850,26 @@ struct AppSkeletonTests {
         #expect(sections.flatMap(\.moments).map(\.id) == [juneID, julyID, augustID])
     }
 
+    @Test func momentContentFilterKeepsOnlyTheSelectedContentType() {
+        let moments = [
+            Moment(id: UUID(), creatorUserID: UUID(), content: .mood(.happy), createdAt: .now),
+            Moment(id: UUID(), creatorUserID: UUID(), content: .text("一起散步"), createdAt: .now),
+            Moment(id: UUID(), creatorUserID: UUID(), content: .photo, createdAt: .now),
+            Moment(
+                id: UUID(),
+                creatorUserID: UUID(),
+                content: .question(MomentQuestion(key: "key", prompt: "最近好嗎？")),
+                createdAt: .now
+            ),
+        ]
+
+        #expect(moments.filter(MomentContentFilter.all.includes).count == 4)
+        #expect(moments.filter(MomentContentFilter.mood.includes).map(\.content) == [.mood(.happy)])
+        #expect(moments.filter(MomentContentFilter.text.includes).map(\.content) == [.text("一起散步")])
+        #expect(moments.filter(MomentContentFilter.photo.includes).map(\.content) == [.photo])
+        #expect(moments.filter(MomentContentFilter.question.includes).count == 1)
+    }
+
     @Test func legacyMomentSnapshotDecodesWithoutSourceMessageID() throws {
         let legacy = LegacyMoment(
             id: UUID(),

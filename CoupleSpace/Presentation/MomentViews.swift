@@ -120,6 +120,7 @@ struct MomentTimelineView: View {
     @ObservedObject var model: MomentModel
     @ObservedObject var togetherNowModel: TogetherNowModel
     let onOpenSourceMessage: (MomentSource) -> Void
+    @State private var contentFilter: MomentContentFilter = .all
 
     init(
         model: MomentModel,
@@ -164,7 +165,30 @@ struct MomentTimelineView: View {
                             }
                             .accessibilityLabel("跳到月份")
                             .accessibilityIdentifier("moment-month-jump")
+                            .disabled(monthSections.isEmpty)
                             Spacer()
+                            Menu {
+                                ForEach(MomentContentFilter.allCases) { filter in
+                                    Button {
+                                        contentFilter = filter
+                                    } label: {
+                                        if filter == contentFilter {
+                                            Label(filter.title, systemImage: "checkmark")
+                                        } else {
+                                            Text(filter.title)
+                                        }
+                                    }
+                                    .accessibilityLabel("篩選\(filter.title)")
+                                    .accessibilityIdentifier("moment-filter-\(filter.rawValue)")
+                                }
+                            } label: {
+                                Label(
+                                    "篩選：\(contentFilter.title)",
+                                    systemImage: "line.3.horizontal.decrease.circle"
+                                )
+                            }
+                            .accessibilityLabel("篩選：\(contentFilter.title)")
+                            .accessibilityIdentifier("moment-content-filter")
                         }
                         .padding(.horizontal)
                         .padding(.vertical, 8)
@@ -173,6 +197,14 @@ struct MomentTimelineView: View {
 
                         ScrollView {
                             LazyVStack(spacing: 16, pinnedViews: [.sectionHeaders]) {
+                                if monthSections.isEmpty {
+                                    ContentUnavailableView(
+                                        "沒有符合的 Moment",
+                                        systemImage: "line.3.horizontal.decrease.circle",
+                                        description: Text("可以改用其他內容類型，或切回全部。")
+                                    )
+                                    .accessibilityIdentifier("moment-filter-empty")
+                                }
                                 ForEach(monthSections) { section in
                                     Section {
                                         ForEach(section.moments) { moment in
@@ -230,7 +262,9 @@ struct MomentTimelineView: View {
     }
 
     private var monthSections: [MomentMonthSection] {
-        MomentTimelinePolicy.monthSections(from: model.moments)
+        MomentTimelinePolicy.monthSections(
+            from: model.moments.filter(contentFilter.includes)
+        )
     }
 
     private func monthTitle(_ date: Date) -> String {

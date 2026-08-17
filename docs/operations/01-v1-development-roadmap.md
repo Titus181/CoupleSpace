@@ -88,7 +88,8 @@ last_updated: 2026-08-15
 - 完整 `CoupleSpaceTests` bundle、照片只含 Moment／舊到新 unit、月份跳轉 UI、照片最新定位／詳情／來源返回 UI 均通過。此切片仍使用 `MomentModel` 已載入的照片資料，不提前宣稱可見範圍下載或遠端歷史分頁。
 - 第三個本機切片為 Moment 遠端歷史加入每頁 50 筆的 `(created_at, client_id)` 複合游標；Supabase 使用同一組降冪排序、多取一筆判定是否仍有舊頁，且回應／共同問答只查詢當頁 Moment。App 載入舊頁及 Realtime 首頁重讀時以 client UUID 合併去重，保留已載入歷史；時間線底部與照片頁頂部可明確載入更早內容。55 筆 fixture 的 unit 與 UI regression、完整 `CoupleSpaceTests` bundle，以及既有月份／照片 W12 UI regressions 均通過。本切片不新增 schema 或 migration。
 - 第四個本機切片移除 `refresh`／載入舊頁後逐張下載照片的行為；Today 最新卡、時間線 LazyVStack 與共同照片 LazyVGrid 只在項目出現時要求照片資料，同一 Moment 的已載入資料與既有本機快取直接重用。Unit 驗證刷新後不可見照片零下載、可見照片重複請求只下載一次；完整 `CoupleSpaceTests` bundle 及月份跳轉、照片詳情／來源返回、舊頁載入三個 W12 UI regressions 均通過。本切片未新增背景預取、圖片淘汰或第二套快取。
-- 日期級跳轉、內容類型篩選、聊天穩定游標分頁、過往約定入口及規則式每週回顧仍待後續切片；G11／W12 尚未關閉。
+- 第五個本機切片在共同時間線加入單選內容類型 Menu，直接對已載入 Moment 提供全部、心情、文字、照片與「我們的一題」五種選項；月份跳轉只列出篩選後仍有內容的月份，空結果保留篩選控制與載入更早頁入口。Unit 覆蓋四種內容分類，UI regression 覆蓋文字隱藏、照片結果及無題目空狀態；既有月份跳轉 regression 同時通過。本切片不新增全文搜尋、多選條件或 server-side filter。
+- 日期級跳轉、聊天穩定游標分頁、過往約定入口及規則式每週回顧仍待後續切片；G11／W12 尚未關閉。
 
 ### G10 完成證據（2026-08-17）
 

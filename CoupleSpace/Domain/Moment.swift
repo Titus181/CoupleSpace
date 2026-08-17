@@ -138,6 +138,36 @@ struct MomentPage: Equatable, Sendable {
     let hasMore: Bool
 }
 
+enum MomentContentFilter: String, CaseIterable, Identifiable, Sendable {
+    case all
+    case mood
+    case text
+    case photo
+    case question
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .all: "全部"
+        case .mood: "心情"
+        case .text: "文字"
+        case .photo: "照片"
+        case .question: "我們的一題"
+        }
+    }
+
+    func includes(_ moment: Moment) -> Bool {
+        switch (self, moment.content) {
+        case (.all, _), (.mood, .mood), (.text, .text), (.photo, .photo),
+             (.question, .question):
+            true
+        default:
+            false
+        }
+    }
+}
+
 enum MomentTimelinePolicy {
     static func monthSections(
         from moments: [Moment],

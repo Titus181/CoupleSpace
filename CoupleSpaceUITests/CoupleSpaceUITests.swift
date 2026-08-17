@@ -308,6 +308,32 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testSharedTimelineFiltersByMomentContentType() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w12-monthly-timeline"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        XCTAssertTrue(app.staticTexts["八月一起散步"].waitForExistence(timeout: 3))
+
+        var filter = app.buttons["篩選：全部"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 2))
+        filter.tap()
+        let photos = app.buttons["篩選照片"]
+        XCTAssertTrue(photos.waitForExistence(timeout: 1))
+        photos.tap()
+        XCTAssertFalse(app.staticTexts["八月一起散步"].exists)
+
+        filter = app.buttons["篩選：照片"]
+        XCTAssertTrue(filter.waitForExistence(timeout: 1))
+        filter.tap()
+        let questions = app.buttons["篩選我們的一題"]
+        XCTAssertTrue(questions.waitForExistence(timeout: 1))
+        questions.tap()
+        XCTAssertTrue(app.descendants(matching: .any)["moment-filter-empty"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testSharedPhotosOpenLatestMomentAndReturnToItsSource() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-w12-monthly-timeline"]
