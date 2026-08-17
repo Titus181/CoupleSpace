@@ -8,6 +8,7 @@ enum SharedAppointmentOperationDeliveryResult: Equatable, Sendable {
 
 @MainActor
 protocol SharedAppointmentRemoteServing: AnyObject {
+    func fetchCachedAppointments() async throws -> [SharedAppointment]?
     func fetchPendingAppointments() async throws -> [SharedAppointment]
     func fetchAppointments() async throws -> [SharedAppointment]
     func fetchAppointmentEvents() async throws -> [SharedAppointmentEvent]
@@ -220,6 +221,7 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
     private let relationshipID: UUID
     private let outboxStore: SharedAppointmentOutboxStore
     private let operationOutboxStore: SharedAppointmentOperationOutboxStore
+    private let snapshotStore: SharedAppointmentSnapshotStore
     private var realtimeChannel: RealtimeChannelV2?
     private var realtimeTasks: [Task<Void, Never>] = []
 
@@ -228,13 +230,19 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
         currentUserID: UUID,
         relationshipID: UUID,
         outboxStore: SharedAppointmentOutboxStore,
-        operationOutboxStore: SharedAppointmentOperationOutboxStore = .init()
+        operationOutboxStore: SharedAppointmentOperationOutboxStore = .init(),
+        snapshotStore: SharedAppointmentSnapshotStore = .init()
     ) {
         self.client = client
         self.currentUserID = currentUserID
         self.relationshipID = relationshipID
         self.outboxStore = outboxStore
         self.operationOutboxStore = operationOutboxStore
+        self.snapshotStore = snapshotStore
+    }
+
+    func fetchCachedAppointments() async throws -> [SharedAppointment]? {
+        try snapshotStore.load(userID: currentUserID, relationshipID: relationshipID)
     }
 
     convenience init(
@@ -269,7 +277,13 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
             .order("starts_at", ascending: true)
             .execute()
             .value
-        return try rows.map { try $0.appointment() }
+        let appointments = try rows.map { try $0.appointment() }
+        try snapshotStore.save(
+            appointments,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        )
+        return appointments
     }
 
     func fetchAppointmentEvents() async throws -> [SharedAppointmentEvent] {
@@ -356,7 +370,13 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
         guard let row = rows.first else {
             throw SharedAppointmentServiceError.missingSavedAppointment
         }
-        return try row.appointment()
+        let appointment = try row.appointment()
+        try? snapshotStore.upsert(
+            appointment,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        )
+        return appointment
     }
 
     func acknowledgePendingAppointment(clientID: UUID) async throws {
@@ -469,7 +489,13 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
         guard let row = rows.first else {
             throw SharedAppointmentServiceError.missingSavedAppointment
         }
-        return try row.appointment()
+        let appointment = try row.appointment()
+        try? snapshotStore.upsert(
+            appointment,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        )
+        return appointment
     }
 
     private func performCancelAppointment(
@@ -491,7 +517,13 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
         guard let row = rows.first else {
             throw SharedAppointmentServiceError.missingSavedAppointment
         }
-        return try row.appointment()
+        let appointment = try row.appointment()
+        try? snapshotStore.upsert(
+            appointment,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        )
+        return appointment
     }
 
     private func fetchAppointment(id: UUID) async throws -> SharedAppointment? {
@@ -605,6 +637,8 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
         self.events = events
         self.discussionSummaries = discussionSummaries
     }
+
+    func fetchCachedAppointments() async throws -> [SharedAppointment]? { nil }
 
     func fetchAppointments() async throws -> [SharedAppointment] { appointments }
 

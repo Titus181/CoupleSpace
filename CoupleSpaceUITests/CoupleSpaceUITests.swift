@@ -77,6 +77,35 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testOfflineBannerDoesNotCoverAppointmentEditorControls() throws {
+        let app = XCUIApplication()
+        app.launchArguments = [
+            "--ui-testing",
+            "--ui-testing-offline",
+            "--ui-testing-w11-appointments",
+        ]
+        app.launch()
+
+        let offlineStatus = app.staticTexts["目前為離線模式，待送內容會在恢復網路後重試。"]
+        XCTAssertTrue(offlineStatus.waitForExistence(timeout: 3))
+
+        app.tabBars.buttons["我們"].tap()
+        let scheduleButton = app.buttons["open-shared-appointment-schedule"]
+        XCTAssertTrue(scheduleButton.waitForExistence(timeout: 3))
+        scheduleButton.tap()
+        XCTAssertTrue(app.navigationBars["共同日程"].waitForExistence(timeout: 2))
+
+        app.staticTexts["週末一起吃晚餐"].tap()
+        XCTAssertTrue(app.navigationBars["約定詳情"].waitForExistence(timeout: 2))
+        app.buttons["edit-shared-appointment"].tap()
+        XCTAssertTrue(app.navigationBars["編輯共同約定"].waitForExistence(timeout: 2))
+
+        let cancelButton = app.buttons["取消"]
+        XCTAssertTrue(cancelButton.isHittable)
+        XCTAssertFalse(offlineStatus.isHittable)
+    }
+
+    @MainActor
     func testReadsPartnerMessageAndSendsBasicTextChat() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-partner-message"]

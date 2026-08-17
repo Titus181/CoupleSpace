@@ -115,6 +115,7 @@ final class SupabasePairingService: PairingRemoteServing {
                 ConversationSnapshotStore().clearAll(userID: session.user.id)
                 ConversationPhotoCacheStore().clearAll(userID: session.user.id)
                 TodaySnapshotStore().clearAll(userID: session.user.id)
+                SharedAppointmentSnapshotStore().clearAll(userID: session.user.id)
                 return nil
             }
 
@@ -138,6 +139,7 @@ final class SupabasePairingService: PairingRemoteServing {
                 ConversationSnapshotStore().clearAll(userID: session.user.id)
                 ConversationPhotoCacheStore().clearAll(userID: session.user.id)
                 TodaySnapshotStore().clearAll(userID: session.user.id)
+                SharedAppointmentSnapshotStore().clearAll(userID: session.user.id)
             }
             try? relationshipSnapshotStore.save(
                 RelationshipSnapshot(

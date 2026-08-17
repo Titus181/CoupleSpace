@@ -434,6 +434,124 @@ struct AppSkeletonTests {
         #expect(restored.entries.map(\.clientID) == [firstID, secondID])
     }
 
+    @Test func sharedAppointmentSnapshotPersistsSyncedItemsWithinAccountRelationshipScope() throws {
+        let suiteName = "SharedAppointmentSnapshotTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = SharedAppointmentSnapshotStore(defaults: defaults)
+        let userID = UUID()
+        let relationshipID = UUID()
+        let now = Date(timeIntervalSince1970: 2_000)
+        let appointments = (0...SharedAppointmentLocalSnapshotPolicy.maximumAppointmentCount).map { index in
+            SharedAppointment(
+                id: UUID(),
+                creatorUserID: userID,
+                title: "約定 \(index)",
+                startsAt: now.addingTimeInterval(TimeInterval(index)),
+                location: nil,
+                note: nil,
+                reminderAt: nil,
+                status: .scheduled,
+                sourceMessageID: nil,
+                createdAt: now,
+                updatedAt: now
+            )
+        }
+
+        try store.save(appointments, userID: userID, relationshipID: relationshipID)
+
+        let restored = try #require(
+            try store.load(userID: userID, relationshipID: relationshipID)
+        )
+        #expect(restored.count == SharedAppointmentLocalSnapshotPolicy.maximumAppointmentCount)
+        #expect(restored.first?.title == "約定 1")
+        let latest = try #require(restored.last)
+        try store.upsert(
+            SharedAppointment(
+                id: latest.id,
+                creatorUserID: latest.creatorUserID,
+                title: "伺服器已接受的更新",
+                startsAt: latest.startsAt,
+                location: latest.location,
+                note: latest.note,
+                reminderAt: latest.reminderAt,
+                status: .cancelled,
+                sourceMessageID: latest.sourceMessageID,
+                createdAt: latest.createdAt,
+                updatedAt: latest.updatedAt.addingTimeInterval(1)
+            ),
+            userID: userID,
+            relationshipID: relationshipID
+        )
+        #expect(
+            try store.load(userID: userID, relationshipID: relationshipID)?.last?.title
+                == "伺服器已接受的更新"
+        )
+        #expect(try store.load(userID: UUID(), relationshipID: relationshipID) == nil)
+        #expect(try store.load(userID: userID, relationshipID: UUID()) == nil)
+        store.clearAll(userID: userID)
+        #expect(try store.load(userID: userID, relationshipID: relationshipID) == nil)
+    }
+
+    @MainActor
+    @Test func sharedAppointmentOfflineRestartRestoresCachedBaseBeforePendingEdit() async throws {
+        let now = Date(timeIntervalSince1970: 2_500)
+        let appointmentID = UUID()
+        let base = SharedAppointment(
+            id: appointmentID,
+            creatorUserID: UUID(),
+            title: "離線前約定",
+            startsAt: now.addingTimeInterval(3_600),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            status: .scheduled,
+            sourceMessageID: UUID(),
+            createdAt: now,
+            updatedAt: now
+        )
+        let updatedStartsAt = now.addingTimeInterval(7_200)
+        let operationID = UUID()
+        let service = SharedAppointmentRemoteServiceFake()
+        service.appointments = [base]
+        service.cachedAppointments = [base]
+        service.suspendFetchAppointments = true
+        service.fetchAppointmentsFails = true
+        service.operationFailuresRemaining = ConversationRecoveryRetryPolicy.maximumAttempts
+        service.pendingOperations = [SharedAppointmentOperationOutboxEntry(
+            userID: UUID(),
+            relationshipID: UUID(),
+            operationID: operationID,
+            appointmentID: appointmentID,
+            operation: .update(SharedAppointmentDraft(
+                title: "離線修改後",
+                startsAt: updatedStartsAt,
+                location: nil,
+                note: nil,
+                reminderAt: nil,
+                sourceMessageID: nil
+            )),
+            localCreatedAt: now,
+            attemptCount: 0
+        )]
+        let model = SharedAppointmentModel(service: service, now: { now })
+
+        let startup = Task { await model.start() }
+        while service.fetchAppointmentsContinuation == nil {
+            await Task.yield()
+        }
+
+        #expect(model.appointment(id: appointmentID)?.title == "離線修改後")
+        #expect(model.appointment(id: appointmentID)?.startsAt == updatedStartsAt)
+        #expect(model.statusMessage == "約定變更已保存在這支裝置；請確認連線後重試。")
+        #expect(service.deliveredOperationIDs.isEmpty)
+
+        service.resumeFetchAppointments()
+        startup.cancel()
+        await startup.value
+        #expect(model.appointment(id: appointmentID)?.title == "離線修改後")
+    }
+
     @MainActor
     @Test func sharedAppointmentLostAcknowledgementRetriesWithoutDuplicate() async throws {
         let service = SharedAppointmentRemoteServiceFake()
@@ -2273,6 +2391,7 @@ struct AppSkeletonTests {
 @MainActor
 private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteServing {
     var appointments: [SharedAppointment] = []
+    var cachedAppointments: [SharedAppointment]?
     var appointmentEvents: [SharedAppointmentEvent] = []
     var discussionSummaries: [SharedAppointmentDiscussionSummary] = []
     var pendingEntries: [SharedAppointmentOutboxEntry] = []
@@ -2284,9 +2403,29 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
     var operationFailuresRemaining = 0
     var operationAcknowledgementFailuresRemaining = 0
     var terminallyRejectedAppointmentIDs: Set<UUID> = []
+    var fetchAppointmentsFails = false
+    var suspendFetchAppointments = false
+    var fetchAppointmentsContinuation: CheckedContinuation<Void, Never>?
     private var onChange: (@MainActor () async -> Void)?
 
-    func fetchAppointments() async throws -> [SharedAppointment] { appointments }
+    func fetchCachedAppointments() async throws -> [SharedAppointment]? { cachedAppointments }
+
+    func fetchAppointments() async throws -> [SharedAppointment] {
+        if suspendFetchAppointments {
+            await withCheckedContinuation { continuation in
+                fetchAppointmentsContinuation = continuation
+            }
+        }
+        if fetchAppointmentsFails { throw CancellationError() }
+        cachedAppointments = appointments
+        return appointments
+    }
+
+    func resumeFetchAppointments() {
+        suspendFetchAppointments = false
+        fetchAppointmentsContinuation?.resume()
+        fetchAppointmentsContinuation = nil
+    }
 
     func fetchAppointmentEvents() async throws -> [SharedAppointmentEvent] {
         appointmentEvents

@@ -86,7 +86,9 @@ final class SharedAppointmentModel: ObservableObject {
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true
+        await loadCachedAppointments()
         await loadPendingAppointments()
+        await loadPendingAppointmentOperations()
         await refresh()
         do {
             try await service.startObservingChanges { [weak self] in
@@ -153,7 +155,11 @@ final class SharedAppointmentModel: ObservableObject {
                 ?? operationDeliveryStatusMessage
                 ?? deliveryStatusMessage
         } catch {
-            statusMessage = "無法更新共同約定，請稍後再試。"
+            statusMessage = operationDeliveryStatusMessage
+                ?? deliveryStatusMessage
+                ?? (appointments.isEmpty
+                    ? "無法更新共同約定，請稍後再試。"
+                    : "目前顯示上次已同步的共同約定；連線後會自動更新。")
         }
     }
 
@@ -295,7 +301,9 @@ final class SharedAppointmentModel: ObservableObject {
     }
 
     func recoverPendingAppointments() async {
+        await loadCachedAppointments()
         await loadPendingAppointments()
+        await loadPendingAppointmentOperations()
         await drainPendingAppointments(
             maximumAttemptsPerAppointment: ConversationRecoveryRetryPolicy.maximumAttempts
         )
@@ -305,11 +313,30 @@ final class SharedAppointmentModel: ObservableObject {
         await refresh()
     }
 
+    private func loadCachedAppointments() async {
+        guard let cached = try? await service.fetchCachedAppointments() else { return }
+        mergeAppointments(cached)
+    }
+
     private func loadPendingAppointments() async {
         do {
             mergeAppointments(try await service.fetchPendingAppointments())
         } catch {
             statusMessage = "無法讀取待同步共同約定，請稍後再試。"
+        }
+    }
+
+    private func loadPendingAppointmentOperations() async {
+        do {
+            let operations = try await service.fetchPendingAppointmentOperations()
+            guard !operations.isEmpty else { return }
+            appointments = Self.applying(operations, to: appointments)
+                .sorted(by: Self.appointmentOrder)
+            let message = "約定變更已保存在這支裝置；請確認連線後重試。"
+            operationDeliveryStatusMessage = message
+            statusMessage = message
+        } catch {
+            statusMessage = "無法讀取待同步的約定操作，請稍後再試。"
         }
     }
 

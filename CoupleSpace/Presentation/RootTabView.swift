@@ -434,40 +434,53 @@ struct RootTabView: View {
     }
 
     var body: some View {
-        TabView(selection: $selection) {
-            Tab("今天", systemImage: "sun.max", value: PrimarySection.today) {
-                TodayMomentView(
-                    model: momentModel,
-                    togetherNowModel: togetherNowModel,
-                    sharedAppointmentModel: sharedAppointmentModel,
-                    onOpenSourceMessage: openSourceMessage
-                )
+        VStack(spacing: 0) {
+            if isOffline {
+                Label("目前為離線模式，待送內容會在恢復網路後重試。", systemImage: "wifi.slash")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(.thinMaterial)
+                    .accessibilityIdentifier("offline-status")
             }
 
-            Tab("對話", systemImage: "bubble.left.and.bubble.right", value: PrimarySection.conversation) {
-                ConversationView(
-                    model: conversationModel,
-                    sharedAppointmentModel: sharedAppointmentModel,
-                    focusMessageID: $conversationFocusMessageID,
-                    appointmentDiscussionFocus: $appointmentDiscussionFocus,
-                    savedMomentSourceIDs: Set(momentModel.moments.compactMap(\.sourceMessageID)),
-                    onMomentSaved: { await momentModel.refresh() }
-                )
-            }
-            .badge(conversationModel.unreadCount + sharedAppointmentModel.discussionUnreadCount)
+            TabView(selection: $selection) {
+                Tab("今天", systemImage: "sun.max", value: PrimarySection.today) {
+                    TodayMomentView(
+                        model: momentModel,
+                        togetherNowModel: togetherNowModel,
+                        sharedAppointmentModel: sharedAppointmentModel,
+                        onOpenSourceMessage: openSourceMessage
+                    )
+                }
 
-            Tab("我們", systemImage: "person.2", value: PrimarySection.us) {
-                UsView(
-                    momentModel: momentModel,
-                    togetherNowModel: togetherNowModel,
-                    sharedAppointmentModel: sharedAppointmentModel,
-                    accountUserToken: accountUserToken,
-                    accountStatusMessage: accountStatusMessage,
-                    relationshipToken: relationshipToken,
-                    technicalValidationClient: technicalValidationClient,
-                    onOpenSourceMessage: openSourceMessage,
-                    onSignOut: onSignOut
-                )
+                Tab("對話", systemImage: "bubble.left.and.bubble.right", value: PrimarySection.conversation) {
+                    ConversationView(
+                        model: conversationModel,
+                        sharedAppointmentModel: sharedAppointmentModel,
+                        focusMessageID: $conversationFocusMessageID,
+                        appointmentDiscussionFocus: $appointmentDiscussionFocus,
+                        savedMomentSourceIDs: Set(momentModel.moments.compactMap(\.sourceMessageID)),
+                        onMomentSaved: { await momentModel.refresh() }
+                    )
+                }
+                .badge(conversationModel.unreadCount + sharedAppointmentModel.discussionUnreadCount)
+
+                Tab("我們", systemImage: "person.2", value: PrimarySection.us) {
+                    UsView(
+                        momentModel: momentModel,
+                        togetherNowModel: togetherNowModel,
+                        sharedAppointmentModel: sharedAppointmentModel,
+                        accountUserToken: accountUserToken,
+                        accountStatusMessage: accountStatusMessage,
+                        relationshipToken: relationshipToken,
+                        technicalValidationClient: technicalValidationClient,
+                        onOpenSourceMessage: openSourceMessage,
+                        onSignOut: onSignOut
+                    )
+                }
             }
         }
         .tint(.accentColor)
@@ -488,18 +501,6 @@ struct RootTabView: View {
                         }
                     }
                 }
-            }
-        }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if isOffline {
-                Label("目前為離線模式，待送內容會在恢復網路後重試。", systemImage: "wifi.slash")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
-                    .background(.thinMaterial)
-                    .accessibilityIdentifier("offline-status")
             }
         }
         .task {
