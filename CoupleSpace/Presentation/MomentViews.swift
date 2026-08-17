@@ -137,14 +137,24 @@ struct MomentTimelineView: View {
             if model.isLoading && model.moments.isEmpty {
                 ProgressView("正在整理共同時間線…")
             } else if model.moments.isEmpty {
-                ContentUnavailableView(
-                    "共同時間線",
-                    systemImage: "sparkles.rectangle.stack",
-                    description: Text("你們留下的 Moment 會依時間出現在這裡。")
-                )
+                VStack(spacing: 16) {
+                    weeklyReviewLink
+                        .padding(.horizontal)
+                    ContentUnavailableView(
+                        "共同時間線",
+                        systemImage: "sparkles.rectangle.stack",
+                        description: Text("你們留下的 Moment 會依時間出現在這裡。")
+                    )
+                }
             } else {
                 ScrollViewReader { proxy in
                     VStack(spacing: 0) {
+                        weeklyReviewLink
+                            .padding(.horizontal)
+                            .padding(.vertical, 8)
+
+                        Divider()
+
                         HStack {
                             Menu {
                                 Section("月份") {
@@ -293,6 +303,20 @@ struct MomentTimelineView: View {
         model.moments.filter(contentFilter.includes)
     }
 
+    private var weeklyReviewLink: some View {
+        NavigationLink {
+            MomentWeeklyReviewView(
+                model: model,
+                togetherNowModel: togetherNowModel,
+                onOpenSourceMessage: onOpenSourceMessage
+            )
+        } label: {
+            Label("回顧最近 7 天", systemImage: "calendar.badge.clock")
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+    }
+
     private func monthTitle(_ date: Date) -> String {
         date.formatted(.dateTime.year().month(.wide))
     }
@@ -318,6 +342,106 @@ struct MomentTimelineView: View {
             components.month ?? 0,
             components.day ?? 0
         )
+    }
+}
+
+private struct MomentWeeklyReviewView: View {
+    @ObservedObject var model: MomentModel
+    @ObservedObject var togetherNowModel: TogetherNowModel
+    let onOpenSourceMessage: (MomentSource) -> Void
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(dateRange)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("weekly-review-date-range")
+                    Text("留下了 \(review.moments.count) 個 Moment")
+                        .font(.title2.weight(.semibold))
+                        .accessibilityIdentifier("weekly-review-count")
+                    if !contentSummary.isEmpty {
+                        Text(contentSummary)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .accessibilityIdentifier("weekly-review-content-summary")
+                    }
+                    Text("依目前已載入內容整理，不評分也不比較彼此。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                if review.moments.isEmpty {
+                    ContentUnavailableView(
+                        "這週還沒有 Moment",
+                        systemImage: "calendar.badge.clock",
+                        description: Text("不用補進度；想留下時，再記下一個此刻就好。")
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 260)
+                    .accessibilityIdentifier("weekly-review-empty")
+                } else {
+                    ForEach(review.moments) { moment in
+                        MomentCard(
+                            moment: moment,
+                            photoData: model.photoDataByMomentID[moment.id],
+                            authorLabel: model.authorLabel(
+                                for: moment,
+                                names: togetherNowModel.snapshot
+                            ),
+                            names: togetherNowModel.snapshot,
+                            model: model,
+                            onOpenSourceMessage: onOpenSourceMessage
+                        )
+                        .task(id: moment.id) {
+                            await model.loadPhotoIfNeeded(moment)
+                        }
+                    }
+                }
+
+                if canLoadMoreReviewMoments {
+                    Button {
+                        Task { await model.loadMoreMoments() }
+                    } label: {
+                        if model.isLoadingMore {
+                            ProgressView()
+                        } else {
+                            Text("載入更多回顧內容")
+                        }
+                    }
+                    .frame(maxWidth: .infinity)
+                    .disabled(model.isLoadingMore)
+                    .accessibilityIdentifier("load-older-weekly-review-moments")
+                }
+            }
+            .padding()
+        }
+        .navigationTitle("這週的我們")
+        .navigationBarTitleDisplayMode(.inline)
+        .accessibilityIdentifier("weekly-review-screen")
+    }
+
+    private var contentSummary: String {
+        MomentContentFilter.allCases.dropFirst().compactMap { filter in
+            let count = review.count(for: filter)
+            return count == 0 ? nil : "\(filter.title) \(count)"
+        }
+        .joined(separator: "・")
+    }
+
+    private var review: MomentWeeklyReview {
+        MomentTimelinePolicy.weeklyReview(from: model.moments)
+    }
+
+    private var canLoadMoreReviewMoments: Bool {
+        guard model.hasMoreMoments, let oldestLoadedMoment = model.moments.last else {
+            return false
+        }
+        return oldestLoadedMoment.createdAt >= review.startDay
+    }
+
+    private var dateRange: String {
+        "\(review.startDay.formatted(date: .abbreviated, time: .omitted))–\(review.endDay.formatted(date: .abbreviated, time: .omitted))"
     }
 }
 

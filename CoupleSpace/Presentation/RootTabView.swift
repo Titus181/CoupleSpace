@@ -172,6 +172,30 @@ struct RootTabView: View {
                         )
                     }
                 )
+            } else if arguments.contains("--ui-testing-w12-weekly-review") {
+                service = InMemoryMomentService(
+                    userID: uiTestUserID,
+                    moments: [
+                        Moment(
+                            id: UUID(uuidString: "C3000000-0000-0000-0000-000000000001")!,
+                            creatorUserID: uiTestUserID,
+                            content: .text("這週一起散步"),
+                            createdAt: .now.addingTimeInterval(-3_600)
+                        ),
+                        Moment(
+                            id: UUID(uuidString: "C3000000-0000-0000-0000-000000000002")!,
+                            creatorUserID: uiTestPartnerID,
+                            content: .mood(.happy),
+                            createdAt: .now.addingTimeInterval(-86_400)
+                        ),
+                        Moment(
+                            id: UUID(uuidString: "C3000000-0000-0000-0000-000000000003")!,
+                            creatorUserID: uiTestPartnerID,
+                            content: .text("八天前的 Moment"),
+                            createdAt: .now.addingTimeInterval(-691_200)
+                        ),
+                    ]
+                )
             } else if arguments.contains("--ui-testing-w12-monthly-timeline") {
                 var calendar = Calendar(identifier: .gregorian)
                 calendar.timeZone = TimeZone(secondsFromGMT: 0)!

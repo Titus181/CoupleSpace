@@ -2043,6 +2043,64 @@ struct AppSkeletonTests {
         #expect(moments.filter(MomentContentFilter.question.includes).count == 1)
     }
 
+    @Test func weeklyReviewUsesTheLatestSevenLocalCalendarDaysThroughNow() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        func date(day: Int, hour: Int, minute: Int = 0) throws -> Date {
+            try #require(calendar.date(from: DateComponents(
+                year: 2026,
+                month: 8,
+                day: day,
+                hour: hour,
+                minute: minute
+            )))
+        }
+        let now = try date(day: 17, hour: 14)
+        let expectedStartDay = try date(day: 11, hour: 0)
+        let expectedEndDay = try date(day: 17, hour: 0)
+        let boundaryID = UUID()
+        let latestID = UUID()
+        let moments = [
+            Moment(
+                id: UUID(),
+                creatorUserID: UUID(),
+                content: .text("範圍外"),
+                createdAt: try date(day: 10, hour: 23, minute: 59)
+            ),
+            Moment(
+                id: boundaryID,
+                creatorUserID: UUID(),
+                content: .mood(.happy),
+                createdAt: try date(day: 11, hour: 0)
+            ),
+            Moment(
+                id: latestID,
+                creatorUserID: UUID(),
+                content: .text("最新"),
+                createdAt: now
+            ),
+            Moment(
+                id: UUID(),
+                creatorUserID: UUID(),
+                content: .photo,
+                createdAt: try date(day: 17, hour: 15)
+            ),
+        ]
+
+        let review = MomentTimelinePolicy.weeklyReview(
+            from: moments,
+            now: now,
+            calendar: calendar
+        )
+
+        #expect(review.startDay == expectedStartDay)
+        #expect(review.endDay == expectedEndDay)
+        #expect(review.moments.map(\.id) == [latestID, boundaryID])
+        #expect(review.count(for: .text) == 1)
+        #expect(review.count(for: .mood) == 1)
+        #expect(review.count(for: .photo) == 0)
+    }
+
     @Test func legacyMomentSnapshotDecodesWithoutSourceMessageID() throws {
         let legacy = LegacyMoment(
             id: UUID(),

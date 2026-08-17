@@ -145,6 +145,16 @@ struct MomentPage: Equatable, Sendable {
     let hasMore: Bool
 }
 
+struct MomentWeeklyReview: Equatable, Sendable {
+    let startDay: Date
+    let endDay: Date
+    let moments: [Moment]
+
+    func count(for filter: MomentContentFilter) -> Int {
+        moments.count(where: filter.includes)
+    }
+}
+
 enum MomentContentFilter: String, CaseIterable, Identifiable, Sendable {
     case all
     case mood
@@ -176,6 +186,29 @@ enum MomentContentFilter: String, CaseIterable, Identifiable, Sendable {
 }
 
 enum MomentTimelinePolicy {
+    static func weeklyReview(
+        from moments: [Moment],
+        now: Date = .now,
+        calendar: Calendar = .current
+    ) -> MomentWeeklyReview {
+        let endDay = calendar.startOfDay(for: now)
+        let startDay = calendar.date(byAdding: .day, value: -6, to: endDay) ?? endDay
+        let includedMoments = moments.filter {
+            $0.createdAt >= startDay && $0.createdAt <= now
+        }
+        .sorted {
+            if $0.createdAt != $1.createdAt {
+                return $0.createdAt > $1.createdAt
+            }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+        return MomentWeeklyReview(
+            startDay: startDay,
+            endDay: endDay,
+            moments: includedMoments
+        )
+    }
+
     static func monthSections(
         from moments: [Moment],
         calendar: Calendar = .current

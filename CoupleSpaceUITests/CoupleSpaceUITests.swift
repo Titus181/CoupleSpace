@@ -377,6 +377,52 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testWeeklyReviewSummarizesOnlyTheLatestSevenDaysWithoutScoring() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w12-weekly-review"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["us-screen"].waitForExistence(timeout: 3)
+        )
+        let review = app.buttons["回顧最近 7 天"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        XCTAssertTrue(app.navigationBars["這週的我們"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["留下了 2 個 Moment"].exists)
+        XCTAssertTrue(app.staticTexts["心情 1・文字 1"].exists)
+        XCTAssertTrue(app.staticTexts["這週一起散步"].exists)
+        XCTAssertTrue(app.staticTexts["開心"].exists)
+        XCTAssertFalse(app.staticTexts["八天前的 Moment"].exists)
+        XCTAssertTrue(
+            app.staticTexts["依目前已載入內容整理，不評分也不比較彼此。"].exists
+        )
+    }
+
+    @MainActor
+    func testWeeklyReviewKeepsAnExplicitLowPressureEmptyState() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["us-screen"].waitForExistence(timeout: 3)
+        )
+        let review = app.buttons["回顧最近 7 天"]
+        XCTAssertTrue(review.waitForExistence(timeout: 3))
+        review.tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["weekly-review-empty"]
+                .waitForExistence(timeout: 2)
+        )
+        XCTAssertTrue(app.staticTexts["不用補進度；想留下時，再記下一個此刻就好。"].exists)
+    }
+
+    @MainActor
     func testSharedPhotosOpenLatestMomentAndReturnToItsSource() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-w12-monthly-timeline"]
