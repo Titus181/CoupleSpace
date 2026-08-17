@@ -261,6 +261,62 @@ struct AppSkeletonTests {
     }
 
     @MainActor
+    @Test func sharedAppointmentModelSeparatesUpcomingFromPastAndCancelledNewestFirst() async {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let upcomingID = UUID()
+        let recentCancelledID = UUID()
+        let olderPastID = UUID()
+        let service = SharedAppointmentRemoteServiceFake()
+
+        func appointment(
+            id: UUID,
+            startsAt: Date,
+            status: SharedAppointmentStatus
+        ) -> SharedAppointment {
+            SharedAppointment(
+                id: id,
+                creatorUserID: UUID(),
+                title: id.uuidString,
+                startsAt: startsAt,
+                location: nil,
+                note: nil,
+                reminderAt: nil,
+                status: status,
+                sourceMessageID: nil,
+                createdAt: startsAt,
+                updatedAt: startsAt
+            )
+        }
+
+        service.appointments = [
+            appointment(
+                id: olderPastID,
+                startsAt: now.addingTimeInterval(-7_200),
+                status: .scheduled
+            ),
+            appointment(
+                id: upcomingID,
+                startsAt: now.addingTimeInterval(3_600),
+                status: .scheduled
+            ),
+            appointment(
+                id: recentCancelledID,
+                startsAt: now.addingTimeInterval(-3_600),
+                status: .cancelled
+            ),
+        ]
+        let model = SharedAppointmentModel(service: service, now: { now })
+
+        await model.refresh()
+
+        #expect(model.upcomingAppointments.map(\.id) == [upcomingID])
+        #expect(model.pastOrCancelledAppointments.map(\.id) == [
+            recentCancelledID,
+            olderPastID,
+        ])
+    }
+
+    @MainActor
     @Test func sharedAppointmentModelLoadsOnlyEventsForVisibleAppointmentsInServerOrder() async {
         let appointmentID = UUID()
         let missingAppointmentID = UUID()

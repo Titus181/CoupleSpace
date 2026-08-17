@@ -282,6 +282,12 @@ struct RootTabView: View {
             _togetherNowModel = StateObject(
                 wrappedValue: TogetherNowModel(service: InMemoryTogetherNowService())
             )
+            let pastDiscussionAppointmentID = UUID(
+                uuidString: "A4000000-0000-0000-0000-000000000006"
+            )!
+            let cancelledDiscussionAppointmentID = UUID(
+                uuidString: "A4000000-0000-0000-0000-000000000007"
+            )!
             let seededAppointments: [SharedAppointment]
             if arguments.contains("--ui-testing-w11-appointments") {
                 seededAppointments = [
@@ -310,6 +316,48 @@ struct RootTabView: View {
                         sourceMessageID: nil,
                         createdAt: .now.addingTimeInterval(-172_800),
                         updatedAt: .now.addingTimeInterval(-86_400)
+                    ),
+                ]
+            } else if arguments.contains("--ui-testing-w12-past-appointments") {
+                seededAppointments = [
+                    SharedAppointment(
+                        id: UUID(uuidString: "A4000000-0000-0000-0000-000000000005")!,
+                        creatorUserID: uiTestUserID,
+                        title: "下週一起吃晚餐",
+                        startsAt: .now.addingTimeInterval(86_400),
+                        location: nil,
+                        note: nil,
+                        reminderAt: nil,
+                        status: .scheduled,
+                        sourceMessageID: nil,
+                        createdAt: .now,
+                        updatedAt: .now
+                    ),
+                    SharedAppointment(
+                        id: pastDiscussionAppointmentID,
+                        creatorUserID: uiTestPartnerID,
+                        title: "昨天一起散步",
+                        startsAt: .now.addingTimeInterval(-86_400),
+                        location: "河濱公園",
+                        note: nil,
+                        reminderAt: nil,
+                        status: .scheduled,
+                        sourceMessageID: nil,
+                        createdAt: .now.addingTimeInterval(-172_800),
+                        updatedAt: .now.addingTimeInterval(-86_400)
+                    ),
+                    SharedAppointment(
+                        id: cancelledDiscussionAppointmentID,
+                        creatorUserID: uiTestUserID,
+                        title: "取消的電影約會",
+                        startsAt: .now.addingTimeInterval(-172_800),
+                        location: "電影院",
+                        note: nil,
+                        reminderAt: nil,
+                        status: .cancelled,
+                        sourceMessageID: nil,
+                        createdAt: .now.addingTimeInterval(-259_200),
+                        updatedAt: .now.addingTimeInterval(-172_800)
                     ),
                 ]
             } else if arguments.contains("--ui-testing-w11-calendar") {
@@ -388,7 +436,25 @@ struct RootTabView: View {
                     discussionModelFactory: { appointmentID in
                         let messages: [ChatMessage]
                         let photoDataByMessageID: [UUID: Data]
-                        if (arguments.contains("--ui-testing-w11-discussion")
+                        if arguments.contains("--ui-testing-w12-past-appointments"),
+                           appointmentID == pastDiscussionAppointmentID {
+                            messages = [ChatMessage(
+                                id: UUID(uuidString: "D4000000-0000-0000-0000-000000000023")!,
+                                senderUserID: uiTestPartnerID,
+                                body: "散步後還想聊聊",
+                                createdAt: .now.addingTimeInterval(-86_300)
+                            )]
+                            photoDataByMessageID = [:]
+                        } else if arguments.contains("--ui-testing-w12-past-appointments"),
+                                  appointmentID == cancelledDiscussionAppointmentID {
+                            messages = [ChatMessage(
+                                id: UUID(uuidString: "D4000000-0000-0000-0000-000000000024")!,
+                                senderUserID: uiTestPartnerID,
+                                body: "電影票已經退好了",
+                                createdAt: .now.addingTimeInterval(-172_700)
+                            )]
+                            photoDataByMessageID = [:]
+                        } else if (arguments.contains("--ui-testing-w11-discussion")
                             || arguments.contains("--ui-testing-w11-source-routing")),
                            appointmentID == discussionAppointmentID {
                             let photoMessageID = UUID(

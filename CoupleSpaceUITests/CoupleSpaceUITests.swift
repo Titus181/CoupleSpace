@@ -543,6 +543,48 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testPastAndCancelledAppointmentsReturnToTheirDiscussionWithCorrectComposerState() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w12-past-appointments"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["us-screen"].waitForExistence(timeout: 3)
+        )
+        let scheduleButton = app.buttons["open-shared-appointment-schedule"]
+        XCTAssertTrue(scheduleButton.waitForExistence(timeout: 3))
+        scheduleButton.tap()
+
+        XCTAssertTrue(app.navigationBars["共同日程"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["下週一起吃晚餐"].exists)
+        let pastAppointment = app.staticTexts["昨天一起散步"]
+        XCTAssertTrue(pastAppointment.exists)
+        XCTAssertTrue(app.staticTexts["取消的電影約會"].exists)
+        pastAppointment.tap()
+
+        XCTAssertTrue(app.navigationBars["約定詳情"].waitForExistence(timeout: 2))
+        app.buttons["open-appointment-discussion"].tap()
+        XCTAssertTrue(app.staticTexts["散步後還想聊聊"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.descendants(matching: .any)["conversation-input"].exists)
+        XCTAssertFalse(
+            app.descendants(matching: .any)["appointment-discussion-read-only"].exists
+        )
+
+        app.navigationBars["專屬討論"].buttons["約定詳情"].tap()
+        app.navigationBars["約定詳情"].buttons["共同日程"].tap()
+        app.staticTexts["取消的電影約會"].tap()
+
+        XCTAssertTrue(app.staticTexts["狀態, 已取消"].waitForExistence(timeout: 2))
+        app.buttons["open-appointment-discussion"].tap()
+        XCTAssertTrue(app.staticTexts["電影票已經退好了"].waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["appointment-discussion-read-only"].exists
+        )
+        XCTAssertFalse(app.descendants(matching: .any)["conversation-input"].exists)
+    }
+
+    @MainActor
     func testAppointmentDiscussionSendsTextAndReusesEmojiActions() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-w11-discussion"]
