@@ -19,6 +19,7 @@ final class MomentModel: ObservableObject {
     private var optimisticResponses: [UUID: MomentResponse] = [:]
     private var pendingAnswerAttempts: [UUID: (answer: String, clientID: UUID)] = [:]
     private var pendingQuestionAttempt: (draft: MomentQuestionDraft, momentID: UUID, answerID: UUID)?
+    private var activePhotoMomentIDs: Set<UUID> = []
     private let pageSize = 50
 
     init(service: MomentRemoteServing) {
@@ -94,7 +95,6 @@ final class MomentModel: ObservableObject {
             hasMoreMoments = hadLoadedOlderPages ? previousHasMore : page.hasMore
             mergeOptimisticResponses()
             statusMessage = nil
-            await loadMissingPhotos()
         } catch {
             statusMessage = "無法更新 Moment，請稍後再試。"
         }
@@ -112,7 +112,6 @@ final class MomentModel: ObservableObject {
             moments = merge(moments, with: page.moments)
             hasMoreMoments = page.hasMore
             statusMessage = nil
-            await loadMissingPhotos()
         } catch {
             statusMessage = "無法載入更早的 Moment，請稍後再試。"
         }
@@ -129,7 +128,7 @@ final class MomentModel: ObservableObject {
             moments.insert(moment, at: 0)
             statusMessage = "已留在你們的共同時間線。"
             if case .photo = moment.content {
-                await loadPhoto(moment)
+                await loadPhotoIfNeeded(moment)
             }
             return true
         } catch {
@@ -245,10 +244,16 @@ final class MomentModel: ObservableObject {
         }
     }
 
-    private func loadMissingPhotos() async {
-        for moment in moments where photoDataByMomentID[moment.id] == nil {
-            guard case .photo = moment.content else { continue }
-            await loadPhoto(moment)
+    func loadPhotoIfNeeded(_ moment: Moment) async {
+        guard case .photo = moment.content,
+              photoDataByMomentID[moment.id] == nil,
+              !activePhotoMomentIDs.contains(moment.id)
+        else { return }
+
+        activePhotoMomentIDs.insert(moment.id)
+        defer { activePhotoMomentIDs.remove(moment.id) }
+        if let data = try? await service.photoData(for: moment) {
+            photoDataByMomentID[moment.id] = data
         }
     }
 
@@ -300,9 +305,4 @@ final class MomentModel: ObservableObject {
         }
     }
 
-    private func loadPhoto(_ moment: Moment) async {
-        if let data = try? await service.photoData(for: moment) {
-            photoDataByMomentID[moment.id] = data
-        }
-    }
 }

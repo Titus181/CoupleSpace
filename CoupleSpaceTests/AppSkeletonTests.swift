@@ -2033,6 +2033,36 @@ struct AppSkeletonTests {
     }
 
     @MainActor
+    @Test func momentModelLoadsPhotoDataOnlyWhenRequestedAndOnlyOnce() async {
+        let firstPhoto = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .photo,
+            createdAt: Date(timeIntervalSince1970: 200)
+        )
+        let secondPhoto = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .photo,
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let service = MomentRemoteServiceFake(moments: [firstPhoto, secondPhoto])
+        service.cachedPhotoDataByMomentID[firstPhoto.id] = Data([0x01])
+        service.cachedPhotoDataByMomentID[secondPhoto.id] = Data([0x02])
+        let model = MomentModel(service: service)
+
+        await model.start()
+        #expect(service.photoDataRequestIDs.isEmpty)
+
+        await model.loadPhotoIfNeeded(firstPhoto)
+        await model.loadPhotoIfNeeded(firstPhoto)
+
+        #expect(service.photoDataRequestIDs == [firstPhoto.id])
+        #expect(model.photoDataByMomentID[firstPhoto.id] == Data([0x01]))
+        #expect(model.photoDataByMomentID[secondPhoto.id] == nil)
+    }
+
+    @MainActor
     @Test func momentModelCompletesPartnerResponseAndJointQuestionReveal() async throws {
         let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
         let partnerUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B2")!
@@ -3206,6 +3236,7 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
     var responseClientIDs: [UUID] = []
     var answerClientIDs: [UUID] = []
     var questionAttemptIDs: [(UUID, UUID)] = []
+    var photoDataRequestIDs: [UUID] = []
     var responseFailuresRemaining = 0
     var responseDelay: Duration = .zero
     var answerFailuresRemaining = 0
@@ -3328,7 +3359,8 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
     }
 
     func photoData(for moment: Moment) async throws -> Data {
-        cachedPhotoDataByMomentID[moment.id] ?? Data()
+        photoDataRequestIDs.append(moment.id)
+        return cachedPhotoDataByMomentID[moment.id] ?? Data()
     }
 
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {

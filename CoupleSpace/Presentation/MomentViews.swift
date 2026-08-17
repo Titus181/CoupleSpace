@@ -80,6 +80,9 @@ struct TodayMomentView: View {
                                 model: model,
                                 onOpenSourceMessage: onOpenSourceMessage
                             )
+                            .task(id: latest.id) {
+                                await model.loadPhotoIfNeeded(latest)
+                            }
                         }
                     } else {
                         ContentUnavailableView {
@@ -184,6 +187,9 @@ struct MomentTimelineView: View {
                                                 model: model,
                                                 onOpenSourceMessage: onOpenSourceMessage
                                             )
+                                            .task(id: moment.id) {
+                                                await model.loadPhotoIfNeeded(moment)
+                                            }
                                         }
                                     } header: {
                                         HStack {
@@ -301,6 +307,9 @@ struct MomentPhotoGridView: View {
                                             }
                                             .buttonStyle(.plain)
                                             .id(moment.id)
+                                            .task(id: moment.id) {
+                                                await model.loadPhotoIfNeeded(moment)
+                                            }
                                             .accessibilityLabel(
                                                 "\(model.authorLabel(for: moment, names: togetherNowModel.snapshot))，\(moment.createdAt.formatted(date: .abbreviated, time: .omitted))"
                                             )
