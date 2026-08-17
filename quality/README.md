@@ -4,6 +4,8 @@
 
 - `CoupleSpaceTests/`
 - `CoupleSpaceUITests/`
+- `CoupleSpace Watch App Watch AppTests/`
+- `CoupleSpace Watch App Watch AppUITests/`
 - `supabase/tests/database/`
 - `supabase/functions/**/**.test.ts`
 - `evals/`
@@ -13,6 +15,7 @@
 - [測試目錄](test-catalog.md)：穩定 ID、責任層級、實際程式位置與必要 gate。
 - [版本發布閘門](release-gates.md)：開發、合併、TestFlight 與正式發布的阻擋規則。
 - [回歸紀錄](regression-history.md)：曾經發生的缺陷及其永久 regression。
+- [W8–W11 完整改版回歸](manual/w8-w11-regression.md)：把基本聊天、可靠傳送、聊天照片／回應／收藏及共同約定編排成一套可重跑流程。
 - [版本驗證紀錄模板](release-record-template.md)：每個 release candidate 的可稽核結果。
 - `releases/`：依版本保存已填寫的 release record，不覆寫歷史結果。
 - `manual/`：無法由 Simulator 可靠取代的真機、Apple 服務與資料生命週期清單。
@@ -26,6 +29,21 @@
 4. 完成垂直切片後，跑相關 database／unit／UI／Harness gate。
 5. 合併前跑完整 iPhone automated suite；TestFlight 或正式發布前依 `release-gates.md` 執行全部必要 gate。
 6. 每次版本複製 `release-record-template.md` 到 `releases/`，記錄 commit、build、結果與人工證據。
+
+## 所有測試存放位置
+
+- Swift unit／model tests：`CoupleSpaceTests/`
+- iPhone UI／launch tests：`CoupleSpaceUITests/`
+- Watch unit tests：`CoupleSpace Watch App Watch AppTests/`
+- Watch UI／launch tests：`CoupleSpace Watch App Watch AppUITests/`
+- Supabase pgTAP／RLS／RPC tests：`supabase/tests/database/`
+- Edge Function／APNs payload tests：`supabase/functions/**/**.test.ts`
+- Agent Evals：`evals/`
+- 人工真機、弱網、Apple 服務與資料生命週期清單：`quality/manual/`
+- 穩定測試 ID 與責任對照：`quality/test-catalog.md`
+- 曾發生缺陷與永久防線：`quality/regression-history.md`
+- 完整自動化入口：`quality/scripts/run-full-automated-suite.sh`
+- 每版測試結果：`quality/releases/`（由 `quality/release-record-template.md` 建立）
 
 統一腳本需要 RTK、Supabase CLI、Deno、Xcode command line tools，以及可用的本機 Supabase／Simulator 環境。缺少任一工具時會直接阻擋，不會跳過對應測試後假裝完整 suite 通過；可先使用 `--dry-run` 檢查預定命令。
 

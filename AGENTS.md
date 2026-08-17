@@ -61,6 +61,15 @@ There is no standalone linter configured yet. Do not claim lint passed; the Swif
 - A fresh green result is required after the final code change. Do not reuse a test result from before the last behavior-affecting edit.
 - Flaky tests are defects. Do not hide them with unconditional retries or silently weaken assertions.
 
+## Complete Test Workflow
+
+- When the user asks for `完整測試` or says `閱讀 quality/ 內的文件，依 Gate C 執行完整測試`, treat it as authorization to run the complete local test workflow, but not to deploy, commit, or push.
+- First read `quality/README.md`, `quality/test-catalog.md`, `quality/release-gates.md`, the applicable `quality/manual/` checklists, and the release-record template. For W8–W11 behavior, also read `quality/manual/w8-w11-regression.md`.
+- Verify that the reset target is the local disposable Supabase test database, then run Gate C's locally automatable checks: unit tests, database／integration tests, UI tests, schema lint, Edge Function tests, the full iPhone scheme, applicable Watch tests, Agent Evals, Harness, and diff hygiene. Record runtime executions, failures, skips, exit status, commit, build, and environment; a build-only result is not a test pass.
+- After the ordinary automated suite is green, run an applicable two-iPhone-Simulator preflight before asking for physical-device work. Use two isolated Simulator devices and test identities／fixtures to exercise cross-client sync, Realtime, unread state, Outbox／FIFO, restart recovery, deduplication, source navigation, and shared-appointment flows. Record unavailable identity or fixture seams as `BLOCKED`; do not silently skip them.
+- Simulator preflight is preliminary evidence only. It cannot close the required two-real-iPhone／two-Apple-ID, APNs, background／terminated, lock-screen, actual network-transition, TestFlight upgrade, low-storage, or physical-device lifecycle gates.
+- Only after all locally automatable and two-Simulator checks finish, provide one consolidated checklist for the remaining two-real-iPhone validation. Do not deploy, commit, push, alter linked／production data, or claim Gate C complete without separate authorization and the required fresh physical-device evidence.
+
 ## Stop Conditions
 
 Stop feature work and address the failure first if a change can cause data to be sent to the wrong person,

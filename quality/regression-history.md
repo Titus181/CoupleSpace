@@ -1,6 +1,6 @@
 ---
 status: active
-last_updated: 2026-08-12
+last_updated: 2026-08-17
 ---
 
 # CoupleSpace 回歸紀錄
@@ -15,6 +15,13 @@ last_updated: 2026-08-12
 | REG-004 | W5 full suite | Launch matrix 留下橫向狀態，污染後續一般 UI cases | UI test `setUpWithError` 回復直向，完整串行 scheme 驗證 |
 | REG-005 | W6 full suite | 元素在 ScrollView 外或 selector 不可見，聚焦 UI tests 通過但完整 suite 失敗 | `INTERACT-001`／`QUESTION-001`：只 assertion 可見元素並在必要時條件式捲動，完整 suite 重跑 |
 | REG-006 | W7 UI | Partner 卡 accessibility identifier 同時落在多個文字元素，selector 命中多筆 | `STATUS-001`：明確 selector 與伴侶左、本人右的位置 regression |
+| REG-007 | W9 雙真機弱網 | FIFO 隊首失敗後，後續訊息永久停在「傳送中」且無法操作 | `CHAT-002`／`NETWORK-001`：失敗隊首傳播、blocked 項目可重試及 FIFO 人工 gate；收斂於 `6c0f4e3` |
+| REG-008 | W9 雙真機重連 | Realtime refresh 執行中收到的事件被丟棄，伴侶必須重啟 App 才看到新內容 | `CHAT-002`／`NETWORK-001`：follow-up refresh、重建 subscription 與前景重連雙機 gate；收斂於 `6c0f4e3` |
+| REG-009 | W9 離線冷啟動 | 已登入配對者離線重開卻跳出帳號設定，或三分頁顯示成全新空白 | `TODAY-001`／`CHAT-002`：relationship／Today／conversation scoped 快照、離線 UI regressions 與雙機 gate；收斂於 `6c0f4e3` |
+| REG-010 | W9 離線傳送 | 離線按傳送後輸入已清空，但內容未成功寫入 Outbox | `CHAT-002`：enqueue 成功才清空、store recreation unit／UI regression；收斂於 `6c0f4e3` |
+| REG-011 | W11 離線重啟 | 待送改期仍存在，但缺少已同步約定快照，冷啟動顯示空白或「無法更新共同約定」 | `APPOINTMENT-001`／`NETWORK-001`：user＋relationship scoped 約定快照、200 筆上限與離線重啟 regression；收斂於 `194c341` |
+| REG-012 | W11 離線重啟 | 快照恢復後先顯示舊時間，必須等遠端 refresh 才套用本機待送改期 | `APPOINTMENT-001`：遠端懸停測試要求 refresh／delivery 前先依 FIFO 疊加 pending operations；收斂於 `194c341` |
+| REG-013 | W11 離線 UI | 全域離線提示遮住約定詳情／編輯頁左上導覽控制 | `APPOINTMENT-001`：完整 UI 路徑確認底層提示不可互動且取消按鈕可操作，另保留真機視覺 gate；收斂於 `194c341` |
 
 ## 新增格式
 

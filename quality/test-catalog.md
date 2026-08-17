@@ -1,6 +1,6 @@
 ---
 status: active
-last_updated: 2026-08-14
+last_updated: 2026-08-17
 ---
 
 # CoupleSpace 測試目錄
@@ -32,7 +32,7 @@ last_updated: 2026-08-14
 | QUESTION-001 | W6 共同問答 | 第一份答案提前洩漏、共同揭曉不一致 | pgTAP／Unit／UI＋真機 | `moment_interactions.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | STATUS-001 | W7 名稱與私人稱呼 | 私人稱呼被伴侶讀取、清除與 fallback 錯誤 | pgTAP／Unit／UI＋真機 | `together_now.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | STATUS-002 | W7 此刻狀態 | 到期仍顯示、重建後未恢復、未選擇卻建立歷史 | pgTAP／Unit／UI＋真機 | 同上、`manual/upgrade-and-recovery.md` | A、B、D |
-| CHAT-001 | W1／W8 基本文字聊天 | 內容長度、伺服器排序、第三人存取、未讀游標倒退或外洩 | pgTAP／Unit／UI＋真機 | `text_message_contract.test.sql`、`basic_text_chat.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift` | A、B、D |
+| CHAT-001 | W1／W8 基本文字聊天 | 內容長度、伺服器排序、第三人存取、未讀游標倒退或外洩 | pgTAP／Unit／UI＋真機 | `text_message_contract.test.sql`、`basic_text_chat.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | CHAT-002 | W9 可靠文字傳送 | 離線輸入靜默消失、待送／最近同步內容跨啟動遺失、錯 relationship、重複、錯序、無限重試或失敗狀態不可操作 | Unit／UI＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/weak-network.md` | A、B、D |
 | CHAT-003 | W10 聊天照片／混合 FIFO | 照片繞過既有私有 Storage／quota、離線檔案跨啟動遺失，或 text→photo→text 重送後漏送、重複、錯序 | pgTAP／Unit／UI＋真機 | `chat_photo_unread.test.sql`、`private_photo_storage.test.sql`、`photo_quota_contract.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/weak-network.md`、`manual/two-iphone.md` | A、B、D |
 | CHAT-004 | W10 訊息 Emoji 回應 | 待送／本人訊息可被回應、非伴侶越權，或常用／自訂 Emoji 的 set／replace／remove 造成重複及兩台不同步 | pgTAP／Unit／UI＋真機 | `shared_item_reactions.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
@@ -54,6 +54,8 @@ Gate A／B／D 定義見 [版本發布閘門](release-gates.md)。`CHAT-001` 只
 | DR-001 | Database／Storage／設定／刪除 journal 一致還原與異區冷重建 | `manual/disaster-recovery.md` |
 | LIFECYCLE-001 | 匯出、刪除、解除配對與雙方一致性 | `manual/deletion-and-unpairing.md` |
 | LOCK-001 | App Lock、背景切換與重新啟動 | `manual/app-lock-and-background.md` |
+
+W8–W11 的跨 catalog 完整改版順序見 `manual/w8-w11-regression.md`；它只編排既有責任，不建立新的 PASS 狀態。
 
 ## 已知未關閉範圍
 

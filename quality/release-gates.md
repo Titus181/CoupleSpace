@@ -1,6 +1,6 @@
 ---
 status: active
-last_updated: 2026-08-13
+last_updated: 2026-08-17
 ---
 
 # CoupleSpace 版本發布閘門
@@ -27,6 +27,7 @@ last_updated: 2026-08-13
 
 - 執行 `quality/scripts/run-full-automated-suite.sh --reset-local-database`。
 - 使用兩支真實 iPhone、兩個 Apple 身分完成所有適用 `manual/` 清單。
+- 若版本影響 W8–W11 的聊天、離線快照、Moment 來源或共同約定，依 `manual/w8-w11-regression.md` 的順序完成整合回歸；其中連結的個別 manual 清單仍是詳細步驟 SSOT。
 - 從空本機資料庫依 migrations 重建，完整 pgTAP 與 local schema lint 通過。
 - linked／staging migration history 與 schema lint 通過；任何部署仍需明確授權。
 - 以舊 build 建立資料與本機待送項目，再安裝 release candidate，確認升級、重登與恢復不重複、不錯序、不遺失。
