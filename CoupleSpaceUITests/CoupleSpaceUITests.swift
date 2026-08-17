@@ -684,6 +684,9 @@ final class CoupleSpaceUITests: XCTestCase {
         app.launch()
 
         let hugButton = app.buttons["moment-emoji-hug"]
+        if !hugButton.waitForExistence(timeout: 1) {
+            app.swipeUp()
+        }
         XCTAssertTrue(hugButton.waitForExistence(timeout: 3))
         hugButton.tap()
         XCTAssertTrue(app.staticTexts["我的回應"].waitForExistence(timeout: 2))
@@ -696,6 +699,9 @@ final class CoupleSpaceUITests: XCTestCase {
         app.launch()
 
         let moreButton = app.buttons["more-moment-emoji"]
+        if !moreButton.waitForExistence(timeout: 1) {
+            app.swipeUp()
+        }
         XCTAssertTrue(moreButton.waitForExistence(timeout: 3))
         moreButton.tap()
 
@@ -798,7 +804,7 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
-    func testPairingEntryRequiresACompleteInvitationCode() throws {
+    func testPairingEntryAcceptsAnEightCharacterShortCode() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-pairing"]
         app.launch()
@@ -811,7 +817,7 @@ final class CoupleSpaceUITests: XCTestCase {
         XCTAssertFalse(declineButton.isEnabled)
 
         app.textFields["pairing-invitation-input"].tap()
-        app.textFields["pairing-invitation-input"].typeText("11111111-2222-4333-8444-555555555555")
+        app.textFields["pairing-invitation-input"].typeText("7K3M-W9QP")
 
         XCTAssertTrue(acceptButton.isEnabled)
         XCTAssertTrue(declineButton.isEnabled)

@@ -59,7 +59,7 @@ private struct PairingSetupView: View {
     @State private var isConfirmingSignOut = false
 
     private var hasValidInput: Bool {
-        PairingInputPolicy.invitationToken(from: invitationCode) != nil
+        PairingInputPolicy.invitationIdentifier(from: invitationCode) != nil
     }
 
     var body: some View {
@@ -78,7 +78,7 @@ private struct PairingSetupView: View {
                 Section("邀請伴侶") {
                     if let invitation {
                         Text(invitation.code)
-                            .font(.footnote.monospaced())
+                            .font(.title3.monospaced().weight(.semibold))
                             .textSelection(.enabled)
                             .accessibilityIdentifier("pairing-invitation-code")
 
@@ -129,8 +129,8 @@ private struct PairingSetupView: View {
 
                 if relationship == nil {
                     Section("接受伴侶邀請") {
-                        TextField("完整貼上邀請碼", text: $invitationCode)
-                            .textInputAutocapitalization(.never)
+                        TextField("輸入 XXXX-XXXX 或貼上邀請", text: $invitationCode)
+                            .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
                             .font(.body.monospaced())
                             .accessibilityIdentifier("pairing-invitation-input")

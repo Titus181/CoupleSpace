@@ -12,10 +12,12 @@ struct PairingRelationship: Equatable {
 struct PairingInvitation: Equatable {
     let relationshipID: UUID
     let token: UUID
+    let shortCode: String
     let expiresAt: Date
 
     var code: String {
-        token.uuidString.lowercased()
+        let midpoint = shortCode.index(shortCode.startIndex, offsetBy: 4)
+        return String(shortCode[..<midpoint]) + "-" + String(shortCode[midpoint...])
     }
 }
 
@@ -27,8 +29,45 @@ enum PairingState: Equatable {
 }
 
 enum PairingInputPolicy {
-    static func invitationToken(from rawValue: String) -> UUID? {
-        UUID(uuidString: rawValue.trimmingCharacters(in: .whitespacesAndNewlines))
+    private static let shortCodeCharacters = CharacterSet(
+        charactersIn: "23456789ABCDEFGHJKMNPQRSTUVWXYZ"
+    )
+
+    static func invitationIdentifier(from rawValue: String) -> String? {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let token = UUID(uuidString: trimmed) {
+            return token.uuidString.lowercased()
+        }
+        if let shortCode = normalizedShortCode(trimmed) {
+            return shortCode
+        }
+
+        let labels = ["邀請碼", "配對碼", "invitation code"]
+        for label in labels {
+            guard let range = trimmed.range(of: label, options: .caseInsensitive) else { continue }
+            let suffix = trimmed[range.upperBound...]
+                .trimmingCharacters(in: CharacterSet(charactersIn: "：: \t"))
+            let candidate = suffix.split(whereSeparator: \Character.isNewline).first.map(String.init) ?? ""
+            if let shortCode = normalizedShortCode(candidate) {
+                return shortCode
+            }
+        }
+        return nil
+    }
+
+    private static func normalizedShortCode(_ value: String) -> String? {
+        let normalized = value
+            .uppercased()
+            .unicodeScalars
+            .filter {
+                !CharacterSet.whitespacesAndNewlines.contains($0) && String($0) != "-"
+            }
+            .map(String.init)
+            .joined()
+        guard normalized.unicodeScalars.count == 8,
+              normalized.unicodeScalars.allSatisfy(shortCodeCharacters.contains)
+        else { return nil }
+        return normalized
     }
 }
 

@@ -17,6 +17,7 @@ last_updated: 2026-08-17
 | AUTH-002 | W3 Apple 登入 | 離線仍開啟 Apple sheet、nonce 或同帳號恢復錯誤 | Unit＋真機 | `CoupleSpaceTests/CoupleSpaceTests.swift`、`CoupleSpaceTests/AppSkeletonTests.swift`、`manual/two-iphone.md` | A、B、D |
 | PAIR-001 | W1／W4 配對授權 | 第三人存取、重複 active relationship、無效邀請接受 | pgTAP／Unit | `supabase/tests/database/pairing_invitation.test.sql`、`pairing_decline.test.sql`、`pairing_cancel.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift` | A、B、D |
 | PAIR-002 | W4 配對恢復 | 同時邀請、拒絕／失效後無法重試、錯誤取消關係 | pgTAP／UI＋真機 | 同上、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
+| PAIR-003 | G4A 短配對碼 | UUID 截短、短碼碰撞、舊 token 失效、正規化誤判、暴力猜測、輪替後舊碼仍可用或短碼建立錯誤 membership | pgTAP／Unit／UI＋真機 | `pairing_short_codes.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | RLS-001 | W1–W9 私密資料邊界 | 非 relationship member 讀寫共同或個人資料 | pgTAP | `supabase/tests/database/*.test.sql` | A、B、D |
 | SYNC-001 | W1 Realtime／排序 | 重讀未經 RLS、server timestamp 排序不穩定 | pgTAP／Unit＋真機 | `shared_items_realtime.test.sql`、`CoupleSpaceTests/CoupleSpaceTests.swift`、`manual/two-iphone.md` | A、B、D |
 | OUTBOX-001 | W1 訊息／marker／照片 | 離線內容遺失、重複、錯序或錯 relationship 送出 | Unit＋真機 | `CoupleSpaceTests/CoupleSpaceTests.swift`、`manual/weak-network.md` | A、B、D |
@@ -42,6 +43,8 @@ last_updated: 2026-08-17
 | EVAL-001 | Agent 行為 | 未讀文件、越權遠端寫入、跳過測試或洩漏私人資料 | Agent Eval／Harness | `evals/README.md`、`.harness/` | B、D |
 
 Gate A／B／D 定義見 [版本發布閘門](release-gates.md)。`CHAT-001` 只代表 W8 基本聊天；W9 的正式持久 Outbox、離線重送、可靠重試與傳送狀態由 `CHAT-002` 獨立關閉。`CHAT-002`、`TODAY-001` 與兩支真實 iPhone 的 `NETWORK-001` 已於 2026-08-13 通過，G8／W9 已完成。`CHAT-003`、`CHAT-004`、`MOMENT-003` 的本機自動化、Dev migrations 020–022 與兩支真實 iPhone 核心流程已於 2026-08-13 通過；近 quota 拒絕／orphan 與上傳成功但 ack 遺失的故障注入尚未取得真機證據，因此 W10 release gate 仍不能視為完整 PASS。`APPOINTMENT-001` 的 migrations 023–031、27 份 pgTAP／441 項、131 個串行 iPhone unit tests、focused UI／archive audit、linked schema lint，以及四輪兩支真實 iPhone 的核心、弱網、提醒與 owner-only 封存驗收已於 2026-08-17 通過；G10／W11 已完成。
+
+`PAIR-003` 的 migration 032、本機空資料庫重建、28 份 pgTAP／460 項、local schema lint、163 個 iPhone 測試定義／166 次 executions、5 個 APNs tests、Harness v0.2.1 與 diff hygiene 已通過，0 failure、0 skip；linked migration 032 已於 2026-08-17 部署，遠端歷史一致且 linked schema lint 無錯誤。兩支真實 iPhone 已完成五輪短碼接受、格式正規化、完整分享文字、拒絕／取消／輪替、同時邀請、弱網／重啟、舊碼失效、十分鐘限流視窗與受控過期後重建；G4A 已完成。
 
 ## 目前必須保留的人工證據
 

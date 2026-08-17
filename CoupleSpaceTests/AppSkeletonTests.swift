@@ -2272,10 +2272,16 @@ struct AppSkeletonTests {
         ) == false)
     }
 
-    @Test func pairingInputAcceptsOnlyACompleteUUIDAndMapsExpectedServerOutcomes() {
+    @Test func pairingInputAcceptsShortCodesShareTextAndLegacyUUID() {
         let token = "11111111-2222-4333-8444-555555555555"
-        #expect(PairingInputPolicy.invitationToken(from: "  \(token)\n")?.uuidString.lowercased() == token)
-        #expect(PairingInputPolicy.invitationToken(from: "11111111") == nil)
+        #expect(PairingInputPolicy.invitationIdentifier(from: "  \(token)\n") == token)
+        #expect(PairingInputPolicy.invitationIdentifier(from: "7k3m-w9qp") == "7K3MW9QP")
+        #expect(PairingInputPolicy.invitationIdentifier(from: "7K3M W9QP") == "7K3MW9QP")
+        #expect(PairingInputPolicy.invitationIdentifier(
+            from: "加入我在方心的私人空間。\n邀請碼：7K3M-W9QP"
+        ) == "7K3MW9QP")
+        #expect(PairingInputPolicy.invitationIdentifier(from: "一般文字 7K3M-W9QP") == nil)
+        #expect(PairingInputPolicy.invitationIdentifier(from: "7K3M-W9QO") == nil)
         #expect(PairingErrorMessage.message(serverMessage: "invitation_not_available").contains("已失效"))
         #expect(PairingErrorMessage.message(serverMessage: "participant_already_paired").contains("已有"))
     }
@@ -2287,8 +2293,11 @@ struct AppSkeletonTests {
         let invitation = PairingInvitation(
             relationshipID: relationshipID,
             token: invitationToken,
+            shortCode: "7K3MW9QP",
             expiresAt: Date(timeIntervalSince1970: 2_000_000_000)
         )
+        #expect(invitation.code == "7K3M-W9QP")
+        #expect(!invitation.code.contains(invitationToken.uuidString.lowercased()))
         let service = PairingRemoteServiceFake(
             currentRelationship: nil,
             invitation: invitation,
@@ -2316,14 +2325,14 @@ struct AppSkeletonTests {
 
         await model.acceptInvitation(rawToken: invitation.code)
         #expect(model.state == .paired(PairingRelationship(id: relationshipID, memberCount: 2)))
-        #expect(service.acceptedTokens == [invitationToken])
+        #expect(service.acceptedIdentifiers == ["7K3MW9QP"])
 
         model.resetForAuthenticatedSession()
         #expect(model.state == .checking)
 
         await model.declineInvitation(rawToken: invitation.code)
         #expect(model.state == .unpaired)
-        #expect(service.declinedTokens == [invitationToken])
+        #expect(service.declinedIdentifiers == ["7K3MW9QP"])
     }
 
     @MainActor
@@ -2907,8 +2916,8 @@ private final class PairingRemoteServiceFake: PairingRemoteServing {
     var currentRelationshipValue: PairingRelationship?
     let invitation: PairingInvitation
     let acceptedRelationshipID: UUID
-    var acceptedTokens: [UUID] = []
-    var declinedTokens: [UUID] = []
+    var acceptedIdentifiers: [String] = []
+    var declinedIdentifiers: [String] = []
     var cancelInvitationCallCount = 0
 
     init(
@@ -2929,13 +2938,13 @@ private final class PairingRemoteServiceFake: PairingRemoteServing {
         invitation
     }
 
-    func acceptInvitation(token: UUID) async throws -> UUID {
-        acceptedTokens.append(token)
+    func acceptInvitation(identifier: String) async throws -> UUID {
+        acceptedIdentifiers.append(identifier)
         return acceptedRelationshipID
     }
 
-    func declineInvitation(token: UUID) async throws {
-        declinedTokens.append(token)
+    func declineInvitation(identifier: String) async throws {
+        declinedIdentifiers.append(identifier)
     }
 
     func cancelInvitation() async throws {
@@ -2974,14 +2983,19 @@ private final class SuspendedPairingRemoteServiceFake: PairingRemoteServing {
     }
 
     func createInvitation() async throws -> PairingInvitation {
-        PairingInvitation(relationshipID: UUID(), token: UUID(), expiresAt: .now)
+        PairingInvitation(
+            relationshipID: UUID(),
+            token: UUID(),
+            shortCode: "7K3MW9QP",
+            expiresAt: .now
+        )
     }
 
-    func acceptInvitation(token: UUID) async throws -> UUID {
+    func acceptInvitation(identifier: String) async throws -> UUID {
         UUID()
     }
 
-    func declineInvitation(token: UUID) async throws {}
+    func declineInvitation(identifier: String) async throws {}
 
     func cancelInvitation() async throws {}
 }

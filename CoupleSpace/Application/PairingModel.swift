@@ -104,15 +104,15 @@ final class PairingModel: ObservableObject {
     }
 
     func acceptInvitation(rawToken: String) async {
-        guard let token = PairingInputPolicy.invitationToken(from: rawToken) else {
-            statusMessage = "邀請碼格式不正確，請完整貼上後再試。"
+        guard let identifier = PairingInputPolicy.invitationIdentifier(from: rawToken) else {
+            statusMessage = "邀請碼格式不正確，請輸入八位碼或完整貼上邀請內容。"
             return
         }
         guard let generation = beginOperation() else { return }
         defer { finishOperation(generation: generation) }
 
         do {
-            let relationshipID = try await service.acceptInvitation(token: token)
+            let relationshipID = try await service.acceptInvitation(identifier: identifier)
             guard generation == sessionGeneration else { return }
             state = .paired(PairingRelationship(id: relationshipID, memberCount: 2))
             statusMessage = "配對完成。"
@@ -123,15 +123,15 @@ final class PairingModel: ObservableObject {
     }
 
     func declineInvitation(rawToken: String) async {
-        guard let token = PairingInputPolicy.invitationToken(from: rawToken) else {
-            statusMessage = "邀請碼格式不正確，請完整貼上後再試。"
+        guard let identifier = PairingInputPolicy.invitationIdentifier(from: rawToken) else {
+            statusMessage = "邀請碼格式不正確，請輸入八位碼或完整貼上邀請內容。"
             return
         }
         guard let generation = beginOperation() else { return }
         defer { finishOperation(generation: generation) }
 
         do {
-            try await service.declineInvitation(token: token)
+            try await service.declineInvitation(identifier: identifier)
             guard generation == sessionGeneration else { return }
             state = .unpaired
             statusMessage = "已拒絕這份邀請。"

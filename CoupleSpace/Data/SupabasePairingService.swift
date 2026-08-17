@@ -4,20 +4,32 @@ import Supabase
 private struct PairingInvitationResponse: Decodable {
     let relationshipID: UUID
     let inviteToken: UUID
+    let shortCode: String
     let expiresAt: Date
 
     enum CodingKeys: String, CodingKey {
         case relationshipID = "relationship_id"
         case inviteToken = "invite_token"
+        case shortCode = "short_code"
         case expiresAt = "expires_at"
     }
 }
 
 private struct PairingInvitationParameters: Encodable {
-    let providedInviteToken: UUID
+    let providedIdentifier: String
 
     enum CodingKeys: String, CodingKey {
-        case providedInviteToken = "provided_invite_token"
+        case providedIdentifier = "provided_identifier"
+    }
+}
+
+private struct PairingAcceptanceResponse: Decodable {
+    let relationshipID: UUID?
+    let result: String
+
+    enum CodingKeys: String, CodingKey {
+        case relationshipID = "relationship_id"
+        case result
     }
 }
 
@@ -59,8 +71,8 @@ protocol PairingRemoteServing {
     func cachedRelationship(userID: UUID) async -> PairingRelationship?
     func currentRelationship() async throws -> PairingRelationship?
     func createInvitation() async throws -> PairingInvitation
-    func acceptInvitation(token: UUID) async throws -> UUID
-    func declineInvitation(token: UUID) async throws
+    func acceptInvitation(identifier: String) async throws -> UUID
+    func declineInvitation(identifier: String) async throws
     func cancelInvitation() async throws
 }
 
@@ -260,7 +272,7 @@ final class SupabasePairingService: PairingRemoteServing {
     func createInvitation() async throws -> PairingInvitation {
         let session = try await client.auth.session
         let responses: [PairingInvitationResponse] = try await client
-            .rpc("create_relationship_invitation")
+            .rpc("create_relationship_invitation_v2")
             .execute()
             .value
 
@@ -271,6 +283,7 @@ final class SupabasePairingService: PairingRemoteServing {
         let invitation = PairingInvitation(
             relationshipID: response.relationshipID,
             token: response.inviteToken,
+            shortCode: response.shortCode,
             expiresAt: response.expiresAt
         )
         try? relationshipSnapshotStore.save(
@@ -284,15 +297,19 @@ final class SupabasePairingService: PairingRemoteServing {
         return invitation
     }
 
-    func acceptInvitation(token: UUID) async throws -> UUID {
+    func acceptInvitation(identifier: String) async throws -> UUID {
         let session = try await client.auth.session
-        let relationshipID: UUID = try await client
+        let responses: [PairingAcceptanceResponse] = try await client
             .rpc(
-                "accept_relationship_invitation",
-                params: PairingInvitationParameters(providedInviteToken: token)
+                "accept_relationship_invitation_v2",
+                params: PairingInvitationParameters(providedIdentifier: identifier)
             )
             .execute()
             .value
+        guard let response = responses.first,
+              response.result == "accepted",
+              let relationshipID = response.relationshipID
+        else { throw PairingServiceError.invitationNotAvailable }
         try? relationshipSnapshotStore.save(
             RelationshipSnapshot(
                 relationshipID: relationshipID,
@@ -304,14 +321,18 @@ final class SupabasePairingService: PairingRemoteServing {
         return relationshipID
     }
 
-    func declineInvitation(token: UUID) async throws {
+    func declineInvitation(identifier: String) async throws {
         _ = try await client.auth.session
-        try await client
+        let result: String = try await client
             .rpc(
-                "decline_relationship_invitation",
-                params: PairingInvitationParameters(providedInviteToken: token)
+                "decline_relationship_invitation_v2",
+                params: PairingInvitationParameters(providedIdentifier: identifier)
             )
             .execute()
+            .value
+        guard result == "declined" else {
+            throw PairingServiceError.invitationNotAvailable
+        }
     }
 
     func cancelInvitation() async throws {
@@ -323,6 +344,14 @@ final class SupabasePairingService: PairingRemoteServing {
     }
 }
 
-private enum PairingServiceError: Error {
+private enum PairingServiceError: LocalizedError {
     case missingInvitation
+    case invitationNotAvailable
+
+    var errorDescription: String? {
+        switch self {
+        case .missingInvitation: "missing_invitation"
+        case .invitationNotAvailable: "invitation_not_available"
+        }
+    }
 }
