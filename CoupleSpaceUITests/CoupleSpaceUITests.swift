@@ -302,9 +302,35 @@ final class CoupleSpaceUITests: XCTestCase {
         XCTAssertTrue(june.waitForExistence(timeout: 1))
         june.tap()
 
-        let juneMoment = app.staticTexts["六月第一天"]
+        let juneMoment = app.staticTexts["六月雨天"]
         XCTAssertTrue(juneMoment.waitForExistence(timeout: 2))
         XCTAssertTrue(juneMoment.isHittable)
+    }
+
+    @MainActor
+    func testSharedPhotosOpenLatestMomentAndReturnToItsSource() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w12-monthly-timeline"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        app.segmentedControls.buttons["照片"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["moment-photo-grid"].waitForExistence(timeout: 3))
+
+        let latestPhoto = app.buttons[
+            "shared-photo-C2000000-0000-0000-0000-000000000003"
+        ]
+        XCTAssertTrue(latestPhoto.waitForExistence(timeout: 2))
+        XCTAssertTrue(latestPhoto.isHittable)
+        latestPhoto.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["shared-photo-detail"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["我留下的"].exists)
+        let source = app.buttons["open-shared-photo-source"]
+        XCTAssertTrue(source.exists)
+        source.tap()
+
+        XCTAssertTrue(app.tabBars.buttons["對話"].isSelected)
     }
 
     @MainActor

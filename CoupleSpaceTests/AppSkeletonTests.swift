@@ -1826,6 +1826,30 @@ struct AppSkeletonTests {
         #expect(sections[1].moments.map(\.id) == [juneID])
     }
 
+    @Test func sharedPhotosKeepOnlyPhotoMomentsInOldestToNewestOrder() throws {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = try #require(TimeZone(secondsFromGMT: 0))
+        func date(month: Int, day: Int) throws -> Date {
+            try #require(calendar.date(from: DateComponents(
+                year: 2026,
+                month: month,
+                day: day
+            )))
+        }
+        let juneID = UUID()
+        let julyID = UUID()
+        let augustID = UUID()
+        let sections = MomentTimelinePolicy.photoMonthSections(from: [
+            Moment(id: augustID, creatorUserID: UUID(), content: .photo, createdAt: try date(month: 8, day: 2)),
+            Moment(id: UUID(), creatorUserID: UUID(), content: .text("不應出現"), createdAt: try date(month: 7, day: 5)),
+            Moment(id: juneID, creatorUserID: UUID(), content: .photo, createdAt: try date(month: 6, day: 1)),
+            Moment(id: julyID, creatorUserID: UUID(), content: .photo, createdAt: try date(month: 7, day: 3)),
+        ], calendar: calendar)
+
+        #expect(sections.map { calendar.component(.month, from: $0.monthStart) } == [6, 7, 8])
+        #expect(sections.flatMap(\.moments).map(\.id) == [juneID, julyID, augustID])
+    }
+
     @Test func legacyMomentSnapshotDecodesWithoutSourceMessageID() throws {
         let legacy = LegacyMoment(
             id: UUID(),

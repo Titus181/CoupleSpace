@@ -148,6 +148,26 @@ enum MomentTimelinePolicy {
         }
         .sorted { $0.monthStart > $1.monthStart }
     }
+
+    static func photoMonthSections(
+        from moments: [Moment],
+        calendar: Calendar = .current
+    ) -> [MomentMonthSection] {
+        monthSections(
+            from: moments.filter {
+                if case .photo = $0.content { return true }
+                return false
+            },
+            calendar: calendar
+        )
+        .reversed()
+        .map { section in
+            MomentMonthSection(
+                monthStart: section.monthStart,
+                moments: Array(section.moments.reversed())
+            )
+        }
+    }
 }
 
 enum MomentDraft: Equatable, Sendable {

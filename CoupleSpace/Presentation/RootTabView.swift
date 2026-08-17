@@ -171,21 +171,52 @@ struct RootTabView: View {
                     ("C1000000-0000-0000-0000-000000000005", 6, 18, "六月雨天"),
                     ("C1000000-0000-0000-0000-000000000006", 6, 1, "六月第一天"),
                 ]
+                let photoData = Data(base64Encoded:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                )!
+                let photoFixture: [(String, Int, Int, UUID?)] = [
+                    ("C2000000-0000-0000-0000-000000000001", 6, 5, nil),
+                    ("C2000000-0000-0000-0000-000000000002", 7, 8, nil),
+                    (
+                        "C2000000-0000-0000-0000-000000000003",
+                        8,
+                        16,
+                        UUID(uuidString: "D4000000-0000-0000-0000-000000000040")!
+                    ),
+                ]
+                let textMoments = fixture.map { id, month, day, text in
+                    Moment(
+                        id: UUID(uuidString: id)!,
+                        creatorUserID: uiTestUserID,
+                        content: .text(text),
+                        createdAt: calendar.date(from: DateComponents(
+                            year: 2026,
+                            month: month,
+                            day: day,
+                            hour: 12
+                        ))!
+                    )
+                }
+                let photoMoments = photoFixture.map { id, month, day, sourceMessageID in
+                    Moment(
+                        id: UUID(uuidString: id)!,
+                        creatorUserID: uiTestUserID,
+                        content: .photo,
+                        createdAt: calendar.date(from: DateComponents(
+                            year: 2026,
+                            month: month,
+                            day: day,
+                            hour: 12
+                        ))!,
+                        sourceMessageID: sourceMessageID
+                    )
+                }
                 service = InMemoryMomentService(
                     userID: uiTestUserID,
-                    moments: fixture.map { id, month, day, text in
-                        Moment(
-                            id: UUID(uuidString: id)!,
-                            creatorUserID: uiTestUserID,
-                            content: .text(text),
-                            createdAt: calendar.date(from: DateComponents(
-                                year: 2026,
-                                month: month,
-                                day: day,
-                                hour: 12
-                            ))!
-                        )
-                    }
+                    moments: textMoments + photoMoments,
+                    photoDataByMomentID: Dictionary(
+                        uniqueKeysWithValues: photoMoments.map { ($0.id, photoData) }
+                    )
                 )
             } else if arguments.contains("--ui-testing-photo-moment"),
                let photoData = Data(base64Encoded:
@@ -641,9 +672,15 @@ struct RootTabView: View {
     }
 }
 
+private enum UsSurface: Hashable {
+    case timeline
+    case photos
+}
+
 private struct UsView: View {
     @State private var isShowingAccountSettings = false
     @State private var isShowingSharedSchedule = false
+    @State private var selectedSurface = UsSurface.timeline
     @ObservedObject var momentModel: MomentModel
     @ObservedObject var togetherNowModel: TogetherNowModel
     @ObservedObject var sharedAppointmentModel: SharedAppointmentModel
@@ -657,11 +694,29 @@ private struct UsView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                MomentTimelineView(
-                    model: momentModel,
-                    togetherNowModel: togetherNowModel,
-                    onOpenSourceMessage: onOpenSourceMessage
-                )
+                Picker("我們的內容", selection: $selectedSurface) {
+                    Text("時間線").tag(UsSurface.timeline)
+                    Text("照片").tag(UsSurface.photos)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .accessibilityIdentifier("us-surface-picker")
+
+                switch selectedSurface {
+                case .timeline:
+                    MomentTimelineView(
+                        model: momentModel,
+                        togetherNowModel: togetherNowModel,
+                        onOpenSourceMessage: onOpenSourceMessage
+                    )
+                case .photos:
+                    MomentPhotoGridView(
+                        model: momentModel,
+                        togetherNowModel: togetherNowModel,
+                        onOpenSourceMessage: onOpenSourceMessage
+                    )
+                }
                 if let accountStatusMessage {
                     Text(accountStatusMessage)
                         .font(.footnote)

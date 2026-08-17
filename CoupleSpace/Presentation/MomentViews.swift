@@ -228,6 +228,175 @@ struct MomentTimelineView: View {
     }
 }
 
+struct MomentPhotoGridView: View {
+    @ObservedObject var model: MomentModel
+    @ObservedObject var togetherNowModel: TogetherNowModel
+    let onOpenSourceMessage: (MomentSource) -> Void
+    @State private var selectedMoment: Moment?
+
+    private let columns = Array(
+        repeating: GridItem(.flexible(), spacing: 2),
+        count: 3
+    )
+
+    var body: some View {
+        Group {
+            if model.isLoading && model.moments.isEmpty {
+                ProgressView("正在整理共同照片…")
+            } else if photoSections.isEmpty {
+                ContentUnavailableView(
+                    "還沒有共同照片",
+                    systemImage: "photo.on.rectangle.angled",
+                    description: Text("照片 Moment 會依月份出現在這裡。")
+                )
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 16) {
+                            ForEach(photoSections) { section in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(monthTitle(section.monthStart))
+                                        .font(.headline)
+                                        .padding(.horizontal)
+                                        .accessibilityIdentifier(
+                                            "photo-\(monthIdentifier(section.monthStart))"
+                                        )
+
+                                    LazyVGrid(columns: columns, spacing: 2) {
+                                        ForEach(section.moments) { moment in
+                                            Button {
+                                                selectedMoment = moment
+                                            } label: {
+                                                photo(moment)
+                                                    .aspectRatio(1, contentMode: .fill)
+                                                    .frame(maxWidth: .infinity)
+                                                    .clipped()
+                                            }
+                                            .buttonStyle(.plain)
+                                            .id(moment.id)
+                                            .accessibilityLabel(
+                                                "\(model.authorLabel(for: moment, names: togetherNowModel.snapshot))，\(moment.createdAt.formatted(date: .abbreviated, time: .omitted))"
+                                            )
+                                            .accessibilityIdentifier("shared-photo-\(moment.id.uuidString)")
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.vertical)
+                    }
+                    .refreshable { await model.refresh() }
+                    .task(id: latestPhotoID) {
+                        guard let latestPhotoID else { return }
+                        await Task.yield()
+                        proxy.scrollTo(latestPhotoID, anchor: .bottom)
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("moment-photo-grid")
+        .sheet(item: $selectedMoment) { moment in
+            MomentPhotoDetailView(
+                moment: moment,
+                photoData: model.photoDataByMomentID[moment.id],
+                authorLabel: model.authorLabel(
+                    for: moment,
+                    names: togetherNowModel.snapshot
+                ),
+                onOpenSourceMessage: onOpenSourceMessage
+            )
+        }
+    }
+
+    private var photoSections: [MomentMonthSection] {
+        MomentTimelinePolicy.photoMonthSections(from: model.moments)
+    }
+
+    private var latestPhotoID: UUID? {
+        photoSections.last?.moments.last?.id
+    }
+
+    @ViewBuilder
+    private func photo(_ moment: Moment) -> some View {
+        if let data = model.photoDataByMomentID[moment.id],
+           let image = UIImage(data: data)
+        {
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFill()
+        } else {
+            ZStack {
+                Color.secondary.opacity(0.12)
+                Image(systemName: "photo")
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func monthTitle(_ date: Date) -> String {
+        date.formatted(.dateTime.year().month(.wide))
+    }
+
+    private func monthIdentifier(_ date: Date) -> String {
+        let components = Calendar.current.dateComponents([.year, .month], from: date)
+        return String(format: "%04d-%02d", components.year ?? 0, components.month ?? 0)
+    }
+}
+
+private struct MomentPhotoDetailView: View {
+    @Environment(\.dismiss) private var dismiss
+    let moment: Moment
+    let photoData: Data?
+    let authorLabel: String
+    let onOpenSourceMessage: (MomentSource) -> Void
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    if let photoData, let image = UIImage(data: photoData) {
+                        Image(uiImage: image)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxWidth: .infinity)
+                            .accessibilityIdentifier("shared-photo-detail-image")
+                    }
+
+                    Text(authorLabel)
+                        .font(.headline)
+                    Text(moment.createdAt.formatted(date: .long, time: .shortened))
+                        .foregroundStyle(.secondary)
+
+                    if let source = moment.source {
+                        Button {
+                            dismiss()
+                            Task { @MainActor in
+                                await Task.yield()
+                                onOpenSourceMessage(source)
+                            }
+                        } label: {
+                            Label(
+                                source.appointmentID == nil ? "回到來源對話" : "回到來源討論",
+                                systemImage: "arrow.turn.up.left"
+                            )
+                        }
+                        .accessibilityIdentifier("open-shared-photo-source")
+                    }
+                }
+                .padding()
+            }
+            .navigationTitle("照片")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+        .accessibilityIdentifier("shared-photo-detail")
+    }
+}
+
 struct MomentCard: View {
     let moment: Moment
     let photoData: Data?
