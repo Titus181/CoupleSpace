@@ -20,6 +20,8 @@ protocol ConversationRemoteServing: AnyObject {
     func acknowledgePendingMessage(clientID: UUID) async throws
     func deliverPendingMessage(_ message: ChatMessage) async throws -> ConversationDeliveryResult
     func fetchSnapshot() async throws -> ConversationSnapshot
+    func fetchPage(before cursor: ConversationPageCursor?, limit: Int) async throws
+        -> ConversationPage
     func cachedPhotoData(for messageID: UUID) -> Data?
     func photoData(for messageID: UUID) async throws -> Data
     func setReaction(
@@ -32,6 +34,38 @@ protocol ConversationRemoteServing: AnyObject {
     func markRead(through messageID: UUID) async throws
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws
     func stopObservingChanges() async
+}
+
+extension ConversationRemoteServing {
+    func fetchPage(before cursor: ConversationPageCursor?, limit: Int) async throws
+        -> ConversationPage
+    {
+        let snapshot = try await fetchSnapshot()
+        let eligible = snapshot.messages.filter { message in
+            guard let cursor else { return true }
+            if message.createdAt != cursor.createdAt {
+                return message.createdAt < cursor.createdAt
+            }
+            return message.id.uuidString < cursor.clientID.uuidString
+        }
+        let descending = eligible.sorted {
+            if $0.createdAt != $1.createdAt { return $0.createdAt > $1.createdAt }
+            return $0.id.uuidString > $1.id.uuidString
+        }
+        let messages = Array(descending.prefix(limit)).sorted {
+            ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString)
+        }
+        let visibleIDs = Set(messages.map(\.id))
+        return ConversationPage(
+            snapshot: ConversationSnapshot(
+                currentUserID: snapshot.currentUserID,
+                messages: messages,
+                unreadCount: snapshot.unreadCount,
+                savedMomentMessageIDs: snapshot.savedMomentMessageIDs.intersection(visibleIDs)
+            ),
+            hasMore: eligible.count > limit
+        )
+    }
 }
 
 private struct ChatMessageRow: Decodable {
@@ -262,6 +296,11 @@ private struct SavedMomentSourceRow: Decodable {
 @MainActor
 final class SupabaseConversationService: ConversationRemoteServing {
     private static let photoBucket = "couplespace-w1-photos"
+    private static let cursorDateFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
 
     private let client: SupabaseClient
     private let currentUserID: UUID
@@ -395,6 +434,12 @@ final class SupabaseConversationService: ConversationRemoteServing {
     }
 
     func fetchSnapshot() async throws -> ConversationSnapshot {
+        try await fetchPage(before: nil, limit: 50).snapshot
+    }
+
+    func fetchPage(before cursor: ConversationPageCursor?, limit: Int) async throws
+        -> ConversationPage
+    {
         let session = try await client.auth.session
         guard session.user.id == currentUserID else {
             throw ConversationServiceError.unexpectedAuthenticatedUser
@@ -403,34 +448,58 @@ final class SupabaseConversationService: ConversationRemoteServing {
             .from("shared_items")
             .select("client_id,creator_user_id,item_kind,text_content,media_byte_size,created_at")
             .eq("relationship_id", value: relationshipID)
+            .in("item_kind", values: ["message", "photo"])
         switch scope {
         case .main:
             messageQuery = messageQuery.is("appointment_client_id", value: nil)
         case let .appointment(appointmentID):
             messageQuery = messageQuery.eq("appointment_client_id", value: appointmentID)
         }
+        if let cursor {
+            let timestamp = Self.cursorDateFormatter.string(from: cursor.createdAt)
+            messageQuery = messageQuery.or(
+                "created_at.lt.\(timestamp),and(created_at.eq.\(timestamp),client_id.lt.\(cursor.clientID.uuidString.lowercased()))"
+            )
+        }
         let rows: [ChatMessageRow] = try await messageQuery
-            .order("created_at", ascending: true)
-            .order("client_id", ascending: true)
+            .order("created_at", ascending: false)
+            .order("client_id", ascending: false)
+            .limit(limit + 1)
             .execute()
             .value
-        let reactionRows: [ChatMessageReactionRow] = try await client
-            .from("shared_item_reactions")
-            .select("message_client_id,client_id,reactor_user_id,emoji_value,updated_at")
-            .eq("relationship_id", value: relationshipID)
-            .execute()
-            .value
+        let pageRows = Array(rows.prefix(limit))
+        let messageIDs = pageRows.map(\.clientID)
+        let reactionRows: [ChatMessageReactionRow]
+        if messageIDs.isEmpty {
+            reactionRows = []
+        } else {
+            reactionRows = try await client
+                .from("shared_item_reactions")
+                .select("message_client_id,client_id,reactor_user_id,emoji_value,updated_at")
+                .eq("relationship_id", value: relationshipID)
+                .in("message_client_id", values: messageIDs)
+                .execute()
+                .value
+        }
         let reactions = try Dictionary(
             uniqueKeysWithValues: reactionRows.map { ($0.messageClientID, try $0.reaction()) }
         )
-        let messages = try rows.compactMap { try $0.message(reaction: reactions[$0.clientID]) }
+        let messages = try pageRows
+            .compactMap { try $0.message(reaction: reactions[$0.clientID]) }
+            .sorted { ($0.createdAt, $0.id.uuidString) < ($1.createdAt, $1.id.uuidString) }
         let visibleMessageIDs = Set(messages.map(\.id))
-        let savedMomentRows: [SavedMomentSourceRow] = try await client
-            .from("moments")
-            .select("source_shared_item_client_id")
-            .eq("relationship_id", value: relationshipID)
-            .execute()
-            .value
+        let savedMomentRows: [SavedMomentSourceRow]
+        if messageIDs.isEmpty {
+            savedMomentRows = []
+        } else {
+            savedMomentRows = try await client
+                .from("moments")
+                .select("source_shared_item_client_id")
+                .eq("relationship_id", value: relationshipID)
+                .in("source_shared_item_client_id", values: messageIDs)
+                .execute()
+                .value
+        }
         let savedMomentMessageIDs = Set(savedMomentRows.compactMap(\.sourceMessageID))
             .intersection(visibleMessageIDs)
         let unreadCount: Int
@@ -455,8 +524,7 @@ final class SupabaseConversationService: ConversationRemoteServing {
             unreadCount: unreadCount,
             savedMomentMessageIDs: savedMomentMessageIDs
         )
-        try snapshotStore.save(snapshot, userID: currentUserID, relationshipID: relationshipID)
-        return snapshot
+        return ConversationPage(snapshot: snapshot, hasMore: rows.count > limit)
     }
 
     func cachedPhotoData(for messageID: UUID) -> Data? {
@@ -724,19 +792,22 @@ final class InMemoryConversationService: ConversationRemoteServing {
     private var photoDataByMessageID: [UUID: Data] = [:]
     private var sendFailuresRemaining: Int
     private var savedMomentByMessageID: [UUID: UUID] = [:]
+    private let returnsCachedSnapshot: Bool
 
     init(
         currentUserID: UUID = UUID(),
         messages: [ChatMessage] = [],
         unreadCount: Int = 0,
         sendFailuresRemaining: Int = 0,
-        photoDataByMessageID: [UUID: Data] = [:]
+        photoDataByMessageID: [UUID: Data] = [:],
+        returnsCachedSnapshot: Bool = true
     ) {
         self.currentUserID = currentUserID
         self.messages = messages
         self.unreadCount = unreadCount
         self.sendFailuresRemaining = sendFailuresRemaining
         self.photoDataByMessageID = photoDataByMessageID
+        self.returnsCachedSnapshot = returnsCachedSnapshot
     }
 
     func fetchPendingSnapshot() async throws -> ConversationPendingSnapshot {
@@ -744,7 +815,12 @@ final class InMemoryConversationService: ConversationRemoteServing {
     }
 
     func fetchCachedSnapshot() async throws -> ConversationSnapshot? {
-        ConversationSnapshot(currentUserID: currentUserID, messages: messages, unreadCount: unreadCount)
+        guard returnsCachedSnapshot else { return nil }
+        return ConversationSnapshot(
+            currentUserID: currentUserID,
+            messages: messages,
+            unreadCount: unreadCount
+        )
     }
 
     func persistCachedSnapshot(_ snapshot: ConversationSnapshot) async {}

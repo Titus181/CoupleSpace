@@ -435,7 +435,17 @@ struct RootTabView: View {
             )
             let seededMessages: [ChatMessage]
             let seededPhotoDataByMessageID: [UUID: Data]
-            if arguments.contains("--ui-testing-w11-source-routing") {
+            if arguments.contains("--ui-testing-w12-chat-pagination") {
+                seededMessages = (0..<55).map { index in
+                    ChatMessage(
+                        id: UUID(),
+                        senderUserID: uiTestPartnerID,
+                        body: "分頁訊息 \(index)",
+                        createdAt: Date(timeIntervalSince1970: TimeInterval(10_000 - index))
+                    )
+                }
+                seededPhotoDataByMessageID = [:]
+            } else if arguments.contains("--ui-testing-w11-source-routing") {
                 seededMessages = [ChatMessage(
                     id: UUID(uuidString: "D4000000-0000-0000-0000-000000000030")!,
                     senderUserID: uiTestPartnerID,
@@ -496,7 +506,8 @@ struct RootTabView: View {
                         messages: seededMessages,
                         unreadCount: seededMessages.count,
                         sendFailuresRemaining: arguments.contains("--ui-testing-offline") ? .max : 0,
-                        photoDataByMessageID: seededPhotoDataByMessageID
+                        photoDataByMessageID: seededPhotoDataByMessageID,
+                        returnsCachedSnapshot: !arguments.contains("--ui-testing-w12-chat-pagination")
                     )
                 )
             )

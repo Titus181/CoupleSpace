@@ -146,6 +146,28 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testConversationLoadsAnOlderCursorPage() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w12-chat-pagination"]
+        app.launch()
+
+        app.tabBars.buttons["對話"].tap()
+        XCTAssertTrue(app.staticTexts["分頁訊息 0"].waitForExistence(timeout: 3))
+        let loadOlder = app.buttons["load-older-conversation-messages"]
+        for _ in 0..<12 where !loadOlder.exists {
+            app.swipeDown()
+        }
+        XCTAssertTrue(loadOlder.waitForExistence(timeout: 2))
+        loadOlder.tap()
+
+        let oldest = app.staticTexts["分頁訊息 54"]
+        for _ in 0..<4 where !oldest.exists {
+            app.swipeDown()
+        }
+        XCTAssertTrue(oldest.waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testChatPhotoReactionReplacementAndRemoval() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-w10-chat"]

@@ -7,6 +7,8 @@ final class ConversationModel: ObservableObject {
     @Published private(set) var unreadCount = 0
     @Published private(set) var currentUserID: UUID?
     @Published private(set) var isLoading = false
+    @Published private(set) var isLoadingMore = false
+    @Published private(set) var hasMoreMessages = false
     @Published private(set) var isSending = false
     @Published private(set) var statusMessage: String?
     @Published private(set) var photoDataByMessageID: [UUID: Data] = [:]
@@ -28,6 +30,8 @@ final class ConversationModel: ObservableObject {
     private var pendingReactionAttempts: [UUID: ReactionAttempt] = [:]
     private var pendingMomentIDs: [UUID: UUID] = [:]
     private var terminalDeliveryMessage: String?
+    private var didLoadOlderMessages = false
+    private let pageSize = 50
 
     init(service: ConversationRemoteServing) {
         self.service = service
@@ -66,6 +70,10 @@ final class ConversationModel: ObservableObject {
     }
 
     func refresh() async {
+        if isLoadingMore {
+            refreshRequested = true
+            while isLoadingMore { await Task.yield() }
+        }
         if isLoading {
             refreshRequested = true
             while isLoading { await Task.yield() }
@@ -75,23 +83,54 @@ final class ConversationModel: ObservableObject {
             refreshRequested = false
             isLoading = true
             do {
-                let snapshot = try await service.fetchSnapshot()
+                let page = try await service.fetchPage(before: nil, limit: pageSize)
+                let snapshot = page.snapshot
                 currentUserID = snapshot.currentUserID
                 let unresolvedMessages = messages.filter { $0.deliveryState != .synced }
-                let remoteIDs = Set(snapshot.messages.map(\.id))
-                messages = (snapshot.messages + unresolvedMessages.filter { !remoteIDs.contains($0.id) })
-                    .sorted(by: Self.messageOrder)
+                mergeRemoteMessages(snapshot.messages, unresolvedMessages: unresolvedMessages)
+                if !didLoadOlderMessages { hasMoreMessages = page.hasMore }
                 applyPendingReactionAttempts()
                 unreadCount = snapshot.unreadCount
-                savedMomentMessageIDs = snapshot.savedMomentMessageIDs
+                savedMomentMessageIDs.formUnion(snapshot.savedMomentMessageIDs)
                 statusMessage = terminalDeliveryMessage
                 loadCachedPhotos()
                 if isConversationVisible { await markVisibleMessagesReadIfNeeded() }
+                await persistCurrentSnapshot()
             } catch {
                 statusMessage = "無法更新對話，請稍後再試。"
             }
             isLoading = false
         } while refreshRequested && hasStarted
+    }
+
+    @discardableResult
+    func loadMoreMessages() async -> Bool {
+        guard !isLoading, !isLoadingMore, hasMoreMessages,
+              let oldest = messages.first(where: { $0.deliveryState == .synced }) else {
+            return false
+        }
+        isLoadingMore = true
+        defer { isLoadingMore = false }
+        do {
+            let page = try await service.fetchPage(
+                before: ConversationPageCursor(
+                    createdAt: oldest.createdAt,
+                    clientID: oldest.id
+                ),
+                limit: pageSize
+            )
+            mergeRemoteMessages(page.snapshot.messages, unresolvedMessages: [])
+            savedMomentMessageIDs.formUnion(page.snapshot.savedMomentMessageIDs)
+            hasMoreMessages = page.hasMore
+            didLoadOlderMessages = true
+            statusMessage = terminalDeliveryMessage
+            loadCachedPhotos()
+            await persistCurrentSnapshot()
+            return true
+        } catch {
+            statusMessage = "無法載入更早的訊息，請稍後再試。"
+            return false
+        }
     }
 
     @discardableResult
@@ -277,6 +316,10 @@ final class ConversationModel: ObservableObject {
         if messages.contains(where: { $0.id == id }) { return true }
         await refresh()
         if messages.contains(where: { $0.id == id }) { return true }
+        while hasMoreMessages {
+            guard await loadMoreMessages() else { break }
+            if messages.contains(where: { $0.id == id }) { return true }
+        }
         statusMessage = "連線後可查看原對話。"
         return false
     }
@@ -444,6 +487,19 @@ final class ConversationModel: ObservableObject {
             if let existing = messagesByID[message.id], existing.deliveryState == .synced {
                 continue
             }
+            messagesByID[message.id] = message
+        }
+        messages = messagesByID.values.sorted(by: Self.messageOrder)
+    }
+
+    private func mergeRemoteMessages(
+        _ remoteMessages: [ChatMessage],
+        unresolvedMessages: [ChatMessage]
+    ) {
+        var messagesByID = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
+        for message in remoteMessages { messagesByID[message.id] = message }
+        let remoteIDs = Set(remoteMessages.map(\.id))
+        for message in unresolvedMessages where !remoteIDs.contains(message.id) {
             messagesByID[message.id] = message
         }
         messages = messagesByID.values.sorted(by: Self.messageOrder)

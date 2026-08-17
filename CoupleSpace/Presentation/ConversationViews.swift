@@ -353,6 +353,30 @@ struct ConversationView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     LazyVStack(spacing: 10) {
+                        if model.hasMoreMessages {
+                            Button {
+                                let anchorMessageID = model.messages.first(where: {
+                                    $0.deliveryState == .synced
+                                })?.id
+                                Task {
+                                    guard await model.loadMoreMessages(),
+                                          let anchorMessageID else { return }
+                                    await Task.yield()
+                                    proxy.scrollTo(
+                                        ConversationTimelineItemID.message(anchorMessageID),
+                                        anchor: .top
+                                    )
+                                }
+                            } label: {
+                                if model.isLoadingMore {
+                                    ProgressView()
+                                } else {
+                                    Text("載入更早的訊息")
+                                }
+                            }
+                            .disabled(model.isLoading || model.isLoadingMore)
+                            .accessibilityIdentifier("load-older-conversation-messages")
+                        }
                         ForEach(timelineItems) { item in
                             timelineRow(item)
                         }

@@ -122,6 +122,16 @@ struct ConversationSnapshot: Equatable, Sendable {
     }
 }
 
+struct ConversationPageCursor: Equatable, Sendable {
+    let createdAt: Date
+    let clientID: UUID
+}
+
+struct ConversationPage: Equatable, Sendable {
+    let snapshot: ConversationSnapshot
+    let hasMore: Bool
+}
+
 enum ChatMessageDraft: Equatable, Sendable {
     case text(String)
     case photo(Data)

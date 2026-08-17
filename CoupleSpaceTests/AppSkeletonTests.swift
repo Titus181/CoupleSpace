@@ -1594,6 +1594,84 @@ struct AppSkeletonTests {
     }
 
     @MainActor
+    @Test func conversationModelLoadsStablePagesAndKeepsOlderHistoryDuringRefresh() async throws {
+        let currentUserID = UUID()
+        let partnerUserID = UUID()
+        let remoteMessages = (0..<55).map { index in
+            ChatMessage(
+                id: UUID(),
+                senderUserID: partnerUserID,
+                body: "分頁訊息 \(index)",
+                createdAt: Date(timeIntervalSince1970: TimeInterval(1_000 - index))
+            )
+        }
+        let service = ConversationRemoteServiceFake(
+            currentUserID: currentUserID,
+            messages: remoteMessages,
+            unreadCount: 0
+        )
+        service.returnsCachedSnapshot = false
+        let model = ConversationModel(service: service)
+
+        await model.start()
+        #expect(model.messages.count == 50)
+        #expect(model.hasMoreMessages)
+
+        #expect(await model.loadMoreMessages())
+        #expect(model.messages.count == 55)
+        #expect(!model.hasMoreMessages)
+        #expect(Set(model.messages.map(\.id)).count == 55)
+
+        let newest = ChatMessage(
+            id: UUID(),
+            senderUserID: partnerUserID,
+            body: "Realtime 新訊息",
+            createdAt: Date(timeIntervalSince1970: 2_000)
+        )
+        service.messages.append(newest)
+        await model.refresh()
+
+        #expect(model.messages.count == 56)
+        #expect(model.messages.last?.id == newest.id)
+        #expect(model.messages.first?.id == remoteMessages.last?.id)
+        #expect(!model.hasMoreMessages)
+    }
+
+    @MainActor
+    @Test func conversationPageCursorDoesNotSkipMessagesWithTheSameTimestamp() async throws {
+        let timestamp = Date(timeIntervalSince1970: 1_000)
+        let messages = (0..<52).map { index in
+            ChatMessage(
+                id: UUID(),
+                senderUserID: UUID(),
+                body: "同時訊息 \(index)",
+                createdAt: timestamp
+            )
+        }
+        let service = ConversationRemoteServiceFake(
+            currentUserID: UUID(),
+            messages: messages,
+            unreadCount: 0
+        )
+
+        let first = try await service.fetchPage(before: nil, limit: 50)
+        let oldestOnFirstPage = try #require(first.snapshot.messages.first)
+        let second = try await service.fetchPage(
+            before: ConversationPageCursor(
+                createdAt: oldestOnFirstPage.createdAt,
+                clientID: oldestOnFirstPage.id
+            ),
+            limit: 50
+        )
+        let fetchedIDs = first.snapshot.messages.map(\.id) + second.snapshot.messages.map(\.id)
+
+        #expect(first.hasMore)
+        #expect(!second.hasMore)
+        #expect(fetchedIDs.count == 52)
+        #expect(Set(fetchedIDs) == Set(messages.map(\.id)))
+    }
+
+    @MainActor
     @Test func conversationModelRetriesLostAcknowledgementWithoutDuplicatingRemoteMessage() async throws {
         let service = ConversationRemoteServiceFake(
             currentUserID: UUID(),
@@ -2900,6 +2978,7 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
     var nextAcceptedAt = Date(timeIntervalSince1970: 200)
     var isObserving = false
     var startObservingCallCount = 0
+    var returnsCachedSnapshot = true
     private var pendingMessages: [ChatMessage] = []
     private var onChange: (@MainActor () async -> Void)?
 
@@ -2920,7 +2999,8 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
     }
 
     func fetchCachedSnapshot() async throws -> ConversationSnapshot? {
-        ConversationSnapshot(
+        guard returnsCachedSnapshot else { return nil }
+        return ConversationSnapshot(
             currentUserID: currentUserID,
             messages: messages,
             unreadCount: unreadCount,
