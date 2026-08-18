@@ -1,5 +1,6 @@
 import Supabase
 import SwiftUI
+import UIKit
 
 struct RootTabView: View {
     @Environment(\.scenePhase) private var scenePhase
@@ -207,9 +208,6 @@ struct RootTabView: View {
                     ("C1000000-0000-0000-0000-000000000005", 6, 18, "六月雨天"),
                     ("C1000000-0000-0000-0000-000000000006", 6, 1, "六月第一天"),
                 ]
-                let photoData = Data(base64Encoded:
-                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
-                )!
                 let photoFixture: [(String, Int, Int, UUID?)] = [
                     ("C2000000-0000-0000-0000-000000000001", 6, 5, nil),
                     ("C2000000-0000-0000-0000-000000000002", 7, 8, nil),
@@ -247,11 +245,18 @@ struct RootTabView: View {
                         sourceMessageID: sourceMessageID
                     )
                 }
+                let photoData = [
+                    Self.uiTestPhotoData(size: CGSize(width: 640, height: 320)),
+                    Self.uiTestPhotoData(size: CGSize(width: 500, height: 500)),
+                    Self.uiTestPhotoData(size: CGSize(width: 320, height: 640)),
+                ]
                 service = InMemoryMomentService(
                     userID: uiTestUserID,
                     moments: textMoments + photoMoments,
                     photoDataByMomentID: Dictionary(
-                        uniqueKeysWithValues: photoMoments.map { ($0.id, photoData) }
+                        uniqueKeysWithValues: zip(photoMoments, photoData).map { moment, data in
+                            (moment.id, data)
+                        }
                     )
                 )
             } else if arguments.contains("--ui-testing-photo-moment"),
@@ -782,6 +787,13 @@ struct RootTabView: View {
     private func openAppointmentReminder(id: UUID) {
         selection = .today
         reminderAppointmentID = id
+    }
+
+    private static func uiTestPhotoData(size: CGSize) -> Data {
+        UIGraphicsImageRenderer(size: size).pngData { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
     }
 }
 

@@ -499,9 +499,6 @@ struct MomentPhotoGridView: View {
                                                 selectedMoment = moment
                                             } label: {
                                                 photo(moment)
-                                                    .aspectRatio(1, contentMode: .fill)
-                                                    .frame(maxWidth: .infinity)
-                                                    .clipped()
                                             }
                                             .buttonStyle(.plain)
                                             .id(moment.id)
@@ -552,19 +549,22 @@ struct MomentPhotoGridView: View {
 
     @ViewBuilder
     private func photo(_ moment: Moment) -> some View {
-        if let data = model.photoDataByMomentID[moment.id],
-           let image = UIImage(data: data)
-        {
-            Image(uiImage: image)
-                .resizable()
-                .scaledToFill()
-        } else {
-            ZStack {
-                Color.secondary.opacity(0.12)
-                Image(systemName: "photo")
-                    .foregroundStyle(.secondary)
+        Color.clear
+            .aspectRatio(1, contentMode: .fit)
+            .overlay {
+                if let data = model.photoDataByMomentID[moment.id],
+                   let image = UIImage(data: data)
+                {
+                    Image(uiImage: image)
+                        .resizable()
+                        .scaledToFill()
+                } else {
+                    Color.secondary.opacity(0.12)
+                    Image(systemName: "photo")
+                        .foregroundStyle(.secondary)
+                }
             }
-        }
+            .clipped()
     }
 
     private func monthTitle(_ date: Date) -> String {

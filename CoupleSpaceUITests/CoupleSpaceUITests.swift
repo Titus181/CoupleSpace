@@ -437,6 +437,8 @@ final class CoupleSpaceUITests: XCTestCase {
         ]
         XCTAssertTrue(latestPhoto.waitForExistence(timeout: 2))
         XCTAssertTrue(latestPhoto.isHittable)
+        XCTAssertEqual(latestPhoto.frame.width, latestPhoto.frame.height, accuracy: 1)
+        XCTAssertLessThanOrEqual(latestPhoto.frame.maxX, app.frame.maxX)
         latestPhoto.tap()
 
         XCTAssertTrue(app.descendants(matching: .any)["shared-photo-detail"].waitForExistence(timeout: 2))
