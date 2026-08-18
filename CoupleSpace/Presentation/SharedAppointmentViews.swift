@@ -99,7 +99,7 @@ private struct SharedAppointmentCard: View {
             Text(appointment.title)
                 .font(.title3.weight(.semibold))
             Label(
-                appointment.startsAt.formatted(date: .abbreviated, time: .shortened),
+                CoupleSpaceDateFormat.string(appointment.startsAt, date: .abbreviated, time: .shortened),
                 systemImage: "calendar"
             )
             if let location = appointment.location {
@@ -233,7 +233,7 @@ struct SharedAppointmentScheduleView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
-                Text(appointment.startsAt.formatted(date: .abbreviated, time: .shortened))
+                Text(CoupleSpaceDateFormat.string(appointment.startsAt, date: .abbreviated, time: .shortened))
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -272,7 +272,7 @@ private struct SharedAppointmentCalendarView: View {
                 .accessibilityIdentifier("shared-appointment-calendar")
             }
 
-            Section(selectedDate.formatted(date: .complete, time: .omitted)) {
+            Section(CoupleSpaceDateFormat.string(selectedDate, date: .complete, time: .omitted)) {
                 if selectedAppointments.isEmpty {
                     Text("這一天沒有共同約定。")
                         .foregroundStyle(.secondary)
@@ -297,7 +297,7 @@ private struct SharedAppointmentCalendarView: View {
                                             .foregroundStyle(.secondary)
                                     }
                                 }
-                                Text(appointment.startsAt.formatted(date: .omitted, time: .shortened))
+                                Text(CoupleSpaceDateFormat.string(appointment.startsAt, date: .omitted, time: .shortened))
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
                             }
@@ -409,7 +409,8 @@ struct SharedAppointmentDetailView: View {
                         LabeledContent("標題", value: appointment.title)
                         LabeledContent(
                             "開始時間",
-                            value: appointment.startsAt.formatted(
+                            value: CoupleSpaceDateFormat.string(
+                                appointment.startsAt,
                                 date: .abbreviated,
                                 time: .shortened
                             )
@@ -423,7 +424,7 @@ struct SharedAppointmentDetailView: View {
                         if let reminderAt = appointment.reminderAt {
                             LabeledContent(
                                 "提醒",
-                                value: reminderAt.formatted(date: .abbreviated, time: .shortened)
+                                value: CoupleSpaceDateFormat.string(reminderAt, date: .abbreviated, time: .shortened)
                             )
                         }
                         LabeledContent(

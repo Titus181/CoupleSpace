@@ -88,7 +88,7 @@ private struct PairingSetupView: View {
                             Label("分享邀請", systemImage: "square.and.arrow.up")
                         }
 
-                        Text("邀請將於 \(invitation.expiresAt.formatted(date: .omitted, time: .shortened)) 失效；失效或被拒絕後可產生新邀請。")
+                        Text("邀請將於 \(CoupleSpaceDateFormat.string(invitation.expiresAt, date: .omitted, time: .shortened)) 失效；失效或被拒絕後可產生新邀請。")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
 

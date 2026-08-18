@@ -318,7 +318,7 @@ struct MomentTimelineView: View {
     }
 
     private func monthTitle(_ date: Date) -> String {
-        date.formatted(.dateTime.year().month(.wide))
+        CoupleSpaceDateFormat.yearMonth(date)
     }
 
     private func monthIdentifier(_ date: Date) -> String {
@@ -331,7 +331,7 @@ struct MomentTimelineView: View {
     }
 
     private func dayTitle(_ date: Date) -> String {
-        date.formatted(.dateTime.year().month().day())
+        CoupleSpaceDateFormat.yearMonthDay(date)
     }
 
     private func dayAccessibilityValue(_ date: Date) -> String {
@@ -441,7 +441,7 @@ private struct MomentWeeklyReviewView: View {
     }
 
     private var dateRange: String {
-        "\(review.startDay.formatted(date: .abbreviated, time: .omitted))–\(review.endDay.formatted(date: .abbreviated, time: .omitted))"
+        "\(CoupleSpaceDateFormat.string(review.startDay, date: .abbreviated, time: .omitted))–\(CoupleSpaceDateFormat.string(review.endDay, date: .abbreviated, time: .omitted))"
     }
 }
 
@@ -506,7 +506,7 @@ struct MomentPhotoGridView: View {
                                                 await model.loadPhotoIfNeeded(moment)
                                             }
                                             .accessibilityLabel(
-                                                "\(model.authorLabel(for: moment, names: togetherNowModel.snapshot))，\(moment.createdAt.formatted(date: .abbreviated, time: .omitted))"
+                                                "\(model.authorLabel(for: moment, names: togetherNowModel.snapshot))，\(CoupleSpaceDateFormat.string(moment.createdAt, date: .abbreviated, time: .omitted))"
                                             )
                                             .accessibilityIdentifier("shared-photo-\(moment.id.uuidString)")
                                         }
@@ -568,7 +568,7 @@ struct MomentPhotoGridView: View {
     }
 
     private func monthTitle(_ date: Date) -> String {
-        date.formatted(.dateTime.year().month(.wide))
+        CoupleSpaceDateFormat.yearMonth(date)
     }
 
     private func monthIdentifier(_ date: Date) -> String {
@@ -598,7 +598,7 @@ private struct MomentPhotoDetailView: View {
 
                     Text(authorLabel)
                         .font(.headline)
-                    Text(moment.createdAt.formatted(date: .long, time: .shortened))
+                    Text(CoupleSpaceDateFormat.string(moment.createdAt, date: .long, time: .shortened))
                         .foregroundStyle(.secondary)
 
                     if let source = moment.source {
@@ -682,7 +682,7 @@ struct MomentCard: View {
                     .accessibilityIdentifier("moment-author")
                 Text("·")
                     .accessibilityHidden(true)
-                Text(moment.createdAt.formatted(date: .abbreviated, time: .shortened))
+                Text(CoupleSpaceDateFormat.string(moment.createdAt, date: .abbreviated, time: .shortened))
             }
             .font(.caption)
             .foregroundStyle(.secondary)

@@ -426,6 +426,7 @@ final class CoupleSpaceUITests: XCTestCase {
         app.tabBars.buttons["我們"].tap()
         app.segmentedControls.buttons["照片"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["moment-photo-grid"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["2026年8月"].waitForExistence(timeout: 2))
 
         let latestPhoto = app.buttons[
             "shared-photo-C2000000-0000-0000-0000-000000000003"

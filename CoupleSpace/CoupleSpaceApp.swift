@@ -50,6 +50,7 @@ struct CoupleSpaceApp: App {
                 bypassesAuthentication: launchOptions.isUITesting,
                 bypassesPairing: launchOptions.isUITesting && !launchOptions.isPairingUITesting
             )
+            .environment(\.locale, Locale(identifier: "zh-Hant-TW"))
         }
     }
 }

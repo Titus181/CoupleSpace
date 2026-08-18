@@ -114,7 +114,7 @@ struct TogetherNowSectionView: View {
 
     private func expirationText(for status: CurrentRelationshipStatus) -> String {
         guard let expiresAt = status.expiresAt else { return "直到手動清除" }
-        return "到 " + expiresAt.formatted(date: .omitted, time: .shortened)
+        return "到 " + CoupleSpaceDateFormat.string(expiresAt, date: .omitted, time: .shortened)
     }
 }
 

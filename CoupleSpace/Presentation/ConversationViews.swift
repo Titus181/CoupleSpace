@@ -320,7 +320,7 @@ struct ConversationView: View {
 
             HStack(spacing: 5) {
                 Text("最新更新")
-                Text(summary.latestActivityAt.formatted(date: .abbreviated, time: .shortened))
+                Text(CoupleSpaceDateFormat.string(summary.latestActivityAt, date: .abbreviated, time: .shortened))
                 if appointment.status == .cancelled {
                     Text("· 已取消")
                 }
@@ -408,9 +408,9 @@ struct ConversationView: View {
                 if let previousStartsAt = event.previousStartsAt,
                    let startsAt = event.startsAt {
                     Text(
-                        previousStartsAt.formatted(date: .abbreviated, time: .shortened)
+                        CoupleSpaceDateFormat.string(previousStartsAt, date: .abbreviated, time: .shortened)
                             + " → "
-                            + startsAt.formatted(date: .abbreviated, time: .shortened)
+                            + CoupleSpaceDateFormat.string(startsAt, date: .abbreviated, time: .shortened)
                     )
                     .font(.caption2)
                 }
@@ -472,7 +472,7 @@ struct ConversationView: View {
                 .strikethrough(appointment.status == .cancelled)
 
             Label(
-                appointment.startsAt.formatted(date: .abbreviated, time: .shortened),
+                CoupleSpaceDateFormat.string(appointment.startsAt, date: .abbreviated, time: .shortened),
                 systemImage: "clock"
             )
             .font(.subheadline)
@@ -591,7 +591,7 @@ struct ConversationView: View {
                 .anchorPreference(key: ConversationMessageBoundsKey.self, value: .bounds) {
                     [message.id: $0]
                 }
-                Text(message.createdAt.formatted(date: .omitted, time: .shortened))
+                Text(CoupleSpaceDateFormat.string(message.createdAt, date: .omitted, time: .shortened))
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 if isCurrentUser { deliveryStatus(for: message) }
