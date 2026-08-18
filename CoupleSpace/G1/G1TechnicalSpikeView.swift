@@ -67,23 +67,15 @@ struct G1TechnicalSpikeView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
+                        Text("W13 僅接受已建立的主對話或約定討論作為推播來源；不再提供任意測試事件入口。")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
                         Button("1. 允許通知並登記此裝置") {
                             Task { await pushModel.requestAuthorizationAndRegister() }
                         }
                         .disabled(pushModel.isWorking)
 
-                        Button(
-                            pushModel.hasPendingPush
-                                ? "2. 重試泛化 W1 測試推播"
-                                : "2. 傳送泛化 W1 測試推播"
-                        ) {
-                            Task {
-                                await pushModel.sendOrRetryGenericTestPush(
-                                    relationshipID: pairingModel.currentRelationshipID
-                                )
-                            }
-                        }
-                        .disabled(pushModel.isWorking)
                     }
 
                     Section("Supabase 雙身分 RLS") {

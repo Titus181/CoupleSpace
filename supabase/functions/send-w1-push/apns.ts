@@ -49,7 +49,14 @@ function privateKeyBytes(pem: string): Uint8Array {
 }
 
 export function genericPayload(eventID: string, eventKind: string) {
-  if (eventKind !== "w1_generic") throw new Error("unsupported_event_kind");
+  if (
+    ![
+      "chat_message_created",
+      "appointment_discussion_message_created",
+    ].includes(eventKind)
+  ) {
+    throw new Error("unsupported_event_kind");
+  }
 
   return {
     aps: {

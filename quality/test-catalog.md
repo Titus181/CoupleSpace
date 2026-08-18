@@ -23,7 +23,7 @@ last_updated: 2026-08-18
 | OUTBOX-001 | W1 訊息／marker／照片 | 離線內容遺失、重複、錯序或錯 relationship 送出 | Unit＋真機 | `CoupleSpaceTests/CoupleSpaceTests.swift`、`manual/weak-network.md` | A、B、D |
 | PHOTO-001 | W1 照片處理 | 大圖方向錯誤、GPS 遺留、容量不足仍寫入 | Unit | `CoupleSpaceTests/CoupleSpaceTests.swift` | A、B、D |
 | PHOTO-002 | W1 Storage／配額 | 越權 object、quota 競態、orphan 未清理 | pgTAP／Unit | `private_photo_storage.test.sql`、`photo_quota_contract.test.sql`、`photo_orphan_cleanup.test.sql`、`CoupleSpaceTests/CoupleSpaceTests.swift` | A、B、D |
-| PUSH-001 | W1 推播隱私 | payload、token 或 routing metadata 洩漏私密內容 | pgTAP／Unit／Function | `private_push_boundary.test.sql`、`push_delivery_claim.test.sql`、`CoupleSpaceTests/CoupleSpaceTests.swift`、`supabase/functions/send-w1-push/apns.test.ts` | A、B、D |
+| PUSH-001 | W13 泛化推播契約與隱私 | 非白名單事件、來源偽造、錯誤收件者、payload／routing metadata 洩漏私密內容、claim timeout 舊 worker 完成新 lease | pgTAP／Unit／Function | `private_push_boundary.test.sql`、`push_delivery_claim.test.sql`、`CoupleSpaceTests/CoupleSpaceTests.swift`、`supabase/functions/send-w1-push/apns.test.ts` | A、B、D |
 | ARCHIVE-001 | W1 封存／匯出 | 單方越權、照片缺失、容量與 staging 清理錯誤 | pgTAP／Unit＋真機 | `relationship_archive.test.sql`、`archived_photo_access.test.sql`、`CoupleSpaceTests/CoupleSpaceTests.swift`、`manual/deletion-and-unpairing.md` | A、B、D |
 | DELETE-001 | W1 刪除／解除配對 | 單方刪除影響另一方、GC／雙方結果不一致 | pgTAP／Unit＋真機 | `personal_archive_deletion_queue.test.sql`、`CoupleSpaceTests/CoupleSpaceTests.swift`、`manual/deletion-and-unpairing.md` | A、B、D |
 | MOMENT-001 | W5 Moment 建立 | 空白／過長內容、client ID 碰撞、非 active relationship 寫入 | pgTAP／Unit／UI | `moment_vertical_slice.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift` | A、B、D |

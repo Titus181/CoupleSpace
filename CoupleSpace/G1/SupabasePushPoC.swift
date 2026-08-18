@@ -39,25 +39,13 @@ private struct RegisterPushDeviceParameters: Encodable {
     }
 }
 
-private struct EnqueueW1TestPushParameters: Encodable {
-    let targetRelationshipID: UUID
-    let targetEventID: UUID
-
-    enum CodingKeys: String, CodingKey {
-        case targetRelationshipID = "target_relationship_id"
-        case targetEventID = "target_event_id"
-    }
-}
-
 @MainActor
 final class SupabasePushPoC: ObservableObject {
     @Published private(set) var status = "尚未要求推播權限"
     @Published private(set) var tokenFingerprint = "尚無 token"
     @Published private(set) var isWorking = false
-    @Published private(set) var hasPendingPush = false
 
     private let client: SupabaseClient
-    private var pendingJobID: UUID?
 
     init(client: SupabaseClient) {
         self.client = client
@@ -115,57 +103,10 @@ final class SupabasePushPoC: ObservableObject {
         status = "APNs token 取得失敗：\(error.localizedDescription)"
     }
 
-    func sendOrRetryGenericTestPush(relationshipID: UUID?) async {
-        guard let relationshipID else {
-            status = "請先建立 2/2 active 測試關係"
-            return
-        }
-        guard !isWorking else { return }
-        isWorking = true
-        defer { isWorking = false }
-
-        do {
-            _ = try await client.auth.session
-            let jobID: UUID
-            if let pendingJobID {
-                jobID = pendingJobID
-            } else {
-                jobID = try await client
-                    .rpc(
-                        "enqueue_w1_test_push",
-                        params: EnqueueW1TestPushParameters(
-                            targetRelationshipID: relationshipID,
-                            targetEventID: UUID()
-                        )
-                    )
-                    .execute()
-                    .value
-                pendingJobID = jobID
-                hasPendingPush = true
-            }
-
-            try await client.functions.invoke(
-                "send-w1-push",
-                options: FunctionInvokeOptions(
-                    body: ["job_id": jobID.uuidString.lowercased()]
-                )
-            )
-            pendingJobID = nil
-            hasPendingPush = false
-            status = "泛化 W1 測試推播已送交 APNs"
-        } catch {
-            status = pendingJobID == nil
-                ? "推播排程失敗：\(error.localizedDescription)"
-                : "推播傳送失敗；工作保留供重試：\(error.localizedDescription)"
-        }
-    }
-
     func clearSession() {
         status = "尚未要求推播權限"
         tokenFingerprint = "尚無 token"
         isWorking = false
-        hasPendingPush = false
-        pendingJobID = nil
     }
 
     private var pushEnvironment: String {

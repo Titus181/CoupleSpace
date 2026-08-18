@@ -8,9 +8,10 @@ import {
 
 type ClaimedJob = {
   job_id: string;
-  event_id: string;
+  source_item_id: string;
   event_kind: string;
   recipient_user_id: string;
+  claim_token: string;
   attempt_count: number;
 };
 
@@ -19,10 +20,14 @@ type DeviceRow = {
 };
 
 const jsonHeaders = { "Content-Type": "application/json" };
-const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const uuidPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function response(error: string, status: number): Response {
-  return new Response(JSON.stringify({ error }), { status, headers: jsonHeaders });
+  return new Response(JSON.stringify({ error }), {
+    status,
+    headers: jsonHeaders,
+  });
 }
 
 Deno.serve(async (request) => {
@@ -33,12 +38,16 @@ Deno.serve(async (request) => {
   const keyID = Deno.env.get("APNS_KEY_ID");
   const teamID = Deno.env.get("APNS_TEAM_ID");
   const privateKey = Deno.env.get("APNS_PRIVATE_KEY");
-  const environment = Deno.env.get("APNS_ENVIRONMENT") as APNsEnvironment | undefined;
+  const environment = Deno.env.get("APNS_ENVIRONMENT") as
+    | APNsEnvironment
+    | undefined;
   const authorization = request.headers.get("Authorization");
   const accessToken = authorization?.replace(/^Bearer\s+/i, "");
 
-  if (!projectURL || !serviceRoleKey || !keyID || !teamID || !privateKey
-    || !environment || !["sandbox", "production"].includes(environment)) {
+  if (
+    !projectURL || !serviceRoleKey || !keyID || !teamID || !privateKey ||
+    !environment || !["sandbox", "production"].includes(environment)
+  ) {
     return response("server_not_configured", 500);
   }
   if (!accessToken) return response("missing_authorization", 401);
@@ -57,11 +66,15 @@ Deno.serve(async (request) => {
   const service = createClient(projectURL, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const { data: authData, error: authError } = await service.auth.getUser(accessToken);
-  if (authError || !authData.user) return response("invalid_authorization", 401);
+  const { data: authData, error: authError } = await service.auth.getUser(
+    accessToken,
+  );
+  if (authError || !authData.user) {
+    return response("invalid_authorization", 401);
+  }
 
   const { data: claimedRows, error: claimError } = await service.rpc(
-    "claim_w1_push_job",
+    "claim_push_delivery_job",
     {
       target_job_id: jobID,
       target_sender_user_id: authData.user.id,
@@ -73,8 +86,9 @@ Deno.serve(async (request) => {
   if (!job) return response("push_job_not_claimable", 409);
 
   const complete = async (succeeded: boolean, error: string | null) => {
-    await service.rpc("complete_w1_push_job", {
+    await service.rpc("complete_push_delivery_job", {
       target_job_id: job.job_id,
+      target_claim_token: job.claim_token,
       target_succeeded: succeeded,
       target_error: error,
     });
@@ -115,7 +129,7 @@ Deno.serve(async (request) => {
   const deliveries = await Promise.all(devices.map((device) =>
     sendGenericPush(
       device.token,
-      job.event_id,
+      job.source_item_id,
       job.event_kind,
       providerToken,
       environment,

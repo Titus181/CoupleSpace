@@ -1,8 +1,4 @@
-import {
-  assert,
-  assertEquals,
-  assertThrows,
-} from "jsr:@std/assert@1";
+import { assert, assertEquals, assertThrows } from "jsr:@std/assert@1";
 import {
   createProviderToken,
   genericPayload,
@@ -17,7 +13,7 @@ function decodeBase64URLJSON(value: string): unknown {
 
 Deno.test("generic payload contains routing metadata but no private content", () => {
   const eventID = "94000000-0000-0000-0000-000000000010";
-  const payload = genericPayload(eventID, "w1_generic");
+  const payload = genericPayload(eventID, "chat_message_created");
   const encoded = JSON.stringify(payload);
 
   assertEquals(payload.aps.alert.title, "CoupleSpace 有新動態");
@@ -25,13 +21,14 @@ Deno.test("generic payload contains routing metadata but no private content", ()
   assertEquals(payload.event_id, eventID);
   assert(!encoded.includes("relationship"));
   assert(!encoded.includes("sender"));
-  assert(!encoded.includes("message"));
+  assert(!Object.hasOwn(payload, "message"));
   assert(!encoded.includes("photo"));
+  assert(!encoded.includes("token"));
 });
 
 Deno.test("unsupported event kind is rejected", () => {
   assertThrows(
-    () => genericPayload("event", "message_created"),
+    () => genericPayload("event", "w1_generic"),
     Error,
     "unsupported_event_kind",
   );
@@ -43,10 +40,14 @@ Deno.test("provider token is an ES256 JWT with key and team identifiers", async 
     true,
     ["sign", "verify"],
   );
-  const bytes = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
+  const bytes = new Uint8Array(
+    await crypto.subtle.exportKey("pkcs8", pair.privateKey),
+  );
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  const key = `-----BEGIN PRIVATE KEY-----\n${btoa(binary)}\n-----END PRIVATE KEY-----`;
+  const key = `-----BEGIN PRIVATE KEY-----\n${
+    btoa(binary)
+  }\n-----END PRIVATE KEY-----`;
 
   const token = await createProviderToken({
     keyID: "KEY123",
@@ -73,7 +74,7 @@ Deno.test("sandbox request uses generic APNs headers and body", async () => {
   const result = await sendGenericPush(
     "a1b2c3d4",
     "94000000-0000-0000-0000-000000000010",
-    "w1_generic",
+    "chat_message_created",
     "provider.jwt",
     "sandbox",
     async (input, init) => {
@@ -84,14 +85,20 @@ Deno.test("sandbox request uses generic APNs headers and body", async () => {
   );
 
   assert(result.ok);
-  assertEquals(requestURL, "https://api.sandbox.push.apple.com/3/device/a1b2c3d4");
+  assertEquals(
+    requestURL,
+    "https://api.sandbox.push.apple.com/3/device/a1b2c3d4",
+  );
   const headers = requestInit?.headers as Record<string, string>;
   assertEquals(headers["apns-topic"], "com.titus.CoupleSpace");
   assertEquals(headers["apns-push-type"], "alert");
   assertEquals(headers["authorization"], "bearer provider.jwt");
   assertEquals(
     JSON.parse(requestInit?.body as string),
-    genericPayload("94000000-0000-0000-0000-000000000010", "w1_generic"),
+    genericPayload(
+      "94000000-0000-0000-0000-000000000010",
+      "chat_message_created",
+    ),
   );
 });
 
@@ -99,13 +106,14 @@ Deno.test("APNs rejection returns only its bounded reason", async () => {
   const result = await sendGenericPush(
     "a1b2c3d4",
     "94000000-0000-0000-0000-000000000010",
-    "w1_generic",
+    "appointment_discussion_message_created",
     "provider.jwt",
     "production",
-    async () => new Response(JSON.stringify({ reason: "BadDeviceToken" }), {
-      status: 400,
-      headers: { "content-type": "application/json" },
-    }),
+    async () =>
+      new Response(JSON.stringify({ reason: "BadDeviceToken" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      }),
   );
 
   assertEquals(result, { ok: false, status: 400, reason: "BadDeviceToken" });
