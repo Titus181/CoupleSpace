@@ -98,7 +98,7 @@ last_updated: 2026-08-18
 ### G12／W13 開發證據（進行中，2026-08-17）
 
 - 第一個本機切片提供 opt-in App Lock：帳號設定可啟用 Face ID／裝置密碼保護；啟用後 app 進入 inactive 或 background 立即以不含內容的鎖定畫面遮蔽，回到 active 時透過 `.deviceOwnerAuthentication` 驗證才回到既有流程。驗證取消、失敗或此裝置無法驗證時維持遮蔽；關閉設定立即恢復內容，偏好保留於本機。功能不改變 Supabase session、relationship、內容或待送佇列。
-- 已加入 Face ID usage description、App Lock lifecycle／失敗保留遮蔽的 unit，以及帳號設定入口 UI regression。iPhone Simulator build 成功；Face ID／裝置密碼、冷啟動、App switcher snapshot 與背景返回仍必須由 `LOCK-001` 真實 iPhone 驗收。跨裝置 session inventory／遠端撤銷與 production APNs 隱私尚未開始，G12 尚未關閉。
+- 已加入 Face ID usage description、App Lock lifecycle／取消／失敗／無法驗證仍保留遮蔽、啟用／停用與偏好恢復的 unit，以及未啟用啟動與已儲存偏好遮蔽的 UI regression。iPhone Simulator build、Harness 與 diff hygiene 通過；2026-08-18 已依 `LOCK-001` 由真實 iPhone 確認 Face ID／裝置密碼、冷啟動、背景返回、App switcher snapshot、鎖屏檢查，以及 session／relationship／Outbox 不變。跨裝置 session inventory／遠端撤銷與 production APNs 隱私尚未開始，G12 尚未關閉。
 
 ### G10 完成證據（2026-08-17）
 

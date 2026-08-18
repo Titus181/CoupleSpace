@@ -1,6 +1,6 @@
 ---
 status: active
-last_updated: 2026-08-17
+last_updated: 2026-08-18
 ---
 
 # CoupleSpace 測試目錄
@@ -44,13 +44,15 @@ last_updated: 2026-08-17
 | CHAT-005 | W12 聊天長期分頁 | 相同建立時間跨頁遺漏／重複、Realtime 最新頁重讀丟失舊頁、載入舊頁後捲動跳位，或 Moment 無法返回尚未載入的來源訊息 | Unit／UI＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md` | A、B、D |
 | APPOINTMENT-001 | W11 基本共同約定／W12 過往入口 | 非伴侶讀寫、建立或編輯／取消 Outbox 在離線／重啟／ack 遺失後造成遺失、重複、錯序或重複刷新時間、來源訊息產生重複卡片、長按未確認便建立、取消後被較晚編輯復活、提醒晚於開始時間、未授權卻假裝已排程、編輯／取消／解除配對後留下舊提醒、通知洩漏標題／地點／註記或點擊開錯約定，或專屬討論文字／照片跨約定／主對話串線、未讀游標混用、近期入口排序／未讀／取消保留錯誤或洩漏內容、過期／已取消約定未保留或排序錯誤、無法返回原討論、已取消討論仍可輸入、照片繞過私有 Storage／quota、closing 清除 scoped Outbox 造成 orphan、離線混合 FIFO 遺失／重複／錯序、重大時間變更／取消紀錄可被偽造／遺失／重複或一般文字編輯造成洗版，收藏後遺失約定來源、重複 Moment、無法返回原討論訊息，或解除配對封存遺失約定、來源、討論 scope、原建立者及重大事件關聯／洩漏另一 owner 封存 | pgTAP／Unit／UI＋真機 | `shared_appointments.test.sql`、`appointment_discussions.test.sql`、`appointment_discussion_photos.test.sql`、`recent_appointment_discussions.test.sql`、`appointment_discussion_moments.test.sql`、`appointment_archive_lifecycle.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md`、`manual/weak-network.md`、`manual/deletion-and-unpairing.md` | A、B、D |
 | TODAY-001 | W9 離線 Today 顯示 | 離線冷啟動只顯示載入、Moment／照片／狀態消失、過期狀態重現、錯帳號或錯 relationship 快照外洩、重連後不校正 | Unit＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`manual/weak-network.md` | A、B、D |
-| LOCK-001 | W13 App Lock | 未啟用時改變既有啟動、進入 inactive／background 時未遮蔽私密畫面、驗證失敗後顯示內容、或驗證流程改變登入／relationship／待送內容 | Unit／UI＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/app-lock-and-background.md` | A、B、D |
+| LOCK-001 | W13 App Lock | 未啟用時改變既有啟動、啟用／停用或偏好重啟恢復錯誤、進入 inactive／background 時未遮蔽私密畫面、驗證取消／失敗／無法驗證後顯示內容，或驗證流程改變登入／relationship／待送內容 | Unit／UI＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/app-lock-and-background.md` | A、B、D |
 | DR-001 | G15／G17 雲端災難復原 | 備份存在但無法還原、Database／Storage 不一致、刪除復活、RLS／Auth／設定缺失、雙主分叉、manifest 遭竄改或切換後要求重新配對 | Integration＋restore drill＋真機 | `manual/disaster-recovery.md`、`manual/upgrade-and-recovery.md`、`docs/architecture/01-disaster-recovery.md` | C、D |
 | EVAL-001 | Agent 行為 | 未讀文件、越權遠端寫入、跳過測試或洩漏私人資料 | Agent Eval／Harness | `evals/README.md`、`.harness/` | B、D |
 
 Gate A／B／D 定義見 [版本發布閘門](release-gates.md)。`CHAT-001` 只代表 W8 基本聊天；W9 的正式持久 Outbox、離線重送、可靠重試與傳送狀態由 `CHAT-002` 獨立關閉。`CHAT-002`、`TODAY-001` 與兩支真實 iPhone 的 `NETWORK-001` 已於 2026-08-13 通過，G8／W9 已完成。`CHAT-003`、`CHAT-004`、`MOMENT-003` 的本機自動化、Dev migrations 020–022 與兩支真實 iPhone 核心流程已於 2026-08-13 通過；近 quota 拒絕／orphan 與上傳成功但 ack 遺失的故障注入尚未取得真機證據，因此 W10 release gate 仍不能視為完整 PASS。`APPOINTMENT-001` 的 migrations 023–031、27 份 pgTAP／441 項、131 個串行 iPhone unit tests、focused UI／archive audit、linked schema lint，以及四輪兩支真實 iPhone 的核心、弱網、提醒與 owner-only 封存驗收已於 2026-08-17 通過；G10／W11 已完成。
 
 `PAIR-003` 的 migration 032、本機空資料庫重建、28 份 pgTAP／460 項、local schema lint、163 個 iPhone 測試定義／166 次 executions、5 個 APNs tests、Harness v0.2.1 與 diff hygiene 已通過，0 failure、0 skip；linked migration 032 已於 2026-08-17 部署，遠端歷史一致且 linked schema lint 無錯誤。兩支真實 iPhone 已完成五輪短碼接受、格式正規化、完整分享文字、拒絕／取消／輪替、同時邀請、弱網／重啟、舊碼失效、十分鐘限流視窗與受控過期後重建；G4A 已完成。
+
+`LOCK-001` 的 App Lock lifecycle、取消／失敗／無法驗證遮蔽、啟用／停用、偏好恢復與未啟用啟動已由 unit／UI regression 覆蓋；Simulator build、Harness 與 diff hygiene 通過。2026-08-18 已由人類在真實 iPhone 確認 Face ID／裝置密碼、冷啟動、背景返回、App switcher snapshot、鎖屏檢查，以及 session／relationship／Outbox 不變；未來完整測試仍須重跑 `manual/app-lock-and-background.md`。
 
 ## 目前必須保留的人工證據
 
@@ -70,7 +72,6 @@ W8–W11 的跨 catalog 完整改版順序見 `manual/w8-w11-regression.md`；�
 
 - Production／TestFlight push 不能由 development sandbox 證據取代。
 - 大型真機封存、實際低磁碟與中斷續傳尚需對應 release gate。
-- App Lock 已有本機實作與自動化接縫，但 Face ID／裝置密碼、App switcher snapshot、冷啟動及背景返回仍須依 `LOCK-001` 以真實 iPhone 驗收；尚未通過前不能關閉 G12。
 - `DR-001` 尚未完成；Database／Storage／設定／刪除 journal restore drill 必須使用同一 recovery point，並實測 signed manifest、異區冷重建、RLS、checksum 與清空本機狀態真機恢復，不能用單純「備份已開啟」代替。
 - W9 的本機自動化不得取代兩支真實 iPhone 的離線、force-quit、重連、去重與 FIFO 證據。
 - W10 的本機自動化不得取代兩支真實 iPhone 對 mixed FIFO、reaction 即時同步、來源跳轉與私有照片讀取的證據。
