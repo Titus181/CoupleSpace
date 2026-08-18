@@ -16,10 +16,12 @@ struct APNsDeviceTokenValue: Equatable, Sendable {
 private struct RegisterPushDeviceParameters: Encodable {
     let targetToken: String
     let targetEnvironment: String
+    let targetContentPreviewEnabled: Bool
 
     enum CodingKeys: String, CodingKey {
         case targetToken = "target_token"
         case targetEnvironment = "target_environment"
+        case targetContentPreviewEnabled = "target_content_preview_enabled"
     }
 }
 
@@ -29,6 +31,8 @@ final class PushNotificationPlatformAdapter {
 
     private var client: SupabaseClient?
     private var pendingDeviceToken: Data?
+    private var registeredDeviceToken: Data?
+    private let contentPreviewDefaultsKey = "push-content-preview-enabled"
 
     private init() {}
 
@@ -54,11 +58,18 @@ final class PushNotificationPlatformAdapter {
     func receive(deviceToken: Data) async {
         guard !deviceToken.isEmpty else { return }
         pendingDeviceToken = deviceToken
+        registeredDeviceToken = deviceToken
         await registerPendingDeviceToken()
     }
 
     func refreshAfterNotificationInteraction() {
         NotificationCenter.default.post(name: .coupleSpaceDidRequestSecureRefresh, object: nil)
+    }
+
+    func setContentPreviewEnabled(_ isEnabled: Bool) async {
+        UserDefaults.standard.set(isEnabled, forKey: contentPreviewDefaultsKey)
+        if pendingDeviceToken == nil { pendingDeviceToken = registeredDeviceToken }
+        await registerPendingDeviceToken()
     }
 
     private func registerPendingDeviceToken() async {
@@ -69,7 +80,8 @@ final class PushNotificationPlatformAdapter {
                 "register_push_device",
                 params: RegisterPushDeviceParameters(
                     targetToken: APNsDeviceTokenValue(pendingDeviceToken).hex,
-                    targetEnvironment: pushEnvironment
+                    targetEnvironment: pushEnvironment,
+                    targetContentPreviewEnabled: UserDefaults.standard.bool(forKey: contentPreviewDefaultsKey)
                 )
             ).execute().value
             self.pendingDeviceToken = nil

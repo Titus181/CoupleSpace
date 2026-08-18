@@ -8,6 +8,12 @@ struct RootTabView: View {
     @State private var conversationFocusMessageID: UUID?
     @State private var appointmentDiscussionFocus: AppointmentDiscussionFocus?
     @State private var sourceNavigationRequestID: UUID?
+    @State private var relationshipUnreadCount: Int?
+
+    private var displayedUnreadCount: Int {
+        relationshipUnreadCount
+            ?? conversationModel.unreadCount + sharedAppointmentModel.discussionUnreadCount
+    }
     @StateObject private var networkRecoveryMonitor = NetworkRecoveryMonitor()
     @StateObject private var momentModel: MomentModel
     @StateObject private var togetherNowModel: TogetherNowModel
@@ -22,6 +28,7 @@ struct RootTabView: View {
     let accountUserToken: String?
     let accountStatusMessage: String?
     let relationshipToken: String?
+    private let relationshipID: UUID?
     let technicalValidationClient: SupabaseClient?
     let onSignOut: () -> Void
     private let shouldActivateRemotePush: Bool
@@ -38,6 +45,7 @@ struct RootTabView: View {
         self.accountUserToken = accountUserToken
         self.accountStatusMessage = accountStatusMessage
         self.relationshipToken = relationshipToken
+        self.relationshipID = relationshipID
         self.technicalValidationClient = technicalValidationClient
         self.onSignOut = onSignOut
         shouldActivateRemotePush = accountUserID != nil
@@ -645,7 +653,7 @@ struct RootTabView: View {
                         onMomentSaved: { await momentModel.refresh() }
                     )
                 }
-                .badge(conversationModel.unreadCount + sharedAppointmentModel.discussionUnreadCount)
+                .badge(displayedUnreadCount)
 
                 Tab("我們", systemImage: "person.2", value: PrimarySection.us) {
                     UsView(
@@ -679,6 +687,7 @@ struct RootTabView: View {
                 sharedAppointmentStart,
                 conversationStart
             )
+            await refreshRelationshipUnreadBadge()
         }
         .onReceive(
             NotificationCenter.default.publisher(
@@ -692,9 +701,25 @@ struct RootTabView: View {
                 await conversationModel.setConversationVisible(selection == .conversation)
             }
         }
+        .onChange(of: conversationModel.unreadCount) { _, _ in
+            Task { await refreshRelationshipUnreadBadge() }
+        }
+        .onChange(of: conversationModel.unreadRefreshGeneration) { _, _ in
+            Task { await refreshRelationshipUnreadBadge() }
+        }
+        .onChange(of: sharedAppointmentModel.discussionUnreadCount) { _, _ in
+            Task { await refreshRelationshipUnreadBadge() }
+        }
+        .onChange(of: sharedAppointmentModel.refreshGeneration) { _, _ in
+            Task { await refreshRelationshipUnreadBadge() }
+        }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
+            guard phase == .active else {
+                Task { await conversationModel.setConversationVisible(false) }
+                return
+            }
             Task {
+                await conversationModel.setConversationVisible(selection == .conversation)
                 async let momentRefresh: Void = momentModel.refresh()
                 async let togetherNowRefresh: Void = togetherNowModel.refresh()
                 async let sharedAppointmentRefresh: Void = sharedAppointmentModel
@@ -736,6 +761,34 @@ struct RootTabView: View {
                 await sharedAppointmentModel.stop()
                 await conversationModel.stop()
             }
+        }
+    }
+
+    private func refreshRelationshipUnreadBadge() async {
+        guard let technicalValidationClient, let relationshipID else { return }
+        struct UnreadRow: Decodable {
+            let totalUnreadCount: Int
+            enum CodingKeys: String, CodingKey { case totalUnreadCount = "total_unread_count" }
+        }
+        struct Parameters: Encodable {
+            let targetRelationshipID: UUID
+            enum CodingKeys: String, CodingKey { case targetRelationshipID = "target_relationship_id" }
+        }
+        do {
+            let rows: [UnreadRow] = try await technicalValidationClient.rpc(
+                "relationship_unread_counts",
+                params: Parameters(targetRelationshipID: relationshipID)
+            ).execute().value
+            let count = rows.first?.totalUnreadCount ?? 0
+            relationshipUnreadCount = count
+#if os(iOS)
+            UIApplication.shared.applicationIconBadgeNumber = count
+#endif
+        } catch {
+            relationshipUnreadCount = nil
+#if os(iOS)
+            UIApplication.shared.applicationIconBadgeNumber = displayedUnreadCount
+#endif
         }
     }
 
@@ -886,6 +939,7 @@ private struct AccountSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appLockModel: AppLockModel
     @AppStorage(CoupleSpaceTimeFormat.defaultsKey) private var timeFormatRawValue = CoupleSpaceTimeFormat.followSystem.rawValue
+    @AppStorage("push-content-preview-enabled") private var showsNotificationContent = false
     @State private var isConfirmingSignOut = false
     @State private var isShowingTechnicalValidation = false
     @ObservedObject var togetherNowModel: TogetherNowModel
@@ -932,6 +986,16 @@ private struct AccountSettingsView: View {
                     .pickerStyle(.inline)
                     .accessibilityIdentifier("time-format-picker")
                     Text("此設定只影響這台裝置的時間顯示，不會改變共同資料或伴侶的設定。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("通知") {
+                    Toggle("顯示通知內容", isOn: $showsNotificationContent)
+                        .onChange(of: showsNotificationContent) { _, isEnabled in
+                            Task { await PushNotificationPlatformAdapter.shared.setContentPreviewEnabled(isEnabled) }
+                        }
+                    Text("開啟後，文字通知會顯示傳送者與內容；照片與共同約定仍不顯示私密細節。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

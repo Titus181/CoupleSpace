@@ -369,6 +369,7 @@ struct AppointmentDiscussionView: View {
         .task(id: initialFocusMessageID) {
             await discussionModel.start()
             await discussionModel.setConversationVisible(true)
+            await discussionModel.markInteractionScopeRead()
             if let initialFocusMessageID {
                 await discussionModel.focusSourceMessage(id: initialFocusMessageID)
             }
@@ -500,6 +501,9 @@ struct SharedAppointmentDetailView: View {
             }
         }
         .accessibilityIdentifier("shared-appointment-detail")
+        .task(id: appointmentID) {
+            await model.markInteractionRead(for: appointmentID)
+        }
     }
 }
 

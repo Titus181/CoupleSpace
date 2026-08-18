@@ -15,6 +15,7 @@ final class ConversationModel: ObservableObject {
     @Published private(set) var activeReactionMessageIDs: Set<UUID> = []
     @Published private(set) var savedMomentMessageIDs: Set<UUID> = []
     @Published private(set) var focusedSourceMessageID: UUID?
+    @Published private(set) var unreadRefreshGeneration = 0
 
     private struct ReactionAttempt {
         let emojiValue: String?
@@ -67,6 +68,24 @@ final class ConversationModel: ObservableObject {
     func setConversationVisible(_ isVisible: Bool) async {
         isConversationVisible = isVisible
         if isVisible { await markVisibleMessagesReadIfNeeded() }
+    }
+
+    func clearAllRelationshipUnreadForDebug() async {
+        do {
+            try await service.markAllRelationshipInteractionsRead()
+            unreadRefreshGeneration &+= 1
+        } catch {
+            statusMessage = "無法清除未讀，請確認連線後再試。"
+        }
+    }
+
+    func markInteractionScopeRead() async {
+        do {
+            try await service.markInteractionScopeRead()
+            unreadRefreshGeneration &+= 1
+        } catch {
+            statusMessage = "無法更新未讀，請確認連線後再試。"
+        }
     }
 
     func refresh() async {
@@ -194,6 +213,7 @@ final class ConversationModel: ObservableObject {
     func recoverPendingMessages() async {
         await loadPendingMessages()
         loadCachedPhotos()
+        await refresh()
         let isObserving = await restartObservation()
         let terminalRejectionMessage = await drainPendingMessages(
             maximumAttemptsPerMessage: ConversationRecoveryRetryPolicy.maximumAttempts
@@ -339,6 +359,7 @@ final class ConversationModel: ObservableObject {
         do {
             try await service.markRead(through: lastMessageID)
             unreadCount = 0
+            unreadRefreshGeneration &+= 1
             await persistCurrentSnapshot()
         } catch {
             statusMessage = "未讀數尚未更新，請稍後再試。"

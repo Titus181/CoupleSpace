@@ -13,12 +13,13 @@ function decodeBase64URLJSON(value: string): unknown {
 
 Deno.test("generic payload contains routing metadata but no private content", () => {
   const eventID = "94000000-0000-0000-0000-000000000010";
-  const payload = genericPayload(eventID, "chat_message_created");
+  const payload = genericPayload(eventID, "chat_message_created", 4);
   const encoded = JSON.stringify(payload);
 
   assertEquals(payload.aps.alert.title, "CoupleSpace 有新動態");
   assertEquals(payload.aps.alert.body, "打開 App 查看");
-  assertEquals(payload.event_id, eventID);
+  assertEquals(payload.aps.badge, 4);
+  assert(!encoded.includes(eventID));
   assert(!encoded.includes("relationship"));
   assert(!encoded.includes("sender"));
   assert(!Object.hasOwn(payload, "message"));
@@ -32,6 +33,19 @@ Deno.test("unsupported event kind is rejected", () => {
     Error,
     "unsupported_event_kind",
   );
+});
+
+Deno.test("appointment lifecycle payloads are generic", () => {
+  for (const eventKind of [
+    "appointment_created",
+    "appointment_updated",
+    "appointment_cancelled",
+  ]) {
+    const payload = genericPayload("event", eventKind, 2);
+    assertEquals(payload.aps.alert.title, "CoupleSpace 有新動態");
+    assertEquals(payload.aps.alert.body, "打開 App 查看");
+    assertEquals(payload.aps.badge, 2);
+  }
 });
 
 Deno.test("provider token is an ES256 JWT with key and team identifiers", async () => {
@@ -75,6 +89,8 @@ Deno.test("sandbox request uses generic APNs headers and body", async () => {
     "a1b2c3d4",
     "94000000-0000-0000-0000-000000000010",
     "chat_message_created",
+    3,
+    undefined,
     "provider.jwt",
     "sandbox",
     async (input, init) => {
@@ -96,8 +112,7 @@ Deno.test("sandbox request uses generic APNs headers and body", async () => {
   assertEquals(
     JSON.parse(requestInit?.body as string),
     genericPayload(
-      "94000000-0000-0000-0000-000000000010",
-      "chat_message_created",
+      "94000000-0000-0000-0000-000000000010", "chat_message_created", 3,
     ),
   );
 });
@@ -107,6 +122,8 @@ Deno.test("APNs rejection returns only its bounded reason", async () => {
     "a1b2c3d4",
     "94000000-0000-0000-0000-000000000010",
     "appointment_discussion_message_created",
+    0,
+    undefined,
     "provider.jwt",
     "production",
     async () =>

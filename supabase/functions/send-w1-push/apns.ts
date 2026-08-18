@@ -48,11 +48,16 @@ function privateKeyBytes(pem: string): Uint8Array {
   }
 }
 
-export function genericPayload(eventID: string, eventKind: string) {
+export type NotificationPreview = { title: string; body: string };
+
+export function genericPayload(eventID: string, eventKind: string, badgeCount = 0, preview?: NotificationPreview) {
   if (
     ![
       "chat_message_created",
       "appointment_discussion_message_created",
+      "appointment_created",
+      "appointment_updated",
+      "appointment_cancelled",
     ].includes(eventKind)
   ) {
     throw new Error("unsupported_event_kind");
@@ -61,13 +66,12 @@ export function genericPayload(eventID: string, eventKind: string) {
   return {
     aps: {
       alert: {
-        title: "CoupleSpace 有新動態",
-        body: "打開 App 查看",
+        title: preview?.title ?? "CoupleSpace 有新動態",
+        body: preview?.body ?? "打開 App 查看",
       },
       sound: "default",
+      badge: Math.max(0, badgeCount),
     },
-    event_id: eventID,
-    event_kind: eventKind,
   };
 }
 
@@ -103,6 +107,8 @@ export async function sendGenericPush(
   deviceToken: string,
   eventID: string,
   eventKind: string,
+  badgeCount: number,
+  preview: NotificationPreview | undefined,
   providerToken: string,
   environment: APNsEnvironment,
   fetcher: Fetcher = fetch,
@@ -124,7 +130,7 @@ export async function sendGenericPush(
       "apns-topic": topic,
       "content-type": "application/json",
     },
-    body: JSON.stringify(genericPayload(eventID, eventKind)),
+    body: JSON.stringify(genericPayload(eventID, eventKind, badgeCount, preview)),
   });
 
   let reason: string | null = null;

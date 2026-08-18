@@ -149,6 +149,22 @@ private struct RecentAppointmentDiscussionsParameters: Encodable {
     }
 }
 
+private struct EnqueueAppointmentInteractionPushParameters: Encodable {
+    let targetRelationshipID: UUID
+    let targetSourceIdentity: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+        case targetSourceIdentity = "target_source_identity"
+    }
+}
+
+private struct AppointmentPushDeliveryInvocation: Encodable {
+    let jobID: UUID
+
+    enum CodingKeys: String, CodingKey { case jobID = "job_id" }
+}
+
 private struct SharedAppointmentDiscussionSummaryRow: Decodable {
     let appointmentClientID: UUID
     let latestActivityAt: Date
@@ -371,6 +387,7 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
             throw SharedAppointmentServiceError.missingSavedAppointment
         }
         let appointment = try row.appointment()
+        await enqueueInteractionPush(sourceIdentity: appointment.id)
         try? snapshotStore.upsert(
             appointment,
             userID: currentUserID,
@@ -490,6 +507,7 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
             throw SharedAppointmentServiceError.missingSavedAppointment
         }
         let appointment = try row.appointment()
+        await enqueueInteractionPush(sourceIdentity: operationID)
         try? snapshotStore.upsert(
             appointment,
             userID: currentUserID,
@@ -518,12 +536,27 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
             throw SharedAppointmentServiceError.missingSavedAppointment
         }
         let appointment = try row.appointment()
+        await enqueueInteractionPush(sourceIdentity: operationID)
         try? snapshotStore.upsert(
             appointment,
             userID: currentUserID,
             relationshipID: relationshipID
         )
         return appointment
+    }
+
+    private func enqueueInteractionPush(sourceIdentity: UUID) async {
+        guard let jobID: UUID = try? await client.rpc(
+            "enqueue_relationship_interaction_push_for_source",
+            params: EnqueueAppointmentInteractionPushParameters(
+                targetRelationshipID: relationshipID,
+                targetSourceIdentity: sourceIdentity
+            )
+        ).execute().value else { return }
+        try? await client.functions.invoke(
+            "send-w1-push",
+            options: FunctionInvokeOptions(body: AppointmentPushDeliveryInvocation(jobID: jobID))
+        )
     }
 
     private func fetchAppointment(id: UUID) async throws -> SharedAppointment? {

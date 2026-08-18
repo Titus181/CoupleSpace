@@ -99,6 +99,7 @@ last_updated: 2026-08-18
 
 - 第一個本機切片提供 opt-in App Lock：帳號設定可啟用 Face ID／裝置密碼保護；啟用後 app 進入 inactive 或 background 立即以不含內容的鎖定畫面遮蔽，回到 active 時透過 `.deviceOwnerAuthentication` 驗證才回到既有流程。驗證取消、失敗或此裝置無法驗證時維持遮蔽；關閉設定立即恢復內容，偏好保留於本機。功能不改變 Supabase session、relationship、內容或待送佇列。
 - 已加入 Face ID usage description、App Lock lifecycle／取消／失敗／無法驗證仍保留遮蔽、啟用／停用與偏好恢復的 unit，以及未啟用啟動與已儲存偏好遮蔽的 UI regression。iPhone Simulator build、Harness 與 diff hygiene 通過；2026-08-18 已依 `LOCK-001` 由真實 iPhone 確認 Face ID／裝置密碼、冷啟動、背景返回、App switcher snapshot、鎖屏檢查，以及 session／relationship／Outbox 不變。跨裝置 session inventory／遠端撤銷與 production APNs 隱私尚未開始，G12 尚未關閉。
+- 第二個切片「關係互動未讀、約定 lifecycle 與 App Badge」已完成：伺服器以穩定互動 identity 記錄對方的主對話／約定討論文字與照片，以及共同約定的建立、有效修改與取消；同一 operation 重送不重複增加未讀或推播。對話分頁、近期約定與 App icon 讀取同一份 relationship authoritative 未讀數，進入主對話、指定約定詳情或討論後才標記對應 scope 已查看。推播帶入權威 badge，預設為泛化文案；文字內容預覽僅在收件者裝置明確開啟時送出，照片與約定 lifecycle 維持不含私人內容的文案。空資料庫 migration、pgTAP、APNs Function regression、Simulator regression 與兩支真實 iPhone 已確認文字、照片、建立／修改／取消、前景／背景／終止／鎖定、重送去重、讀取收斂與 badge 一致。此證據只關閉第二個切片；本機提醒 W13 回歸及 session capability／撤銷仍未開始，G12 保持進行中。
 
 ### G10 完成證據（2026-08-17）
 

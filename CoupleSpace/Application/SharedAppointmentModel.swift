@@ -11,6 +11,7 @@ final class SharedAppointmentModel: ObservableObject {
     @Published private(set) var statusMessage: String?
     @Published private(set) var reminderStatusMessage: String?
     @Published private(set) var reminderAuthorization: SharedAppointmentReminderAuthorization = .notDetermined
+    @Published private(set) var refreshGeneration = 0
 
     private let service: SharedAppointmentRemoteServing
     private let reminderScheduler: SharedAppointmentReminderScheduling
@@ -83,6 +84,12 @@ final class SharedAppointmentModel: ObservableObject {
         return created
     }
 
+    func markInteractionRead(for appointmentID: UUID) async {
+        guard let discussionModel = discussionModel(for: appointmentID) else { return }
+        await discussionModel.markInteractionScopeRead()
+        await refresh()
+    }
+
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true
@@ -151,6 +158,7 @@ final class SharedAppointmentModel: ObservableObject {
                     ($0.latestActivityAt, $0.appointmentID.uuidString)
                         > ($1.latestActivityAt, $1.appointmentID.uuidString)
                 }
+            refreshGeneration &+= 1
             statusMessage = terminalOperationMessage
                 ?? operationDeliveryStatusMessage
                 ?? deliveryStatusMessage

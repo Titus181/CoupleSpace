@@ -238,6 +238,18 @@ struct ConversationView: View {
             }
         }
         .navigationTitle(mode.navigationTitle)
+        #if DEBUG
+        .toolbar {
+            if mode == .main {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("清除未讀") {
+                        Task { await model.clearAllRelationshipUnreadForDebug() }
+                    }
+                    .accessibilityIdentifier("debug-clear-all-unread")
+                }
+            }
+        }
+        #endif
     }
 
     private var recentDiscussionEntries: [RecentAppointmentDiscussionEntry] {

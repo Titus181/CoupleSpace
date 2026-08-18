@@ -1750,6 +1750,34 @@ struct AppSkeletonTests {
     }
 
     @MainActor
+    @Test func conversationRecoveryRereadsMessagesBeforeRealtimeReconnectCompletes() async throws {
+        let currentUserID = UUID()
+        let partnerUserID = UUID()
+        let service = ConversationRemoteServiceFake(
+            currentUserID: currentUserID,
+            messages: [],
+            unreadCount: 0
+        )
+        let model = ConversationModel(service: service)
+        await model.start()
+        let incoming = ChatMessage(
+            id: UUID(),
+            senderUserID: partnerUserID,
+            body: "恢復時立即顯示",
+            createdAt: .now
+        )
+        service.messages = [incoming]
+        service.unreadCount = 1
+        service.startObservingDelay = .milliseconds(250)
+
+        let recovery = Task { await model.recoverPendingMessages() }
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(model.messages == [incoming])
+        await recovery.value
+    }
+
+    @MainActor
     @Test func conversationModelLoadsStablePagesAndKeepsOlderHistoryDuringRefresh() async throws {
         let currentUserID = UUID()
         let partnerUserID = UUID()
@@ -3201,6 +3229,7 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
     var saveMomentFailuresRemaining = 0
     var sendDelay: Duration = .zero
     var fetchDelay: Duration = .zero
+    var startObservingDelay: Duration = .zero
     var reactionDelay: Duration = .zero
     var removeReactionDelay: Duration = .zero
     var deliveryResultOverride: ConversationDeliveryResult?
@@ -3392,8 +3421,13 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
         unreadCount = 0
     }
 
+    func markAllRelationshipInteractionsRead() async throws {}
+
+    func markInteractionScopeRead() async throws {}
+
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
         startObservingCallCount += 1
+        try await Task.sleep(for: startObservingDelay)
         isObserving = true
         self.onChange = onChange
     }

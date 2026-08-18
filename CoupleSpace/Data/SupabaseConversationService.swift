@@ -32,6 +32,8 @@ protocol ConversationRemoteServing: AnyObject {
     func removeReaction(messageID: UUID) async throws
     func saveAsMoment(messageID: UUID, momentClientID: UUID) async throws -> UUID
     func markRead(through messageID: UUID) async throws
+    func markInteractionScopeRead() async throws
+    func markAllRelationshipInteractionsRead() async throws
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws
     func stopObservingChanges() async
 }
@@ -176,6 +178,22 @@ private struct EnqueuePushEventParameters: Encodable {
     enum CodingKeys: String, CodingKey {
         case targetEventKind = "target_event_kind"
         case targetSourceItemID = "target_source_item_id"
+    }
+}
+
+private struct PushDeliveryInvocation: Encodable {
+    let jobID: UUID
+
+    enum CodingKeys: String, CodingKey { case jobID = "job_id" }
+}
+
+private struct MarkRelationshipInteractionsReadParameters: Encodable {
+    let targetRelationshipID: UUID
+    let targetScopeID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+        case targetScopeID = "target_scope_id"
     }
 }
 
@@ -463,7 +481,7 @@ final class SupabaseConversationService: ConversationRemoteServing {
             .select("id")
             .eq("relationship_id", value: relationshipID)
             .eq("client_id", value: messageID)
-            .eq("item_kind", value: "message")
+            .in("item_kind", values: ["message", "photo"])
         let eventKind: PushEventKind
         switch scope {
         case .main:
@@ -477,13 +495,17 @@ final class SupabaseConversationService: ConversationRemoteServing {
         guard let sourceItemID = rows.first?.id else {
             throw ConversationServiceError.invalidServerMessage
         }
-        let _: UUID = try await client.rpc(
+        let jobID: UUID = try await client.rpc(
             "enqueue_push_event",
             params: EnqueuePushEventParameters(
                 targetEventKind: eventKind.rawValue,
                 targetSourceItemID: sourceItemID
             )
         ).execute().value
+        try? await client.functions.invoke(
+            "send-w1-push",
+            options: FunctionInvokeOptions(body: PushDeliveryInvocation(jobID: jobID))
+        )
     }
 
     func fetchPage(before cursor: ConversationPageCursor?, limit: Int) async throws
@@ -672,6 +694,41 @@ final class SupabaseConversationService: ConversationRemoteServing {
                 )
             ).execute()
         }
+        let scopeID: UUID
+        switch scope {
+        case .main: scopeID = relationshipID
+        case let .appointment(appointmentID): scopeID = appointmentID
+        }
+        try await client.rpc(
+            "mark_relationship_interactions_read",
+            params: MarkRelationshipInteractionsReadParameters(
+                targetRelationshipID: relationshipID,
+                targetScopeID: scopeID
+            )
+        ).execute()
+    }
+
+    func markAllRelationshipInteractionsRead() async throws {
+        _ = try await client.auth.session
+        try await client.rpc(
+            "mark_all_relationship_interactions_read",
+            params: ConversationRelationshipParameters(targetRelationshipID: relationshipID)
+        ).execute()
+    }
+
+    func markInteractionScopeRead() async throws {
+        let scopeID: UUID
+        switch scope {
+        case .main: scopeID = relationshipID
+        case let .appointment(appointmentID): scopeID = appointmentID
+        }
+        try await client.rpc(
+            "mark_relationship_interactions_read",
+            params: MarkRelationshipInteractionsReadParameters(
+                targetRelationshipID: relationshipID,
+                targetScopeID: scopeID
+            )
+        ).execute()
     }
 
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
@@ -778,6 +835,7 @@ final class SupabaseConversationService: ConversationRemoteServing {
                 relationshipID: relationshipID,
                 messageID: messageID
             )
+            try? await enqueuePushEvent(for: messageID)
             return .accepted(acceptedAt)
         }
         let message: String
@@ -1006,6 +1064,10 @@ final class InMemoryConversationService: ConversationRemoteServing {
         }
         unreadCount = 0
     }
+
+    func markAllRelationshipInteractionsRead() async throws {}
+
+    func markInteractionScopeRead() async throws {}
 
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {}
     func stopObservingChanges() async {}
