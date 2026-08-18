@@ -1030,8 +1030,11 @@ final class CoupleSpaceUITests: XCTestCase {
     @MainActor
     func testAccountSettingsOffersPrivateAppLock() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing"]
+        app.launchArguments = ["--ui-testing", "-couplespace.app-lock-enabled", "NO"]
         app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["main-content"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.descendants(matching: .any)["app-lock-screen"].exists)
 
         app.tabBars.buttons["我們"].tap()
         app.buttons["account-settings"].tap()
@@ -1042,6 +1045,15 @@ final class CoupleSpaceUITests: XCTestCase {
         }
         XCTAssertTrue(appLockToggle.waitForExistence(timeout: 2))
         XCTAssertFalse(appLockToggle.value as? String == "1")
+    }
+
+    @MainActor
+    func testPersistedAppLockPreferenceCoversContentAtLaunch() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "-couplespace.app-lock-enabled", "YES"]
+        app.launch()
+
+        XCTAssertTrue(app.descendants(matching: .any)["app-lock-screen"].waitForExistence(timeout: 2))
     }
 
     @MainActor

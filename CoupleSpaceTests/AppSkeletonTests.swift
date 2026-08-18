@@ -7,7 +7,7 @@ import UIKit
 
 struct AppSkeletonTests {
     @MainActor
-    @Test func appLockLocksOnBackgroundAndOnlyUnlocksAfterDeviceAuthentication() async {
+    @Test func appLockLocksOnInactiveAndBackgroundAndOnlyUnlocksAfterDeviceAuthentication() async {
         let preferences = UserDefaults(suiteName: "AppSkeletonTests.appLock")!
         preferences.removePersistentDomain(forName: "AppSkeletonTests.appLock")
         let authenticator = AppLockAuthenticatorFake(result: .authenticated)
@@ -24,6 +24,12 @@ struct AppSkeletonTests {
         await model.unlockIfNeeded()
         #expect(model.isLocked == false)
 
+        await model.handleLifecyclePhase(.inactive)
+        #expect(model.isLocked)
+
+        await model.handleLifecyclePhase(.active)
+        #expect(model.isLocked == false)
+
         await model.handleLifecyclePhase(.background)
         #expect(model.isLocked)
 
@@ -31,6 +37,23 @@ struct AppSkeletonTests {
         await model.handleLifecyclePhase(.active)
         #expect(model.isLocked)
         #expect(model.statusMessage == "尚未驗證，內容仍受保護。")
+    }
+
+    @MainActor
+    @Test func appLockKeepsContentCoveredWhenDeviceAuthenticationIsUnavailable() async {
+        let preferences = UserDefaults(suiteName: "AppSkeletonTests.appLockUnavailable")!
+        preferences.removePersistentDomain(forName: "AppSkeletonTests.appLockUnavailable")
+        let model = AppLockModel(
+            preferences: preferences,
+            preferenceKey: "enabled",
+            authenticator: AppLockAuthenticatorFake(result: .unavailable),
+            initiallyEnabled: true
+        )
+
+        await model.handleLifecyclePhase(.active)
+
+        #expect(model.isLocked)
+        #expect(model.statusMessage == "此裝置無法使用 Face ID 或裝置密碼解鎖。")
     }
 
     @MainActor
@@ -47,6 +70,40 @@ struct AppSkeletonTests {
         model.setEnabled(false)
         #expect(model.isLocked == false)
         #expect(preferences.bool(forKey: "enabled") == false)
+    }
+
+    @MainActor
+    @Test func appLockRestoresPersistedPreferenceWithoutChangingUnlockedStateWhenDisabled() async {
+        let preferences = UserDefaults(suiteName: "AppSkeletonTests.appLockRestoration")!
+        preferences.removePersistentDomain(forName: "AppSkeletonTests.appLockRestoration")
+        let authenticator = AppLockAuthenticatorFake(result: .authenticated)
+        let enabledModel = AppLockModel(
+            preferences: preferences,
+            preferenceKey: "enabled",
+            authenticator: authenticator,
+            initiallyEnabled: false
+        )
+        enabledModel.setEnabled(true)
+
+        let restoredEnabledModel = AppLockModel(
+            preferences: preferences,
+            preferenceKey: "enabled",
+            authenticator: authenticator
+        )
+        #expect(restoredEnabledModel.isEnabled)
+        #expect(restoredEnabledModel.isLocked)
+
+        restoredEnabledModel.setEnabled(false)
+        let restoredDisabledModel = AppLockModel(
+            preferences: preferences,
+            preferenceKey: "enabled",
+            authenticator: authenticator
+        )
+        await restoredDisabledModel.handleLifecyclePhase(.active)
+
+        #expect(restoredDisabledModel.isEnabled == false)
+        #expect(restoredDisabledModel.isLocked == false)
+        #expect(authenticator.authenticationCount == 0)
     }
 
     @Test func uiTestingLaunchOptionIsExplicitAndOrderIndependent() {
@@ -2843,13 +2900,15 @@ struct AppSkeletonTests {
 @MainActor
 private final class AppLockAuthenticatorFake: AppLockAuthenticating {
     var result: AppLockAuthenticationResult
+    private(set) var authenticationCount = 0
 
     init(result: AppLockAuthenticationResult) {
         self.result = result
     }
 
     func authenticate(reason _: String) async -> AppLockAuthenticationResult {
-        result
+        authenticationCount += 1
+        return result
     }
 }
 
