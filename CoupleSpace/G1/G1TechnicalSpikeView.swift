@@ -10,10 +10,6 @@ struct G1TechnicalSpikeView: View {
     @StateObject private var pairingModel: SupabasePairingPoC
     @StateObject private var networkRecoveryMonitor = NetworkRecoveryMonitor()
 #if os(iOS)
-    @StateObject private var pushModel: SupabasePushPoC
-#endif
-
-#if os(iOS)
     @State private var supabaseSelectedPhoto: PhotosPickerItem?
     @State private var pairingInvitationInput = ""
     @State private var isConfirmingBeginUnpairing = false
@@ -29,11 +25,6 @@ struct G1TechnicalSpikeView: View {
         _pairingModel = StateObject(
             wrappedValue: SupabasePairingPoC(client: supabaseClient)
         )
-#if os(iOS)
-        _pushModel = StateObject(
-            wrappedValue: SupabasePushPoC(client: supabaseClient)
-        )
-#endif
     }
 
     var body: some View {
@@ -60,24 +51,6 @@ struct G1TechnicalSpikeView: View {
                 }
 
                 if authModel.isSignedIn {
-                    Section("Supabase 私人推播邊界") {
-                        Text(pushModel.status)
-                        LabeledContent("Token 指紋", value: pushModel.tokenFingerprint)
-                        Text("只顯示 token 雜湊前八碼；伺服器自行推導另一位 active 成員，通知不含私人內容。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Text("W13 僅接受已建立的主對話或約定討論作為推播來源；不再提供任意測試事件入口。")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        Button("1. 允許通知並登記此裝置") {
-                            Task { await pushModel.requestAuthorizationAndRegister() }
-                        }
-                        .disabled(pushModel.isWorking)
-
-                    }
-
                     Section("Supabase 雙身分 RLS") {
                         Text(pairingModel.status)
                         LabeledContent("關係代碼", value: pairingModel.relationshipToken)
@@ -297,7 +270,6 @@ struct G1TechnicalSpikeView: View {
                 } else {
                     Task {
                         await pairingModel.clearSession()
-                        pushModel.clearSession()
                     }
                 }
             }
@@ -315,22 +287,6 @@ struct G1TechnicalSpikeView: View {
                     return
                 }
                 Task { await pairingModel.recoverPendingOutboxesOnForeground() }
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(
-                    for: .coupleSpaceDidRegisterForRemoteNotifications
-                )
-            ) { notification in
-                guard let data = notification.object as? Data else { return }
-                Task { await pushModel.register(deviceToken: data) }
-            }
-            .onReceive(
-                NotificationCenter.default.publisher(
-                    for: .coupleSpaceDidFailToRegisterForRemoteNotifications
-                )
-            ) { notification in
-                guard let error = notification.object as? Error else { return }
-                pushModel.reportRegistrationFailure(error)
             }
             .onChange(of: supabaseSelectedPhoto) { _, item in
                 guard let item else { return }

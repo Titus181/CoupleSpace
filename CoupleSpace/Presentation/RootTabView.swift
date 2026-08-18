@@ -8,7 +8,6 @@ struct RootTabView: View {
     @State private var conversationFocusMessageID: UUID?
     @State private var appointmentDiscussionFocus: AppointmentDiscussionFocus?
     @State private var sourceNavigationRequestID: UUID?
-    @State private var reminderAppointmentID: UUID?
     @StateObject private var networkRecoveryMonitor = NetworkRecoveryMonitor()
     @StateObject private var momentModel: MomentModel
     @StateObject private var togetherNowModel: TogetherNowModel
@@ -25,6 +24,7 @@ struct RootTabView: View {
     let relationshipToken: String?
     let technicalValidationClient: SupabaseClient?
     let onSignOut: () -> Void
+    private let shouldActivateRemotePush: Bool
 
     init(
         accountUserID: UUID? = nil,
@@ -40,6 +40,9 @@ struct RootTabView: View {
         self.relationshipToken = relationshipToken
         self.technicalValidationClient = technicalValidationClient
         self.onSignOut = onSignOut
+        shouldActivateRemotePush = accountUserID != nil
+            && relationshipID != nil
+            && technicalValidationClient != nil
         if let accountUserID, let relationshipID, let technicalValidationClient {
             _momentModel = StateObject(
                 wrappedValue: MomentModel(
@@ -660,27 +663,12 @@ struct RootTabView: View {
             }
         }
         .tint(.accentColor)
-        .sheet(isPresented: Binding(
-            get: { reminderAppointmentID != nil },
-            set: { if !$0 { reminderAppointmentID = nil } }
-        )) {
-            if let reminderAppointmentID {
-                NavigationStack {
-                    SharedAppointmentDetailView(
-                        appointmentID: reminderAppointmentID,
-                        model: sharedAppointmentModel,
-                        onMomentSaved: { await momentModel.refresh() }
-                    )
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) {
-                            Button("關閉") { self.reminderAppointmentID = nil }
-                        }
-                    }
-                }
-            }
-        }
         .task {
             networkRecoveryMonitor.start()
+            if shouldActivateRemotePush,
+               !ProcessInfo.processInfo.arguments.contains("--ui-testing") {
+                await PushNotificationPlatformAdapter.shared.requestAuthorizationAndRegister()
+            }
             async let momentStart: Void = momentModel.start()
             async let togetherNowStart: Void = togetherNowModel.start()
             async let sharedAppointmentStart: Void = sharedAppointmentModel.start()
@@ -691,19 +679,13 @@ struct RootTabView: View {
                 sharedAppointmentStart,
                 conversationStart
             )
-            openPendingAppointmentReminder()
         }
         .onReceive(
             NotificationCenter.default.publisher(
-                for: SharedAppointmentNotificationRoute.didRequestOpen
+                for: .coupleSpaceDidRequestSecureRefresh
             )
-        ) { notification in
-            guard let appointmentID = notification.object as? UUID else { return }
-            Task {
-                await sharedAppointmentModel.refresh()
-                _ = SharedAppointmentNotificationRoute.consumePendingAppointmentID()
-                openAppointmentReminder(id: appointmentID)
-            }
+        ) { _ in
+            Task { await refreshAfterSecureNotificationInteraction() }
         }
         .onChange(of: selection) { _, selection in
             Task {
@@ -777,16 +759,17 @@ struct RootTabView: View {
         }
     }
 
-    private func openPendingAppointmentReminder() {
-        guard let appointmentID = SharedAppointmentNotificationRoute
-            .consumePendingAppointmentID()
-        else { return }
-        openAppointmentReminder(id: appointmentID)
-    }
-
-    private func openAppointmentReminder(id: UUID) {
-        selection = .today
-        reminderAppointmentID = id
+    private func refreshAfterSecureNotificationInteraction() async {
+        async let momentRefresh: Void = momentModel.refresh()
+        async let togetherNowRefresh: Void = togetherNowModel.refresh()
+        async let appointmentRefresh: Void = sharedAppointmentModel.refresh()
+        async let conversationRefresh: Void = conversationModel.refresh()
+        _ = await (
+            momentRefresh,
+            togetherNowRefresh,
+            appointmentRefresh,
+            conversationRefresh
+        )
     }
 
     private static func uiTestPhotoData(size: CGSize) -> Data {

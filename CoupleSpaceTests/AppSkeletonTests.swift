@@ -250,15 +250,12 @@ struct AppSkeletonTests {
             fireDate: now.addingTimeInterval(3_600),
             title: "共同約定提醒",
             body: "你有一筆即將開始的共同約定。",
-            userInfo: [
-                "event_kind": "shared_appointment_reminder",
-                "event_id": futureID.uuidString.lowercased(),
-            ]
+            userInfo: [:]
         )])
         #expect(requests[0].title.contains("私人晚餐標題") == false)
         #expect(requests[0].body.contains("私人地點") == false)
         #expect(requests[0].body.contains("私人註記") == false)
-        #expect(requests[0].userInfo.keys.sorted() == ["event_id", "event_kind"])
+        #expect(requests[0].userInfo.isEmpty)
     }
 
     @MainActor
@@ -305,24 +302,6 @@ struct AppSkeletonTests {
 
         #expect(scheduler.authorizationRequestCount == 1)
         #expect(model.reminderStatusMessage?.contains("不會在指定時間提醒") == true)
-    }
-
-    @MainActor
-    @Test func appointmentReminderRouteAcceptsOnlyOpaqueAppointmentEvents() {
-        _ = SharedAppointmentNotificationRoute.consumePendingAppointmentID()
-        SharedAppointmentNotificationRoute.receive(userInfo: [
-            "event_kind": "message_created",
-            "event_id": UUID().uuidString,
-        ])
-        #expect(SharedAppointmentNotificationRoute.consumePendingAppointmentID() == nil)
-
-        let appointmentID = UUID()
-        SharedAppointmentNotificationRoute.receive(userInfo: [
-            "event_kind": "shared_appointment_reminder",
-            "event_id": appointmentID.uuidString.lowercased(),
-        ])
-        #expect(SharedAppointmentNotificationRoute.consumePendingAppointmentID() == appointmentID)
-        #expect(SharedAppointmentNotificationRoute.consumePendingAppointmentID() == nil)
     }
 
     @MainActor

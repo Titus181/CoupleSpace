@@ -1323,12 +1323,10 @@ struct CoupleSpaceTests {
     }
 
 #if os(iOS)
-    @Test func apnsTokenPresentationUsesHexAndOnlyExposesFingerprint() {
+    @Test func apnsTokenValueUsesHexWithoutPresentationMetadata() {
         let token = APNsDeviceTokenValue(Data([0x00, 0xab, 0xff, 0x10]))
 
         #expect(token.hex == "00abff10")
-        #expect(token.fingerprint.count == 8)
-        #expect(token.fingerprint != token.hex)
     }
 #endif
 

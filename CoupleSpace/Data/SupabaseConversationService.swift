@@ -164,6 +164,25 @@ private struct SendAppointmentMessageParameters: Encodable {
     }
 }
 
+private enum PushEventKind: String {
+    case chatMessageCreated = "chat_message_created"
+    case appointmentDiscussionMessageCreated = "appointment_discussion_message_created"
+}
+
+private struct EnqueuePushEventParameters: Encodable {
+    let targetEventKind: String
+    let targetSourceItemID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case targetEventKind = "target_event_kind"
+        case targetSourceItemID = "target_source_item_id"
+    }
+}
+
+private struct SharedItemIdentifierRow: Decodable {
+    let id: UUID
+}
+
 private struct FinalizeChatPhotoParameters: Encodable {
     let targetRelationshipID: UUID
     let targetClientID: UUID
@@ -427,6 +446,7 @@ final class SupabaseConversationService: ConversationRemoteServing {
                     )
                 ).execute().value
             }
+            try await enqueuePushEvent(for: message.id)
             return .accepted(acceptedAt)
         case .photo:
             return try await deliverPendingPhoto(messageID: message.id)
@@ -435,6 +455,35 @@ final class SupabaseConversationService: ConversationRemoteServing {
 
     func fetchSnapshot() async throws -> ConversationSnapshot {
         try await fetchPage(before: nil, limit: 50).snapshot
+    }
+
+    private func enqueuePushEvent(for messageID: UUID) async throws {
+        var query = client
+            .from("shared_items")
+            .select("id")
+            .eq("relationship_id", value: relationshipID)
+            .eq("client_id", value: messageID)
+            .eq("item_kind", value: "message")
+        let eventKind: PushEventKind
+        switch scope {
+        case .main:
+            query = query.is("appointment_client_id", value: nil)
+            eventKind = .chatMessageCreated
+        case let .appointment(appointmentID):
+            query = query.eq("appointment_client_id", value: appointmentID)
+            eventKind = .appointmentDiscussionMessageCreated
+        }
+        let rows: [SharedItemIdentifierRow] = try await query.limit(1).execute().value
+        guard let sourceItemID = rows.first?.id else {
+            throw ConversationServiceError.invalidServerMessage
+        }
+        let _: UUID = try await client.rpc(
+            "enqueue_push_event",
+            params: EnqueuePushEventParameters(
+                targetEventKind: eventKind.rawValue,
+                targetSourceItemID: sourceItemID
+            )
+        ).execute().value
     }
 
     func fetchPage(before cursor: ConversationPageCursor?, limit: Int) async throws

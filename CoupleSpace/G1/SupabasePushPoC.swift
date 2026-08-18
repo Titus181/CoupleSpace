@@ -1,5 +1,3 @@
-import Combine
-import CryptoKit
 import Foundation
 import Supabase
 
@@ -7,25 +5,11 @@ import Supabase
 import UIKit
 import UserNotifications
 
-extension Notification.Name {
-    static let coupleSpaceDidRegisterForRemoteNotifications = Notification.Name(
-        "CoupleSpace.didRegisterForRemoteNotifications"
-    )
-    static let coupleSpaceDidFailToRegisterForRemoteNotifications = Notification.Name(
-        "CoupleSpace.didFailToRegisterForRemoteNotifications"
-    )
-}
-
-struct APNsDeviceTokenValue: Equatable {
+struct APNsDeviceTokenValue: Equatable, Sendable {
     let hex: String
-    let fingerprint: String
 
     init(_ data: Data) {
         hex = data.map { String(format: "%02x", $0) }.joined()
-        fingerprint = SHA256.hash(data: data)
-            .prefix(4)
-            .map { String(format: "%02x", $0) }
-            .joined()
     }
 }
 
@@ -40,73 +24,58 @@ private struct RegisterPushDeviceParameters: Encodable {
 }
 
 @MainActor
-final class SupabasePushPoC: ObservableObject {
-    @Published private(set) var status = "尚未要求推播權限"
-    @Published private(set) var tokenFingerprint = "尚無 token"
-    @Published private(set) var isWorking = false
+final class PushNotificationPlatformAdapter {
+    static let shared = PushNotificationPlatformAdapter()
 
-    private let client: SupabaseClient
+    private var client: SupabaseClient?
+    private var pendingDeviceToken: Data?
 
-    init(client: SupabaseClient) {
-        self.client = client
+    private init() {}
+
+    static func configure(client: SupabaseClient) {
+        shared.client = client
     }
 
     func requestAuthorizationAndRegister() async {
-        guard !isWorking else { return }
-        isWorking = true
-        defer { isWorking = false }
-
         do {
-            let granted = try await UNUserNotificationCenter.current()
-                .requestAuthorization(options: [.alert, .sound, .badge])
-            guard granted else {
-                status = "使用者未允許推播通知"
-                return
+            let center = UNUserNotificationCenter.current()
+            let settings = await center.notificationSettings()
+            let isAuthorized: Bool
+            if settings.authorizationStatus == .notDetermined {
+                isAuthorized = try await center.requestAuthorization(options: [.alert, .sound, .badge])
+            } else {
+                isAuthorized = settings.authorizationStatus == .authorized
             }
-
-            status = "已允許通知；等待 APNs device token"
+            guard isAuthorized else { return }
             UIApplication.shared.registerForRemoteNotifications()
-        } catch {
-            status = "推播權限要求失敗：\(error.localizedDescription)"
-        }
+        } catch {}
     }
 
-    func register(deviceToken data: Data) async {
-        guard !data.isEmpty else {
-            status = "APNs 回傳空白 device token"
-            return
-        }
+    func receive(deviceToken: Data) async {
+        guard !deviceToken.isEmpty else { return }
+        pendingDeviceToken = deviceToken
+        await registerPendingDeviceToken()
+    }
 
-        let token = APNsDeviceTokenValue(data)
-        tokenFingerprint = token.fingerprint
-        status = "正在向 Supabase 登記 token…"
+    func refreshAfterNotificationInteraction() {
+        NotificationCenter.default.post(name: .coupleSpaceDidRequestSecureRefresh, object: nil)
+    }
 
+    private func registerPendingDeviceToken() async {
+        guard let client, let pendingDeviceToken else { return }
         do {
             _ = try await client.auth.session
-            let _: UUID = try await client
-                .rpc(
-                    "register_push_device",
-                    params: RegisterPushDeviceParameters(
-                        targetToken: token.hex,
-                        targetEnvironment: pushEnvironment
-                    )
+            let _: UUID = try await client.rpc(
+                "register_push_device",
+                params: RegisterPushDeviceParameters(
+                    targetToken: APNsDeviceTokenValue(pendingDeviceToken).hex,
+                    targetEnvironment: pushEnvironment
                 )
-                .execute()
-                .value
-            status = "APNs token 已登記（\(pushEnvironment)）"
+            ).execute().value
+            self.pendingDeviceToken = nil
         } catch {
-            status = "APNs token 登記失敗：\(error.localizedDescription)"
+            // Keep the token in memory for the next authenticated activation.
         }
-    }
-
-    func reportRegistrationFailure(_ error: Error) {
-        status = "APNs token 取得失敗：\(error.localizedDescription)"
-    }
-
-    func clearSession() {
-        status = "尚未要求推播權限"
-        tokenFingerprint = "尚無 token"
-        isWorking = false
     }
 
     private var pushEnvironment: String {
@@ -116,5 +85,11 @@ final class SupabasePushPoC: ObservableObject {
         "production"
 #endif
     }
+}
+
+extension Notification.Name {
+    static let coupleSpaceDidRequestSecureRefresh = Notification.Name(
+        "CoupleSpace.didRequestSecureRefresh"
+    )
 }
 #endif

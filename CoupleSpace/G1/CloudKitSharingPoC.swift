@@ -447,7 +447,7 @@ final class CloudKitShareSceneDelegate: UIResponder, UIWindowSceneDelegate {
     }
 }
 
-final class CloudKitShareAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
+final class CoupleSpaceAppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
@@ -467,30 +467,20 @@ final class CloudKitShareAppDelegate: UIResponder, UIApplicationDelegate, UNUser
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse
     ) async {
-        SharedAppointmentNotificationRoute.receive(
-            userInfo: response.notification.request.content.userInfo
-        )
+        PushNotificationPlatformAdapter.shared.refreshAfterNotificationInteraction()
     }
 
     func application(
         _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
-        NotificationCenter.default.post(
-            name: .coupleSpaceDidRegisterForRemoteNotifications,
-            object: deviceToken
-        )
+        Task { await PushNotificationPlatformAdapter.shared.receive(deviceToken: deviceToken) }
     }
 
     func application(
         _ application: UIApplication,
         didFailToRegisterForRemoteNotificationsWithError error: Error
-    ) {
-        NotificationCenter.default.post(
-            name: .coupleSpaceDidFailToRegisterForRemoteNotifications,
-            object: error
-        )
-    }
+    ) {}
 
     func application(
         _ application: UIApplication,

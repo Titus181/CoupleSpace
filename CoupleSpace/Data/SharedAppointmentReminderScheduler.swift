@@ -53,33 +53,10 @@ enum SharedAppointmentReminderPolicy {
                 fireDate: reminderAt,
                 title: title,
                 body: body,
-                userInfo: [
-                    "event_kind": "shared_appointment_reminder",
-                    "event_id": appointment.id.uuidString.lowercased(),
-                ]
+                userInfo: [:]
             )
         }
         .sorted { ($0.fireDate, $0.identifier) < ($1.fireDate, $1.identifier) }
-    }
-}
-
-@MainActor
-enum SharedAppointmentNotificationRoute {
-    static let didRequestOpen = Notification.Name("CoupleSpace.openSharedAppointment")
-    private(set) static var pendingAppointmentID: UUID?
-
-    static func receive(userInfo: [AnyHashable: Any]) {
-        guard userInfo["event_kind"] as? String == "shared_appointment_reminder",
-              let value = userInfo["event_id"] as? String,
-              let appointmentID = UUID(uuidString: value)
-        else { return }
-        pendingAppointmentID = appointmentID
-        NotificationCenter.default.post(name: didRequestOpen, object: appointmentID)
-    }
-
-    static func consumePendingAppointmentID() -> UUID? {
-        defer { pendingAppointmentID = nil }
-        return pendingAppointmentID
     }
 }
 

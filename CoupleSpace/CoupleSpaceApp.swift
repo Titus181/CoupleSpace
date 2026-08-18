@@ -11,7 +11,7 @@ import Supabase
 @main
 struct CoupleSpaceApp: App {
 #if os(iOS)
-    @UIApplicationDelegateAdaptor(CloudKitShareAppDelegate.self) private var appDelegate
+    @UIApplicationDelegateAdaptor(CoupleSpaceAppDelegate.self) private var appDelegate
 #endif
     private let supabaseClient: SupabaseClient
     private let launchOptions: AppLaunchOptions
@@ -26,6 +26,9 @@ struct CoupleSpaceApp: App {
             let configuration = try AppConfiguration.load()
             let client = CoupleSpaceSupabaseClient.make(configuration: configuration.supabase)
             supabaseClient = client
+#if os(iOS)
+            PushNotificationPlatformAdapter.configure(client: client)
+#endif
             _authModel = StateObject(
                 wrappedValue: SupabaseAppleAuthenticationModel(client: client)
             )
