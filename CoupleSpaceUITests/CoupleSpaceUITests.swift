@@ -1045,6 +1045,25 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testAccountSettingsOffersTimeFormatChoices() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        app.buttons["account-settings"].tap()
+
+        let timeFormatPicker = app.pickers["time-format-picker"]
+        if !timeFormatPicker.waitForExistence(timeout: 1) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(timeFormatPicker.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["12 小時"].exists)
+        XCTAssertTrue(app.staticTexts["24 小時"].exists)
+        XCTAssertTrue(app.staticTexts["跟隨系統設置"].exists)
+    }
+
+    @MainActor
     func testPairingEntryAcceptsAnEightCharacterShortCode() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-pairing"]

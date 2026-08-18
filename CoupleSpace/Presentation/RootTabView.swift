@@ -902,6 +902,7 @@ private struct UsView: View {
 private struct AccountSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appLockModel: AppLockModel
+    @AppStorage(CoupleSpaceTimeFormat.defaultsKey) private var timeFormatRawValue = CoupleSpaceTimeFormat.followSystem.rawValue
     @State private var isConfirmingSignOut = false
     @State private var isShowingTechnicalValidation = false
     @ObservedObject var togetherNowModel: TogetherNowModel
@@ -935,6 +936,19 @@ private struct AccountSettingsView: View {
                     )
                     .accessibilityIdentifier("app-lock-toggle")
                     Text("啟用後，CoupleSpace 進入背景時會遮蔽私密內容；回到 App 時需要重新解鎖。")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                Section("時間格式") {
+                    Picker("顯示方式", selection: $timeFormatRawValue) {
+                        ForEach(CoupleSpaceTimeFormat.allCases) { format in
+                            Text(format.title).tag(format.rawValue)
+                        }
+                    }
+                    .pickerStyle(.inline)
+                    .accessibilityIdentifier("time-format-picker")
+                    Text("此設定只影響這台裝置的時間顯示，不會改變共同資料或伴侶的設定。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }

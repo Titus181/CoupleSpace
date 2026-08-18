@@ -55,6 +55,27 @@ struct AppSkeletonTests {
         #expect(AppLaunchOptions(arguments: ["--ui-testing-pairing"]).isPairingUITesting)
     }
 
+    @Test func timeFormatUsesTheSelectedHourConvention() {
+        let date = Date(timeIntervalSince1970: 0)
+
+        let twelveHour = CoupleSpaceDateFormat.string(
+            date,
+            date: .omitted,
+            time: .shortened,
+            timeFormat: .twelveHour
+        )
+        let twentyFourHour = CoupleSpaceDateFormat.string(
+            date,
+            date: .omitted,
+            time: .shortened,
+            timeFormat: .twentyFourHour
+        )
+
+        #expect(twelveHour.contains("上午") || twelveHour.contains("下午"))
+        #expect(twentyFourHour.contains(":"))
+        #expect(!twentyFourHour.contains("上午") && !twentyFourHour.contains("下午"))
+    }
+
 #if os(iOS)
     @Test func systemAndInAppLaunchBackgroundShareTheNamedAsset() {
         let launchScreen = Bundle.main.object(forInfoDictionaryKey: "UILaunchScreen") as? [String: Any]
