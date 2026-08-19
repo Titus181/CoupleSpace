@@ -54,7 +54,7 @@ Supabase production（唯一可寫遠端 SSOT）
 
 - `normal` 且伺服器已確認最新狀態時，App 才能顯示「所有內容已同步」。`read_only／recovery` 必須顯示服務狀態、目前內容截至時間、待送數量及可重試狀態，不得把本機快照或未送 Outbox 說成雲端已同步。
 - D4 輪替金鑰或重建 Auth 時，可以使全部既有 session 失效並要求 Sign in with Apple 重新驗證；還原必須維持原 Supabase Auth user identity、Apple identity mapping、relationship／membership 與內容所有權。重新驗證後應回到原關係，不重新配對。
-- 事故後的裝置 session inventory 只以新主站有效 session 重建；舊站 session 不得被視為仍有效。一般遺失裝置撤銷及 D4 全部 session 失效都只是授權控制，不是解除配對、帳號刪除或內容刪除，不得產生 deletion tombstone。
+- D4 輪替憑證或重建 Auth 時可使舊站 session 全部失效；這是災難復原控制，不是 iPhone MVP 的遠端裝置管理。依 PD-044，產品不建立 session／裝置 inventory，也不提供遺失裝置的遠端撤銷；D4 全面失效仍不是解除配對、帳號刪除或內容刪除，不得產生 deletion tombstone。
 - 雲端恢復完成後仍依 PD-033 漸進交付：先恢復身分與關係，再恢復最近內容，最後分頁取得歷史並按可見範圍載入媒體。單一頁面或 object 失敗不得使已恢復內容消失或阻塞核心入口。
 
 ## 保護目標與非目標
@@ -276,7 +276,7 @@ Custom domain 可降低長期 URL 搬移成本，但新 project 的 Auth、publi
 - tombstone sequence 連續，已刪內容、解除配對與 GC 不會復活。
 - active／archived relationship、owner-only archive 與第三人隔離符合 RLS。
 - Auth、Apple re-authentication、Realtime hint＋RLS reread、push privacy 可用。
-- 原 Auth user identity、Apple identity mapping 與 relationship／membership 對應保持一致；裝置 session inventory 由新主站重建，撤銷 session 未產生 deletion tombstone。
+- 原 Auth user identity、Apple identity mapping 與 relationship／membership 對應保持一致；舊站 session 因 D4 全面失效且重新驗證不產生 deletion tombstone，也不因此建立產品 session／裝置 inventory。
 - 兩支真實 iPhone 中至少一支清除本機狀態後可恢復完整授權與歷史，不需重新配對。
 - 舊 Outbox 恢復後只送達一次、順序正確，不把舊 relationship 內容送往目前 relationship。
 

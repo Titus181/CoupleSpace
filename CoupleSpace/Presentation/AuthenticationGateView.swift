@@ -21,7 +21,8 @@ struct AuthenticationGateView: View {
                         accountUserID: nil,
                         accountUserToken: nil,
                         accountStatusMessage: nil,
-                        onSignOut: {}
+                        onSignOut: {},
+                        refreshesPairingOnActivation: false
                     )
                 }
             } else {
@@ -33,7 +34,11 @@ struct AuthenticationGateView: View {
                 case .signedOut, .signingIn:
                     SignInView(authModel: authModel)
 
-                case .signedIn, .signingOut:
+                case .signingOut:
+                    ProgressView(authModel.state.message)
+                        .accessibilityIdentifier("authentication-signing-out")
+
+                case .signedIn:
                     PairingGateView(
                         model: pairingModel,
                         supabaseClient: supabaseClient,
@@ -41,10 +46,10 @@ struct AuthenticationGateView: View {
                         accountUserToken: authModel.state.userToken,
                         accountStatusMessage: authModel.state.message == "已登入"
                             ? nil
-                            : authModel.state.message
-                    ) {
-                        Task { await authModel.signOut() }
-                    }
+                            : authModel.state.message,
+                        onSignOut: { Task { await authModel.signOut() } },
+                        refreshesPairingOnActivation: true
+                    )
                 }
             }
         }

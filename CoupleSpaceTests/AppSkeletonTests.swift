@@ -1,4 +1,5 @@
 import Foundation
+import Supabase
 import Testing
 #if os(iOS)
 import UIKit
@@ -7,24 +8,163 @@ import UIKit
 
 struct AppSkeletonTests {
     @MainActor
-    @Test func otherSessionsSignOutOnlyReportsTheSubmittedOperationOutcome() async {
-        let model = OtherSessionsSignOutModel()
-        var operationCount = 0
+    @Test func currentSessionSignOutUsesTheLocalServiceOperation() async {
+        let userID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let service = AuthSessionSignOutServiceFake()
+        let model = SupabaseAppleAuthenticationModel(
+            client: CoupleSpaceSupabaseClient.preview,
+            sessionSignOutService: service,
+            initialState: .signedIn(userID: userID)
+        )
 
-        await model.signOutOtherSessions {
-            operationCount += 1
-        }
+        await model.signOut()
 
-        #expect(operationCount == 1)
-        #expect(model.isWorking == false)
-        #expect(model.statusMessage == OtherSessionsSignOutModel.successMessage)
+        #expect(service.currentSessionSignOutCount == 1)
+        #expect(model.state.isSignedIn == false)
+    }
 
-        await model.signOutOtherSessions {
-            throw OtherSessionsSignOutTestError.failed
-        }
+    @MainActor
+    @Test func productionLocalSignOutDrainsRefreshBeforeItsFinalLocalCleanup() async throws {
+        var events: [String] = []
+        let service = SupabaseAuthSessionSignOutService(
+            currentRefreshToken: { "prior-refresh-token" },
+            signOut: { scope in events.append("signOut:\(scope.rawValue)") },
+            refreshSession: { token in events.append("refresh:\(token)") }
+        )
 
-        #expect(model.isWorking == false)
-        #expect(model.statusMessage == OtherSessionsSignOutModel.failureMessage)
+        try await service.signOutCurrentSession()
+
+        #expect(events == [
+            "signOut:local",
+            "refresh:prior-refresh-token",
+            "signOut:local",
+        ])
+    }
+
+    @MainActor
+    @Test func productionLocalSignOutStillDrainsAfterTheInitialLogoutRequestFails() async {
+        var events: [String] = []
+        var signOutCount = 0
+        let service = SupabaseAuthSessionSignOutService(
+            currentRefreshToken: { "prior-refresh-token" },
+            signOut: { scope in
+                signOutCount += 1
+                events.append("signOut:\(scope.rawValue)")
+                if signOutCount == 1 { throw AuthSessionSignOutTestError.failed }
+            },
+            refreshSession: { token in events.append("refresh:\(token)") }
+        )
+
+        do {
+            try await service.signOutCurrentSession()
+            Issue.record("Expected the initial logout request error to be reported")
+        } catch {}
+
+        #expect(events == [
+            "signOut:local",
+            "refresh:prior-refresh-token",
+            "signOut:local",
+        ])
+    }
+
+    @MainActor
+    @Test func productionLocalSignOutStillFinishesCleanupWhenRefreshIsRejected() async throws {
+        var events: [String] = []
+        let service = SupabaseAuthSessionSignOutService(
+            currentRefreshToken: { "prior-refresh-token" },
+            signOut: { scope in events.append("signOut:\(scope.rawValue)") },
+            refreshSession: { token in
+                events.append("refresh:\(token)")
+                throw AuthSessionSignOutTestError.failed
+            }
+        )
+
+        try await service.signOutCurrentSession()
+
+        #expect(events == [
+            "signOut:local",
+            "refresh:prior-refresh-token",
+            "signOut:local",
+        ])
+    }
+
+    @MainActor
+    @Test func localSignOutFailureDoesNotRestoreTheSDKRemovedSession() async {
+        let userID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let service = AuthSessionSignOutServiceFake(
+            currentSessionSignOutError: AuthSessionSignOutTestError.failed
+        )
+        let model = SupabaseAppleAuthenticationModel(
+            client: CoupleSpaceSupabaseClient.preview,
+            sessionSignOutService: service,
+            initialState: .signedIn(userID: userID),
+            currentSession: { nil }
+        )
+
+        await model.signOut()
+
+        #expect(model.state.isSignedIn == false)
+    }
+
+    @MainActor
+    @Test func authEventsDoNotOverrideARequestedLocalSignOutBeforeItFinishes() async {
+        let userID = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let service = AuthSessionSignOutServiceFake(suspendsCurrentSessionSignOut: true)
+        let model = SupabaseAppleAuthenticationModel(
+            client: CoupleSpaceSupabaseClient.preview,
+            sessionSignOutService: service,
+            initialState: .signedIn(userID: userID),
+            currentSession: { nil }
+        )
+
+        let signOut = Task { await model.signOut() }
+        while service.currentSessionSignOutCount == 0 { await Task.yield() }
+
+        model.reconcileObservedSession(nil)
+        #expect(model.state.phase == .signingOut)
+        #expect(model.state.userID == userID)
+
+        let refreshedSession = Session(
+            accessToken: "test-access-token",
+            tokenType: "bearer",
+            expiresIn: 3_600,
+            expiresAt: Date().addingTimeInterval(3_600).timeIntervalSince1970,
+            refreshToken: "test-refresh-token",
+            user: User(
+                id: userID,
+                appMetadata: [:],
+                userMetadata: [:],
+                aud: "authenticated",
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+        )
+        model.reconcileObservedSession(refreshedSession)
+        #expect(model.state.phase == .signingOut)
+        #expect(model.state.userID == userID)
+
+        service.resumeCurrentSessionSignOut()
+        await signOut.value
+        #expect(model.state.isSignedIn == false)
+
+        model.reconcileObservedSession(refreshedSession)
+        #expect(model.state.phase == .signedOut)
+        #expect(model.state.userID == nil)
+    }
+
+    @MainActor
+    @Test func aRemoteSignedOutEventMovesAnAuthenticatedDeviceToSignIn() {
+        let model = SupabaseAppleAuthenticationModel(
+            client: CoupleSpaceSupabaseClient.preview,
+            sessionSignOutService: AuthSessionSignOutServiceFake(),
+            initialState: .signedIn(userID: UUID()),
+            currentSession: { nil }
+        )
+
+        model.reconcileObservedSession(nil)
+
+        #expect(model.state.phase == .signedOut)
+        #expect(model.state.userID == nil)
     }
 
     @MainActor
@@ -720,6 +860,116 @@ struct AppSkeletonTests {
         #expect(restored.entries.map(\.clientID) == [firstID, secondID])
     }
 
+    @MainActor
+    @Test func sharedAppointmentReadUsesTheRenderedServerBoundary() async {
+        let appointmentID = UUID()
+        let renderedBoundaryID = UUID()
+        let newerBoundaryID = UUID()
+        let now = Date(timeIntervalSince1970: 2_000)
+        let service = SharedAppointmentRemoteServiceFake()
+        service.appointments = [SharedAppointment(
+            id: appointmentID,
+            creatorUserID: UUID(),
+            title: "精確清讀邊界",
+            startsAt: now.addingTimeInterval(3_600),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            status: .scheduled,
+            sourceMessageID: nil,
+            interactionBoundarySourceIdentity: renderedBoundaryID,
+            createdAt: now,
+            updatedAt: now
+        )]
+        let model = SharedAppointmentModel(service: service, now: { now })
+        await model.start()
+        let renderedBoundary = model.appointment(id: appointmentID)?.interactionBoundarySourceIdentity
+        service.appointments = [SharedAppointment(
+            id: appointmentID,
+            creatorUserID: UUID(),
+            title: "稍後才抵達的更新",
+            startsAt: now.addingTimeInterval(7_200),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            status: .scheduled,
+            sourceMessageID: nil,
+            interactionBoundarySourceIdentity: newerBoundaryID,
+            createdAt: now,
+            updatedAt: now.addingTimeInterval(1)
+        )]
+        await model.refresh()
+        #expect(model.appointment(id: appointmentID)?.interactionBoundarySourceIdentity == newerBoundaryID)
+        let generationBeforeRead = model.refreshGeneration
+
+        await model.markInteractionRead(
+            for: appointmentID,
+            visibleSourceIdentity: renderedBoundary
+        )
+
+        #expect(service.markedInteractionAppointmentIDs == [appointmentID])
+        #expect(service.markedInteractionSourceIdentities == [renderedBoundaryID])
+        #expect(model.refreshGeneration > generationBeforeRead)
+        await model.stop()
+    }
+
+    @MainActor
+    @Test func backgroundAppointmentFetchCannotRestoreAClearedSnapshot() async throws {
+        let suiteName = "BackgroundAppointmentFetchTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let userID = UUID()
+        let relationshipID = UUID()
+        let snapshotStore = SharedAppointmentSnapshotStore(defaults: defaults)
+        let staleAppointment = SharedAppointment(
+            id: UUID(),
+            creatorUserID: userID,
+            title: "登出前的約定",
+            startsAt: Date(timeIntervalSince1970: 3_600),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            status: .scheduled,
+            sourceMessageID: nil,
+            interactionBoundarySourceIdentity: UUID(),
+            createdAt: Date(timeIntervalSince1970: 1_000),
+            updatedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        try snapshotStore.save(
+            [staleAppointment],
+            userID: userID,
+            relationshipID: relationshipID
+        )
+        var fetchContinuation: CheckedContinuation<Void, Never>?
+        let service = SupabaseSharedAppointmentService(
+            client: CoupleSpaceSupabaseClient.preview,
+            currentUserID: userID,
+            relationshipID: relationshipID,
+            outboxStore: SharedAppointmentOutboxStore(defaults: defaults),
+            operationOutboxStore: SharedAppointmentOperationOutboxStore(defaults: defaults),
+            snapshotStore: snapshotStore,
+            appointmentSessionUserID: { userID },
+            fetchAppointmentsOverride: {
+                await withCheckedContinuation { continuation in
+                    fetchContinuation = continuation
+                }
+                return [staleAppointment]
+            }
+        )
+        let fetch = Task {
+            try await service.fetchAppointmentsWithoutUpdatingSnapshot()
+        }
+        while fetchContinuation == nil {
+            await Task.yield()
+        }
+
+        snapshotStore.clearAll(userID: userID)
+        fetchContinuation?.resume()
+
+        #expect(try await fetch.value == [staleAppointment])
+        #expect(try snapshotStore.load(userID: userID, relationshipID: relationshipID) == nil)
+    }
+
     @Test func sharedAppointmentSnapshotPersistsSyncedItemsWithinAccountRelationshipScope() throws {
         let suiteName = "SharedAppointmentSnapshotTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suiteName))
@@ -727,6 +977,7 @@ struct AppSkeletonTests {
         let store = SharedAppointmentSnapshotStore(defaults: defaults)
         let userID = UUID()
         let relationshipID = UUID()
+        let interactionBoundaryID = UUID()
         let now = Date(timeIntervalSince1970: 2_000)
         let appointments = (0...SharedAppointmentLocalSnapshotPolicy.maximumAppointmentCount).map { index in
             SharedAppointment(
@@ -739,6 +990,9 @@ struct AppSkeletonTests {
                 reminderAt: nil,
                 status: .scheduled,
                 sourceMessageID: nil,
+                interactionBoundarySourceIdentity: index == SharedAppointmentLocalSnapshotPolicy.maximumAppointmentCount
+                    ? interactionBoundaryID
+                    : nil,
                 createdAt: now,
                 updatedAt: now
             )
@@ -752,6 +1006,7 @@ struct AppSkeletonTests {
         #expect(restored.count == SharedAppointmentLocalSnapshotPolicy.maximumAppointmentCount)
         #expect(restored.first?.title == "約定 1")
         let latest = try #require(restored.last)
+        #expect(latest.interactionBoundarySourceIdentity == interactionBoundaryID)
         try store.upsert(
             SharedAppointment(
                 id: latest.id,
@@ -763,6 +1018,7 @@ struct AppSkeletonTests {
                 reminderAt: latest.reminderAt,
                 status: .cancelled,
                 sourceMessageID: latest.sourceMessageID,
+                interactionBoundarySourceIdentity: latest.interactionBoundarySourceIdentity,
                 createdAt: latest.createdAt,
                 updatedAt: latest.updatedAt.addingTimeInterval(1)
             ),
@@ -772,6 +1028,10 @@ struct AppSkeletonTests {
         #expect(
             try store.load(userID: userID, relationshipID: relationshipID)?.last?.title
                 == "伺服器已接受的更新"
+        )
+        #expect(
+            try store.load(userID: userID, relationshipID: relationshipID)?
+                .last?.interactionBoundarySourceIdentity == interactionBoundaryID
         )
         #expect(try store.load(userID: UUID(), relationshipID: relationshipID) == nil)
         #expect(try store.load(userID: userID, relationshipID: UUID()) == nil)
@@ -1762,7 +2022,8 @@ struct AppSkeletonTests {
         #expect(model.unreadCount == 1)
         #expect(service.isObserving)
 
-        await model.setConversationVisible(true)
+        model.setConversationVisible(true)
+        await model.markVisibleMessagesRead()
         #expect(model.unreadCount == 0)
         #expect(service.markedReadMessageIDs == [partnerMessage.id])
 
@@ -1803,6 +2064,161 @@ struct AppSkeletonTests {
 
         await model.stop()
         #expect(!service.isObserving)
+    }
+
+    @MainActor
+    @Test func conversationModelKeepsNewUnreadAfterLeavingWhileAnOlderReadIsInFlight() async {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
+        let partnerUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C2")!
+        let olderMessage = ChatMessage(
+            id: UUID(uuidString: "C2000000-0000-0000-0000-000000000001")!,
+            senderUserID: partnerUserID,
+            body: "先前未讀",
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let service = ConversationRemoteServiceFake(
+            currentUserID: currentUserID,
+            messages: [olderMessage],
+            unreadCount: 1
+        )
+        service.markReadDelay = .milliseconds(200)
+        let model = ConversationModel(service: service)
+        await model.start()
+
+        model.setConversationVisible(true)
+        let readTask = Task { await model.markVisibleMessagesRead() }
+        while service.markedReadMessageIDs.isEmpty { await Task.yield() }
+        model.setConversationVisible(false)
+
+        let newerMessage = ChatMessage(
+            id: UUID(uuidString: "C2000000-0000-0000-0000-000000000002")!,
+            senderUserID: partnerUserID,
+            body: "離開後才收到",
+            createdAt: Date(timeIntervalSince1970: 200)
+        )
+        service.messages.append(newerMessage)
+        service.unreadCount = 1
+        await service.sendChange()
+        #expect(model.unreadCount == 1)
+
+        await readTask.value
+        #expect(model.unreadCount == 1)
+        #expect(service.markedReadMessageIDs == [olderMessage.id])
+    }
+
+    @MainActor
+    @Test func conversationModelKeepsIncomingTextAndPhotoUnreadWhileHidden() async {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
+        let partnerUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C2")!
+        let service = ConversationRemoteServiceFake(
+            currentUserID: currentUserID,
+            messages: [],
+            unreadCount: 0
+        )
+        let model = ConversationModel(service: service)
+        await model.start()
+        model.setConversationVisible(false)
+
+        let text = ChatMessage(
+            id: UUID(uuidString: "C3000000-0000-0000-0000-000000000001")!,
+            senderUserID: partnerUserID,
+            body: "Today 收到文字",
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        service.messages.append(text)
+        service.unreadCount = 1
+        await service.sendChange()
+        #expect(model.unreadCount == 1)
+
+        let photo = ChatMessage(
+            id: UUID(uuidString: "C3000000-0000-0000-0000-000000000002")!,
+            senderUserID: partnerUserID,
+            content: .photo,
+            createdAt: Date(timeIntervalSince1970: 200)
+        )
+        service.messages.append(photo)
+        service.unreadCount = 2
+        await service.sendChange()
+        #expect(model.unreadCount == 2)
+        #expect(service.markedReadMessageIDs.isEmpty)
+    }
+
+    @Test func relationshipUnreadRefreshGateAcceptsOnlyTheLatestRequest() {
+        var gate = RelationshipUnreadRefreshGate()
+        #expect(gate.begin() == nil)
+
+        gate.activate()
+        let olderRequest = gate.begin()!
+        let latestRequest = gate.begin()!
+
+        #expect(!gate.accepts(olderRequest))
+        #expect(gate.accepts(latestRequest))
+        gate.deactivate()
+        #expect(!gate.accepts(latestRequest))
+        #expect(gate.begin() == nil)
+    }
+
+    @Test func mainConversationVisibilityRequiresTheActualUnlockedForegroundSurface() {
+        #expect(MainConversationVisibilityPolicy.isVisible(
+            sceneIsActive: true,
+            isConversationSelected: true,
+            isPresented: true,
+            isLocked: false
+        ))
+        #expect(!MainConversationVisibilityPolicy.isVisible(
+            sceneIsActive: false,
+            isConversationSelected: true,
+            isPresented: true,
+            isLocked: false
+        ))
+        #expect(!MainConversationVisibilityPolicy.isVisible(
+            sceneIsActive: true,
+            isConversationSelected: false,
+            isPresented: true,
+            isLocked: false
+        ))
+        #expect(!MainConversationVisibilityPolicy.isVisible(
+            sceneIsActive: true,
+            isConversationSelected: true,
+            isPresented: false,
+            isLocked: false
+        ))
+        #expect(!MainConversationVisibilityPolicy.isVisible(
+            sceneIsActive: true,
+            isConversationSelected: true,
+            isPresented: true,
+            isLocked: true
+        ))
+        #expect(!MainConversationVisibilityPolicy.isVisible(
+            sceneIsActive: true,
+            isConversationSelected: true,
+            isPresented: true,
+            isLocked: false,
+            isAppointmentRoutePending: true
+        ))
+    }
+
+    @Test func appointmentDetailReadRequiresTheUnlockedForegroundSurface() {
+        #expect(SharedAppointmentDetailVisibilityPolicy.isVisible(
+            sceneIsActive: true,
+            isPresented: true,
+            isLocked: false
+        ))
+        #expect(!SharedAppointmentDetailVisibilityPolicy.isVisible(
+            sceneIsActive: false,
+            isPresented: true,
+            isLocked: false
+        ))
+        #expect(!SharedAppointmentDetailVisibilityPolicy.isVisible(
+            sceneIsActive: true,
+            isPresented: false,
+            isLocked: false
+        ))
+        #expect(!SharedAppointmentDetailVisibilityPolicy.isVisible(
+            sceneIsActive: true,
+            isPresented: true,
+            isLocked: true
+        ))
     }
 
     @MainActor
@@ -2855,7 +3271,7 @@ struct AppSkeletonTests {
         await restoredModel.stop()
     }
 
-    @Test func authenticationStateDistinguishesRestoreCancelFailureAndSignOut() {
+    @Test func authenticationStateDistinguishesRestoreCancelAndSignOut() {
         if case .checking = AuthenticationState.checking.phase {} else {
             Issue.record("The initial authentication state should restore the session first.")
         }
@@ -2881,13 +3297,6 @@ struct AppSkeletonTests {
             Issue.record("Sign-out should have an explicit in-progress state.")
         }
         #expect(signingOut.isSignedIn)
-
-        let restored = signedIn.restoringAfterSignOutFailure()
-        if case .signedIn = restored.phase {} else {
-            Issue.record("A failed sign-out must preserve the valid signed-in session.")
-        }
-        #expect(restored.isSignedIn)
-        #expect(restored.message == "登出失敗，請稍後再試。")
     }
 
     @Test func appleSignInStartsOnlyWhenNetworkIsAvailableAndNoRequestIsPending() {
@@ -3163,8 +3572,516 @@ struct AppSkeletonTests {
     }
 }
 
-private enum OtherSessionsSignOutTestError: Error {
+@MainActor
+private func waitForLifecycleCondition(
+    attempts: Int = 10_000,
+    _ condition: @escaping @MainActor () -> Bool
+) async -> Bool {
+    for _ in 0..<attempts {
+        if condition() { return true }
+        await Task.yield()
+    }
+    return condition()
+}
+
+@Suite struct ModelLifecycleTests {
+    @MainActor
+    @Test func momentModelStopRejectsAnOlderDelayedRefresh() async {
+        let baseline = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("基線"),
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let staleIncoming = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("stop 後不得寫入"),
+            createdAt: Date(timeIntervalSince1970: 200)
+        )
+        let service = MomentRemoteServiceFake(moments: [baseline])
+        let model = MomentModel(service: service)
+        await model.start()
+
+        service.moments = [staleIncoming]
+        service.suspendFetchMoments = true
+        let refresh = Task { await model.refresh() }
+        guard await waitForLifecycleCondition({
+            service.fetchMomentsContinuation != nil
+        }) else {
+            Issue.record("Moment refresh did not reach the deterministic suspension point.")
+            refresh.cancel()
+            return
+        }
+        let resume = Task { @MainActor in
+            for _ in 0..<20 { await Task.yield() }
+            service.resumeFetchMoments()
+        }
+        await model.stop()
+        service.cachedMomentsValue = nil
+        await resume.value
+        await refresh.value
+
+        #expect(model.moments == [baseline])
+        #expect(service.cachedMomentsValue == nil)
+        #expect(!service.isObserving)
+    }
+
+    @MainActor
+    @Test func togetherNowModelStopRejectsAnOlderDelayedRefresh() async {
+        let baseline = TogetherNowSnapshot.preview
+        let staleIncoming = TogetherNowSnapshot(
+            currentUserID: baseline.currentUserID,
+            partnerUserID: baseline.partnerUserID,
+            currentDisplayName: "stop 後不得寫入",
+            partnerDisplayName: baseline.partnerDisplayName,
+            privatePartnerName: baseline.privatePartnerName,
+            currentStatus: baseline.currentStatus,
+            partnerStatus: baseline.partnerStatus
+        )
+        let service = TogetherNowRemoteServiceFake(snapshot: baseline)
+        let model = TogetherNowModel(service: service)
+        await model.start()
+
+        service.snapshot = staleIncoming
+        service.suspendFetchSnapshot = true
+        let refresh = Task { await model.refresh() }
+        guard await waitForLifecycleCondition({
+            service.fetchSnapshotContinuation != nil
+        }) else {
+            Issue.record("Together refresh did not reach the deterministic suspension point.")
+            refresh.cancel()
+            return
+        }
+        let resume = Task { @MainActor in
+            for _ in 0..<20 { await Task.yield() }
+            service.resumeFetchSnapshot()
+        }
+        await model.stop()
+        service.cachedSnapshotValue = nil
+        await resume.value
+        await refresh.value
+
+        #expect(model.snapshot == baseline)
+        #expect(service.cachedSnapshotValue == nil)
+        #expect(!service.isObserving)
+    }
+
+    @MainActor
+    @Test func conversationModelStopRejectsAnOlderDelayedRefreshAndCacheWrite() async {
+        let currentUserID = UUID()
+        let partnerUserID = UUID()
+        let baseline = ChatMessage(
+            id: UUID(),
+            senderUserID: partnerUserID,
+            body: "基線",
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let staleIncoming = ChatMessage(
+            id: UUID(),
+            senderUserID: partnerUserID,
+            body: "stop 後不得寫入",
+            createdAt: Date(timeIntervalSince1970: 200)
+        )
+        let service = ConversationRemoteServiceFake(
+            currentUserID: currentUserID,
+            messages: [baseline],
+            unreadCount: 1
+        )
+        let model = ConversationModel(service: service)
+        await model.start()
+        let persistedSnapshotCount = service.persistedSnapshots.count
+
+        service.messages = [staleIncoming]
+        service.suspendFetchSnapshot = true
+        let refresh = Task { await model.refresh() }
+        guard await waitForLifecycleCondition({
+            service.fetchSnapshotContinuation != nil
+        }) else {
+            Issue.record("Conversation refresh did not reach the deterministic suspension point.")
+            refresh.cancel()
+            return
+        }
+        let stop = Task { await model.stop() }
+        await Task.yield()
+        service.resumeFetchSnapshot()
+        await refresh.value
+        await stop.value
+
+        #expect(model.messages == [baseline])
+        #expect(service.persistedSnapshots.count == persistedSnapshotCount)
+        #expect(!service.isObserving)
+    }
+
+    @MainActor
+    @Test func sharedAppointmentModelStopInvalidatesADelayedStartBeforeItCanReconcileOrObserve() async {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let appointment = SharedAppointment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            title: "不應在 stop 後復活",
+            startsAt: now.addingTimeInterval(7_200),
+            location: nil,
+            note: nil,
+            reminderAt: now.addingTimeInterval(3_600),
+            status: .scheduled,
+            sourceMessageID: nil,
+            createdAt: now,
+            updatedAt: now
+        )
+        let service = SharedAppointmentRemoteServiceFake()
+        service.appointments = [appointment]
+        service.suspendFetchAppointments = true
+        let scheduler = SharedAppointmentReminderSchedulerFake()
+        let model = SharedAppointmentModel(
+            service: service,
+            now: { now },
+            reminderScheduler: scheduler
+        )
+
+        let start = Task { await model.start() }
+        guard await waitForLifecycleCondition({
+            service.fetchAppointmentsContinuation != nil
+        }) else {
+            Issue.record("Appointment start did not reach the deterministic suspension point.")
+            start.cancel()
+            return
+        }
+        let stop = Task { await model.stop() }
+        await Task.yield()
+        await scheduler.removeAll()
+        service.resumeFetchAppointments()
+        await start.value
+        await stop.value
+
+        #expect(model.appointments.isEmpty)
+        #expect(scheduler.reconciledAppointments.isEmpty)
+        #expect(scheduler.removeAllCount == 1)
+        #expect(!service.isObserving)
+    }
+
+    @MainActor
+    @Test func sharedAppointmentModelStopSerializesAnInFlightObserverAndRejectsItsStaleCallback() async {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let baseline = SharedAppointment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            title: "基線",
+            startsAt: now.addingTimeInterval(7_200),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            status: .scheduled,
+            sourceMessageID: nil,
+            createdAt: now,
+            updatedAt: now
+        )
+        let staleIncoming = SharedAppointment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            title: "舊 observer 不得復活",
+            startsAt: now.addingTimeInterval(10_800),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            status: .scheduled,
+            sourceMessageID: nil,
+            createdAt: now,
+            updatedAt: now
+        )
+        let service = SharedAppointmentRemoteServiceFake()
+        service.appointments = [baseline]
+        service.suspendStartObserving = true
+        let scheduler = SharedAppointmentReminderSchedulerFake()
+        let model = SharedAppointmentModel(
+            service: service,
+            now: { now },
+            reminderScheduler: scheduler
+        )
+
+        let start = Task { await model.start() }
+        guard await waitForLifecycleCondition({
+            service.startObservingContinuation != nil
+        }) else {
+            Issue.record("Appointment observer did not reach the deterministic suspension point.")
+            start.cancel()
+            return
+        }
+        let stop = Task { await model.stop() }
+        await Task.yield()
+        service.resumeStartObserving()
+        await start.value
+        await stop.value
+        scheduler.reconciledAppointments.removeAll()
+
+        service.appointments = [staleIncoming]
+        await service.sendStaleChange()
+
+        #expect(model.appointments == [baseline])
+        #expect(scheduler.reconciledAppointments.isEmpty)
+        #expect(!service.isObserving)
+    }
+
+    @MainActor
+    @Test func sharedAppointmentModelStopInvalidatesAnOlderDelayedRefresh() async {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let baseline = SharedAppointment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            title: "基線",
+            startsAt: now.addingTimeInterval(7_200),
+            location: nil,
+            note: nil,
+            reminderAt: now.addingTimeInterval(3_600),
+            status: .scheduled,
+            sourceMessageID: nil,
+            createdAt: now,
+            updatedAt: now
+        )
+        let staleIncoming = SharedAppointment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            title: "stop 後不得寫入",
+            startsAt: now.addingTimeInterval(10_800),
+            location: nil,
+            note: nil,
+            reminderAt: now.addingTimeInterval(7_200),
+            status: .scheduled,
+            sourceMessageID: nil,
+            createdAt: now,
+            updatedAt: now
+        )
+        let service = SharedAppointmentRemoteServiceFake()
+        service.appointments = [baseline]
+        let scheduler = SharedAppointmentReminderSchedulerFake()
+        let model = SharedAppointmentModel(
+            service: service,
+            now: { now },
+            reminderScheduler: scheduler
+        )
+        await model.start()
+        scheduler.reconciledAppointments.removeAll()
+
+        service.appointments = [staleIncoming]
+        service.suspendFetchAppointments = true
+        let refresh = Task { await model.refresh() }
+        guard await waitForLifecycleCondition({
+            service.fetchAppointmentsContinuation != nil
+        }) else {
+            Issue.record("Appointment refresh did not reach the deterministic suspension point.")
+            refresh.cancel()
+            return
+        }
+        let resume = Task { @MainActor in
+            for _ in 0..<20 { await Task.yield() }
+            service.resumeFetchAppointments()
+        }
+        await model.stop()
+        service.cachedAppointments = nil
+        await scheduler.removeAll()
+        await resume.value
+        await refresh.value
+
+        #expect(model.appointments == [baseline])
+        #expect(service.cachedAppointments == nil)
+        #expect(scheduler.reconciledAppointments.isEmpty)
+        #expect(scheduler.removeAllCount == 1)
+        #expect(!service.isObserving)
+    }
+
+    @MainActor
+    @Test func sharedAppointmentModelStopPreventsAnInFlightDrainFromReaddingReminders() async {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let service = SharedAppointmentRemoteServiceFake()
+        service.suspendAppointmentDelivery = true
+        let scheduler = SharedAppointmentReminderSchedulerFake()
+        let model = SharedAppointmentModel(
+            service: service,
+            now: { now },
+            reminderScheduler: scheduler
+        )
+        await model.start()
+        scheduler.reconciledAppointments.removeAll()
+        let draft = SharedAppointmentDraft(
+            title: "仍應送達，但 stop 後不改 UI 或提醒",
+            startsAt: now.addingTimeInterval(7_200),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            sourceMessageID: nil
+        )
+
+        let create = Task { await model.create(draft) }
+        guard await waitForLifecycleCondition({
+            service.appointmentDeliveryContinuation != nil
+        }) else {
+            Issue.record("Appointment delivery did not reach the deterministic suspension point.")
+            create.cancel()
+            return
+        }
+        let appointmentsBeforeStop = model.appointments
+        let resume = Task { @MainActor in
+            for _ in 0..<20 { await Task.yield() }
+            service.resumeAppointmentDelivery()
+        }
+        await model.stop()
+        await scheduler.removeAll()
+        await resume.value
+        #expect(await create.value)
+
+        #expect(model.appointments == appointmentsBeforeStop)
+        #expect(service.pendingEntries.isEmpty)
+        #expect(scheduler.reconciledAppointments.isEmpty)
+        #expect(scheduler.removeAllCount == 1)
+        #expect(!service.isObserving)
+    }
+
+    @MainActor
+    @Test func sharedAppointmentModelStopJoinsAnInFlightReminderReconcileBeforeCleanup() async {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let appointment = SharedAppointment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            title: "提醒清理順序",
+            startsAt: now.addingTimeInterval(7_200),
+            location: nil,
+            note: nil,
+            reminderAt: now.addingTimeInterval(3_600),
+            status: .scheduled,
+            sourceMessageID: nil,
+            createdAt: now,
+            updatedAt: now
+        )
+        let service = SharedAppointmentRemoteServiceFake()
+        service.appointments = [appointment]
+        let scheduler = SharedAppointmentReminderSchedulerFake()
+        let model = SharedAppointmentModel(
+            service: service,
+            now: { now },
+            reminderScheduler: scheduler
+        )
+        await model.start()
+        scheduler.reconciledAppointments.removeAll()
+
+        scheduler.suspendReconcile = true
+        let refresh = Task { await model.refresh() }
+        guard await waitForLifecycleCondition({
+            scheduler.reconcileContinuation != nil
+        }) else {
+            Issue.record("Reminder reconcile did not reach the deterministic suspension point.")
+            refresh.cancel()
+            return
+        }
+        let resume = Task { @MainActor in
+            for _ in 0..<20 { await Task.yield() }
+            scheduler.resumeReconcile()
+        }
+        await model.stop()
+        await scheduler.removeAll()
+        await resume.value
+        await refresh.value
+
+        #expect(scheduler.reconciledAppointments.isEmpty)
+        #expect(scheduler.removeAllCount == 1)
+        #expect(!service.isObserving)
+    }
+
+    @MainActor
+    @Test func sharedAppointmentOldStopDoesNotStopDiscussionAfterLifecycleRestarts() async {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let appointment = SharedAppointment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            title: "重新顯示中的約定",
+            startsAt: now.addingTimeInterval(7_200),
+            location: nil,
+            note: nil,
+            reminderAt: nil,
+            status: .scheduled,
+            sourceMessageID: nil,
+            createdAt: now,
+            updatedAt: now
+        )
+        let service = SharedAppointmentRemoteServiceFake()
+        service.appointments = [appointment]
+        let discussionService = ConversationRemoteServiceFake(
+            currentUserID: UUID(),
+            messages: [],
+            unreadCount: 0
+        )
+        let scheduler = SharedAppointmentReminderSchedulerFake()
+        let model = SharedAppointmentModel(
+            service: service,
+            now: { now },
+            reminderScheduler: scheduler,
+            discussionModelFactory: { _ in ConversationModel(service: discussionService) }
+        )
+        await model.start()
+        let discussionModel = try? #require(model.discussionModel(for: appointment.id))
+        guard let discussionModel else { return }
+        await discussionModel.start()
+        #expect(discussionService.isObserving)
+
+        service.suspendStopObserving = true
+        let oldStop = Task { await model.stop() }
+        guard await waitForLifecycleCondition({
+            service.stopObservingContinuation != nil
+        }) else {
+            Issue.record("Appointment stop did not reach the deterministic suspension point.")
+            oldStop.cancel()
+            return
+        }
+        let restart = Task { await model.start() }
+        guard await waitForLifecycleCondition({ scheduler.activateCount == 2 }) else {
+            Issue.record("Appointment restart did not begin before the old stop resumed.")
+            restart.cancel()
+            oldStop.cancel()
+            service.resumeStopObserving()
+            return
+        }
+        await discussionModel.start()
+        service.resumeStopObserving()
+        await oldStop.value
+        await restart.value
+
+        #expect(service.isObserving)
+        #expect(discussionService.isObserving)
+    }
+}
+
+private enum AuthSessionSignOutTestError: Error {
     case failed
+}
+
+@MainActor
+private final class AuthSessionSignOutServiceFake: AuthSessionSignOutServing {
+    private(set) var currentSessionSignOutCount = 0
+    var currentSessionSignOutError: Error?
+    private var currentSessionSignOutContinuation: CheckedContinuation<Void, Never>?
+    private let suspendsCurrentSessionSignOut: Bool
+
+    init(
+        currentSessionSignOutError: Error? = nil,
+        suspendsCurrentSessionSignOut: Bool = false
+    ) {
+        self.currentSessionSignOutError = currentSessionSignOutError
+        self.suspendsCurrentSessionSignOut = suspendsCurrentSessionSignOut
+    }
+
+    func signOutCurrentSession() async throws {
+        currentSessionSignOutCount += 1
+        if suspendsCurrentSessionSignOut {
+            await withCheckedContinuation { currentSessionSignOutContinuation = $0 }
+        }
+        if let currentSessionSignOutError {
+            throw currentSessionSignOutError
+        }
+    }
+
+    func resumeCurrentSessionSignOut() {
+        currentSessionSignOutContinuation?.resume()
+        currentSessionSignOutContinuation = nil
+    }
 }
 
 #if DEBUG
@@ -3205,6 +4122,8 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
     var cachedAppointments: [SharedAppointment]?
     var appointmentEvents: [SharedAppointmentEvent] = []
     var discussionSummaries: [SharedAppointmentDiscussionSummary] = []
+    var markedInteractionAppointmentIDs: [UUID] = []
+    var markedInteractionSourceIdentities: [UUID?] = []
     var pendingEntries: [SharedAppointmentOutboxEntry] = []
     var pendingOperations: [SharedAppointmentOperationOutboxEntry] = []
     var deliveryClientIDs: [UUID] = []
@@ -3217,7 +4136,15 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
     var fetchAppointmentsFails = false
     var suspendFetchAppointments = false
     var fetchAppointmentsContinuation: CheckedContinuation<Void, Never>?
+    var suspendAppointmentDelivery = false
+    var appointmentDeliveryContinuation: CheckedContinuation<Void, Never>?
+    var suspendStartObserving = false
+    var startObservingContinuation: CheckedContinuation<Void, Never>?
+    var suspendStopObserving = false
+    var stopObservingContinuation: CheckedContinuation<Void, Never>?
+    var isObserving = false
     private var onChange: (@MainActor () async -> Void)?
+    private var staleOnChange: (@MainActor () async -> Void)?
 
     func fetchCachedAppointments() async throws -> [SharedAppointment]? { cachedAppointments }
 
@@ -3244,6 +4171,17 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
 
     func fetchRecentDiscussionSummaries() async throws -> [SharedAppointmentDiscussionSummary] {
         discussionSummaries
+    }
+
+    func markAppointmentInteractionsRead(
+        appointmentID: UUID,
+        visibleSourceIdentity: UUID?
+    ) async throws {
+        guard appointments.contains(where: { $0.id == appointmentID }) else {
+            throw CancellationError()
+        }
+        markedInteractionAppointmentIDs.append(appointmentID)
+        markedInteractionSourceIdentities.append(visibleSourceIdentity)
     }
 
     func fetchPendingAppointments() async throws -> [SharedAppointment] {
@@ -3275,6 +4213,11 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
         _ entry: SharedAppointmentOutboxEntry
     ) async throws -> SharedAppointment {
         deliveryClientIDs.append(entry.clientID)
+        if suspendAppointmentDelivery {
+            await withCheckedContinuation { continuation in
+                appointmentDeliveryContinuation = continuation
+            }
+        }
         if createFailuresRemaining > 0 {
             createFailuresRemaining -= 1
             throw CancellationError()
@@ -3297,6 +4240,12 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
         )
         appointments.append(appointment)
         return appointment
+    }
+
+    func resumeAppointmentDelivery() {
+        suspendAppointmentDelivery = false
+        appointmentDeliveryContinuation?.resume()
+        appointmentDeliveryContinuation = nil
     }
 
     func acknowledgePendingAppointment(clientID: UUID) async throws {
@@ -3458,18 +4407,52 @@ private final class SharedAppointmentRemoteServiceFake: SharedAppointmentRemoteS
     }
 
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
+        staleOnChange = onChange
+        if suspendStartObserving {
+            await withCheckedContinuation { continuation in
+                startObservingContinuation = continuation
+            }
+        }
+        isObserving = true
         self.onChange = onChange
     }
 
-    func stopObservingChanges() async { onChange = nil }
+    func resumeStartObserving() {
+        suspendStartObserving = false
+        startObservingContinuation?.resume()
+        startObservingContinuation = nil
+    }
+
+    func stopObservingChanges() async {
+        if suspendStopObserving {
+            await withCheckedContinuation { continuation in
+                stopObservingContinuation = continuation
+            }
+        }
+        isObserving = false
+        onChange = nil
+    }
+
+    func resumeStopObserving() {
+        suspendStopObserving = false
+        stopObservingContinuation?.resume()
+        stopObservingContinuation = nil
+    }
+
+    func sendStaleChange() async {
+        await staleOnChange?()
+    }
 }
 
 @MainActor
 private final class SharedAppointmentReminderSchedulerFake: SharedAppointmentReminderScheduling {
     var authorization: SharedAppointmentReminderAuthorization = .authorized
     var authorizationRequestCount = 0
+    var activateCount = 0
     var reconciledAppointments: [[SharedAppointment]] = []
     var removeAllCount = 0
+    var suspendReconcile = false
+    var reconcileContinuation: CheckedContinuation<Void, Never>?
 
     func authorizationStatus() async -> SharedAppointmentReminderAuthorization {
         authorization
@@ -3480,12 +4463,28 @@ private final class SharedAppointmentReminderSchedulerFake: SharedAppointmentRem
         return authorization
     }
 
+    func activate() async {
+        activateCount += 1
+    }
+
     func reconcile(_ appointments: [SharedAppointment]) async throws {
+        if suspendReconcile {
+            await withCheckedContinuation { continuation in
+                reconcileContinuation = continuation
+            }
+        }
         reconciledAppointments.append(appointments)
+    }
+
+    func resumeReconcile() {
+        suspendReconcile = false
+        reconcileContinuation?.resume()
+        reconcileContinuation = nil
     }
 
     func removeAll() async {
         removeAllCount += 1
+        reconciledAppointments.removeAll()
     }
 }
 
@@ -3501,6 +4500,7 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
     var savedMomentClientIDs: [UUID] = []
     var savedMomentMessageIDs: Set<UUID> = []
     var markedReadMessageIDs: [UUID] = []
+    var persistedSnapshots: [ConversationSnapshot] = []
     var sendFailuresRemaining = 0
     var fetchFailuresRemaining = 0
     var acknowledgementFailuresRemaining = 0
@@ -3509,6 +4509,9 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
     var saveMomentFailuresRemaining = 0
     var sendDelay: Duration = .zero
     var fetchDelay: Duration = .zero
+    var suspendFetchSnapshot = false
+    var fetchSnapshotContinuation: CheckedContinuation<Void, Never>?
+    var markReadDelay: Duration = .zero
     var startObservingDelay: Duration = .zero
     var reactionDelay: Duration = .zero
     var removeReactionDelay: Duration = .zero
@@ -3546,7 +4549,9 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
         )
     }
 
-    func persistCachedSnapshot(_ snapshot: ConversationSnapshot) async {}
+    func persistCachedSnapshot(_ snapshot: ConversationSnapshot) async {
+        persistedSnapshots.append(snapshot)
+    }
 
     func enqueueMessage(
         _ draft: ChatMessageDraft,
@@ -3605,8 +4610,19 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
             unreadCount: unreadCount,
             savedMomentMessageIDs: savedMomentMessageIDs
         )
+        if suspendFetchSnapshot {
+            await withCheckedContinuation { continuation in
+                fetchSnapshotContinuation = continuation
+            }
+        }
         try await Task.sleep(for: fetchDelay)
         return snapshot
+    }
+
+    func resumeFetchSnapshot() {
+        suspendFetchSnapshot = false
+        fetchSnapshotContinuation?.resume()
+        fetchSnapshotContinuation = nil
     }
 
     func deliverPendingMessage(_ message: ChatMessage) async throws -> ConversationDeliveryResult {
@@ -3698,12 +4714,18 @@ private final class ConversationRemoteServiceFake: ConversationRemoteServing {
 
     func markRead(through messageID: UUID) async throws {
         markedReadMessageIDs.append(messageID)
-        unreadCount = 0
+        try await Task.sleep(for: markReadDelay)
+        guard let target = messages.first(where: { $0.id == messageID }) else { return }
+        unreadCount = messages.filter { message in
+            guard message.senderUserID != currentUserID else { return false }
+            if message.createdAt != target.createdAt {
+                return message.createdAt > target.createdAt
+            }
+            return message.id.uuidString > target.id.uuidString
+        }.count
     }
 
     func markAllRelationshipInteractionsRead() async throws {}
-
-    func markInteractionScopeRead() async throws {}
 
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
         startObservingCallCount += 1
@@ -3869,6 +4891,8 @@ private final class TogetherNowRemoteServiceFake: TogetherNowRemoteServing {
     var snapshot: TogetherNowSnapshot
     var cachedSnapshotValue: TogetherNowSnapshot?
     var fetchDelay: Duration = .zero
+    var suspendFetchSnapshot = false
+    var fetchSnapshotContinuation: CheckedContinuation<Void, Never>?
     var fetchFailuresRemaining = 0
     var savedNames: [(String?, String?)] = []
     var statusMomentIDs: [UUID?] = []
@@ -3883,12 +4907,24 @@ private final class TogetherNowRemoteServiceFake: TogetherNowRemoteServing {
     func cachedSnapshot() -> TogetherNowSnapshot? { cachedSnapshotValue }
 
     func fetchSnapshot() async throws -> TogetherNowSnapshot {
+        if suspendFetchSnapshot {
+            await withCheckedContinuation { continuation in
+                fetchSnapshotContinuation = continuation
+            }
+        }
         try await Task.sleep(for: fetchDelay)
         if fetchFailuresRemaining > 0 {
             fetchFailuresRemaining -= 1
             throw TestServiceError.expected
         }
+        cachedSnapshotValue = snapshot
         return snapshot
+    }
+
+    func resumeFetchSnapshot() {
+        suspendFetchSnapshot = false
+        fetchSnapshotContinuation?.resume()
+        fetchSnapshotContinuation = nil
     }
 
     func updateNames(displayName: String?, privatePartnerName: String?) async throws {
@@ -3967,6 +5003,8 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
     var cachedMomentsValue: [Moment]?
     var cachedPhotoDataByMomentID: [UUID: Data] = [:]
     var fetchDelay: Duration = .zero
+    var suspendFetchMoments = false
+    var fetchMomentsContinuation: CheckedContinuation<Void, Never>?
     var fetchFailuresRemaining = 0
     var createdDrafts: [MomentDraft] = []
     var responseClientIDs: [UUID] = []
@@ -3993,12 +5031,24 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
     }
 
     func fetchMoments() async throws -> [Moment] {
+        if suspendFetchMoments {
+            await withCheckedContinuation { continuation in
+                fetchMomentsContinuation = continuation
+            }
+        }
         try await Task.sleep(for: fetchDelay)
         if fetchFailuresRemaining > 0 {
             fetchFailuresRemaining -= 1
             throw TestServiceError.expected
         }
+        cachedMomentsValue = moments
         return moments
+    }
+
+    func resumeFetchMoments() {
+        suspendFetchMoments = false
+        fetchMomentsContinuation?.resume()
+        fetchMomentsContinuation = nil
     }
 
     func createMoment(_ draft: MomentDraft, clientID: UUID) async throws -> Moment {

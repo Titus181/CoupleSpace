@@ -21,9 +21,40 @@ struct SharedAppointment: Identifiable, Equatable, Sendable {
     let reminderAt: Date?
     let status: SharedAppointmentStatus
     let sourceMessageID: UUID?
+    let interactionBoundarySourceIdentity: UUID?
     let createdAt: Date
     let updatedAt: Date
     var deliveryState: SharedAppointmentDeliveryState = .synced
+
+    init(
+        id: UUID,
+        creatorUserID: UUID,
+        title: String,
+        startsAt: Date,
+        location: String?,
+        note: String?,
+        reminderAt: Date?,
+        status: SharedAppointmentStatus,
+        sourceMessageID: UUID?,
+        interactionBoundarySourceIdentity: UUID? = nil,
+        createdAt: Date,
+        updatedAt: Date,
+        deliveryState: SharedAppointmentDeliveryState = .synced
+    ) {
+        self.id = id
+        self.creatorUserID = creatorUserID
+        self.title = title
+        self.startsAt = startsAt
+        self.location = location
+        self.note = note
+        self.reminderAt = reminderAt
+        self.status = status
+        self.sourceMessageID = sourceMessageID
+        self.interactionBoundarySourceIdentity = interactionBoundarySourceIdentity
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+        self.deliveryState = deliveryState
+    }
 }
 
 struct SharedAppointmentDiscussionSummary: Identifiable, Equatable, Sendable {

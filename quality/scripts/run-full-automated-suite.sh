@@ -96,7 +96,7 @@ run_step "Full iPhone scheme" \
     -resultBundlePath "$evidence_root/CoupleSpace.xcresult" \
     -parallel-testing-enabled NO
 
-run_step "Auth session SDK capability" \
+run_step "Auth SDK and local logout capability" \
     env COUPLESPACE_DERIVED_DATA_ROOT="$evidence_root/DerivedData" \
     "$repo_root/quality/scripts/verify-session-capability.sh"
 

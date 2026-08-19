@@ -16,12 +16,10 @@ struct APNsDeviceTokenValue: Equatable, Sendable {
 private struct RegisterPushDeviceParameters: Encodable {
     let targetToken: String
     let targetEnvironment: String
-    let targetContentPreviewEnabled: Bool
 
     enum CodingKeys: String, CodingKey {
         case targetToken = "target_token"
         case targetEnvironment = "target_environment"
-        case targetContentPreviewEnabled = "target_content_preview_enabled"
     }
 }
 
@@ -36,14 +34,77 @@ enum BackgroundAppointmentReminderRefreshPolicy {
     }
 }
 
+struct BackgroundAppointmentReminderContext: Equatable, Sendable {
+    let userID: UUID
+    let relationshipID: UUID
+    let relationshipStatus: String
+
+    var isActive: Bool {
+        relationshipStatus == "active"
+    }
+}
+
+@MainActor
+struct BackgroundAppointmentReminderReconcileOrchestrator {
+    private let initialContext: BackgroundAppointmentReminderContext
+    private let fetchAppointments: @MainActor (
+        BackgroundAppointmentReminderContext
+    ) async throws -> [SharedAppointment]
+    private let revalidatedContext: @MainActor () async throws
+        -> BackgroundAppointmentReminderContext?
+    private let reconcile: @MainActor (
+        BackgroundAppointmentReminderContext,
+        [SharedAppointment]
+    ) async throws -> Void
+    private let activateIfContextUnchanged: @MainActor () async -> Bool
+
+    init(
+        initialContext: BackgroundAppointmentReminderContext,
+        fetchAppointments: @escaping @MainActor (
+            BackgroundAppointmentReminderContext
+        ) async throws -> [SharedAppointment],
+        revalidatedContext: @escaping @MainActor () async throws
+            -> BackgroundAppointmentReminderContext?,
+        reconcile: @escaping @MainActor (
+            BackgroundAppointmentReminderContext,
+            [SharedAppointment]
+        ) async throws -> Void,
+        activateIfContextUnchanged: @escaping @MainActor () async -> Bool = { true }
+    ) {
+        self.initialContext = initialContext
+        self.fetchAppointments = fetchAppointments
+        self.revalidatedContext = revalidatedContext
+        self.reconcile = reconcile
+        self.activateIfContextUnchanged = activateIfContextUnchanged
+    }
+
+    func run() async throws -> Bool {
+        guard initialContext.isActive else { return false }
+        let appointments = try await fetchAppointments(initialContext)
+        guard let currentContext = try await revalidatedContext(),
+              currentContext.isActive,
+              currentContext.userID == initialContext.userID,
+              currentContext.relationshipID == initialContext.relationshipID
+        else { return false }
+
+        guard await activateIfContextUnchanged() else { return false }
+
+        try await reconcile(currentContext, appointments)
+        return true
+    }
+}
+
+private struct BackgroundAppointmentRelationshipRow: Decodable {
+    let id: UUID
+    let status: String
+}
+
 @MainActor
 final class PushNotificationPlatformAdapter {
     static let shared = PushNotificationPlatformAdapter()
 
     private var client: SupabaseClient?
     private var pendingDeviceToken: Data?
-    private var registeredDeviceToken: Data?
-    private let contentPreviewDefaultsKey = "push-content-preview-enabled"
 
     private init() {}
 
@@ -69,7 +130,6 @@ final class PushNotificationPlatformAdapter {
     func receive(deviceToken: Data) async {
         guard !deviceToken.isEmpty else { return }
         pendingDeviceToken = deviceToken
-        registeredDeviceToken = deviceToken
         await registerPendingDeviceToken()
     }
 
@@ -84,28 +144,79 @@ final class PushNotificationPlatformAdapter {
               let client else { return .noData }
         do {
             let session = try await client.auth.session
-            guard let relationship = try RelationshipSnapshotStore().load(userID: session.user.id) else {
+            guard let relationship = try RelationshipSnapshotStore().load(userID: session.user.id),
+                  relationship.status == "active"
+            else {
                 return .noData
             }
-            let service = SupabaseSharedAppointmentService(
-                client: client,
-                currentUserID: session.user.id,
+            let initialContext = BackgroundAppointmentReminderContext(
+                userID: session.user.id,
+                relationshipID: relationship.relationshipID,
+                relationshipStatus: relationship.status
+            )
+            let reminderScheduler = LocalSharedAppointmentReminderScheduler(
                 relationshipID: relationship.relationshipID
             )
-            let appointments = try await service.fetchAppointments()
-            try await LocalSharedAppointmentReminderScheduler(
-                relationshipID: relationship.relationshipID
-            ).reconcile(appointments)
-            return .newData
+            let reminderLifecycleGeneration = await reminderScheduler.lifecycleGeneration()
+            let orchestrator = BackgroundAppointmentReminderReconcileOrchestrator(
+                initialContext: initialContext,
+                fetchAppointments: { context in
+                    try await SupabaseSharedAppointmentService(
+                        client: client,
+                        currentUserID: context.userID,
+                        relationshipID: context.relationshipID
+                    ).fetchAppointmentsWithoutUpdatingSnapshot()
+                },
+                revalidatedContext: {
+                    try await self.revalidatedAppointmentReminderContext(
+                        client: client,
+                        expectedContext: initialContext
+                    )
+                },
+                reconcile: { context, appointments in
+                    guard context.relationshipID == relationship.relationshipID else { return }
+                    try await reminderScheduler.reconcile(appointments)
+                },
+                activateIfContextUnchanged: {
+                    await reminderScheduler.activate(
+                        ifLifecycleGenerationMatches: reminderLifecycleGeneration
+                    )
+                }
+            )
+            let didReconcile = try await orchestrator.run()
+            return didReconcile ? .newData : .noData
         } catch {
             return .failed
         }
     }
 
-    func setContentPreviewEnabled(_ isEnabled: Bool) async {
-        UserDefaults.standard.set(isEnabled, forKey: contentPreviewDefaultsKey)
-        if pendingDeviceToken == nil { pendingDeviceToken = registeredDeviceToken }
-        await registerPendingDeviceToken()
+    private func revalidatedAppointmentReminderContext(
+        client: SupabaseClient,
+        expectedContext: BackgroundAppointmentReminderContext
+    ) async throws -> BackgroundAppointmentReminderContext? {
+        guard self.client === client else { return nil }
+        let sessionBeforeQuery = try await client.auth.session
+        guard sessionBeforeQuery.user.id == expectedContext.userID else { return nil }
+
+        let relationships: [BackgroundAppointmentRelationshipRow] = try await client
+            .from("relationships")
+            .select("id,status")
+            .eq("id", value: expectedContext.relationshipID)
+            .eq("status", value: "active")
+            .limit(1)
+            .execute()
+            .value
+
+        let sessionAfterQuery = try await client.auth.session
+        guard self.client === client,
+              sessionAfterQuery.user.id == expectedContext.userID,
+              let relationship = relationships.first
+        else { return nil }
+        return BackgroundAppointmentReminderContext(
+            userID: sessionAfterQuery.user.id,
+            relationshipID: relationship.id,
+            relationshipStatus: relationship.status
+        )
     }
 
     private func registerPendingDeviceToken() async {
@@ -116,8 +227,7 @@ final class PushNotificationPlatformAdapter {
                 "register_push_device",
                 params: RegisterPushDeviceParameters(
                     targetToken: APNsDeviceTokenValue(pendingDeviceToken).hex,
-                    targetEnvironment: pushEnvironment,
-                    targetContentPreviewEnabled: UserDefaults.standard.bool(forKey: contentPreviewDefaultsKey)
+                    targetEnvironment: pushEnvironment
                 )
             ).execute().value
             self.pendingDeviceToken = nil

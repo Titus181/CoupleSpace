@@ -2,13 +2,33 @@ import Supabase
 import SwiftUI
 import UIKit
 
+@MainActor
+enum AuthenticatedContentTeardown {
+    typealias StopAction = @MainActor () async -> Void
+
+    static func run(
+        stopActions: [StopAction],
+        completion: @MainActor () -> Void = {}
+    ) async {
+        for stop in stopActions {
+            await stop()
+        }
+        completion()
+    }
+}
+
 struct RootTabView: View {
     @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var appLockModel: AppLockModel
     @State private var selection = PrimarySection.defaultSelection
     @State private var conversationFocusMessageID: UUID?
     @State private var appointmentDiscussionFocus: AppointmentDiscussionFocus?
     @State private var sourceNavigationRequestID: UUID?
     @State private var relationshipUnreadCount: Int?
+    @State private var relationshipUnreadRefreshGate = RelationshipUnreadRefreshGate()
+    @State private var isMainConversationPresented = false
+    @State private var isRoutingToAppointmentDiscussion = false
+    @State private var isPreparingLocalSignOut = false
 #if DEBUG
     @State private var isShowingSessionCapabilityProbe = false
 #endif
@@ -475,13 +495,14 @@ struct RootTabView: View {
             } else {
                 seededAppointmentEvents = []
             }
+            let inMemorySharedAppointmentService = InMemorySharedAppointmentService(
+                appointments: seededAppointments,
+                events: seededAppointmentEvents,
+                discussionSummaries: seededDiscussionSummaries
+            )
             _sharedAppointmentModel = StateObject(
                 wrappedValue: SharedAppointmentModel(
-                    service: InMemorySharedAppointmentService(
-                        appointments: seededAppointments,
-                        events: seededAppointmentEvents,
-                        discussionSummaries: seededDiscussionSummaries
-                    ),
+                    service: inMemorySharedAppointmentService,
                     discussionModelFactory: { appointmentID in
                         let messages: [ChatMessage]
                         let photoDataByMessageID: [UUID: Data]
@@ -542,7 +563,12 @@ struct RootTabView: View {
                                 currentUserID: uiTestUserID,
                                 messages: messages,
                                 unreadCount: messages.count,
-                                photoDataByMessageID: photoDataByMessageID
+                                photoDataByMessageID: photoDataByMessageID,
+                                onMarkRead: { _ in
+                                    inMemorySharedAppointmentService.markDiscussionMessagesRead(
+                                        appointmentID: appointmentID
+                                    )
+                                }
                             )
                         )
                     }
@@ -659,7 +685,16 @@ struct RootTabView: View {
                         focusMessageID: $conversationFocusMessageID,
                         appointmentDiscussionFocus: $appointmentDiscussionFocus,
                         savedMomentSourceIDs: Set(momentModel.moments.compactMap(\.sourceMessageID)),
-                        onMomentSaved: { await momentModel.refresh() }
+                        onMomentSaved: { await momentModel.refresh() },
+                        onVisibilityChanged: { isPresented in
+                            isMainConversationPresented = isPresented
+                            if !isPresented {
+                                isRoutingToAppointmentDiscussion = false
+                            }
+                            reconcileMainConversationVisibility(
+                                presentedOverride: isPresented
+                            )
+                        }
                     )
                 }
                 .badge(displayedUnreadCount)
@@ -676,7 +711,7 @@ struct RootTabView: View {
                         technicalValidationClient: technicalValidationClient,
                         pairingModel: pairingModel,
                         onOpenSourceMessage: openSourceMessage,
-                        onSignOut: onSignOut,
+                        onSignOut: prepareForLocalSignOut,
                         onRelationshipLifecycleChanged: onRelationshipLifecycleChanged
                     )
                 }
@@ -716,6 +751,7 @@ struct RootTabView: View {
         }
         .tint(.accentColor)
         .task {
+            relationshipUnreadRefreshGate.activate()
             networkRecoveryMonitor.start()
             if shouldActivateRemotePush,
                !ProcessInfo.processInfo.arguments.contains("--ui-testing") {
@@ -741,9 +777,7 @@ struct RootTabView: View {
             Task { await refreshAfterSecureNotificationInteraction() }
         }
         .onChange(of: selection) { _, selection in
-            Task {
-                await conversationModel.setConversationVisible(selection == .conversation)
-            }
+            reconcileMainConversationVisibility(selectionOverride: selection)
         }
         .onChange(of: conversationModel.unreadCount) { _, _ in
             Task { await refreshRelationshipUnreadBadge() }
@@ -758,12 +792,11 @@ struct RootTabView: View {
             Task { await refreshRelationshipUnreadBadge() }
         }
         .onChange(of: scenePhase) { _, phase in
+            reconcileMainConversationVisibility(scenePhaseOverride: phase)
             guard phase == .active else {
-                Task { await conversationModel.setConversationVisible(false) }
                 return
             }
             Task {
-                await conversationModel.setConversationVisible(selection == .conversation)
                 async let momentRefresh: Void = momentModel.refresh()
                 async let togetherNowRefresh: Void = togetherNowModel.refresh()
                 async let sharedAppointmentRefresh: Void = sharedAppointmentModel
@@ -776,6 +809,9 @@ struct RootTabView: View {
                     conversationRecovery
                 )
             }
+        }
+        .onChange(of: appLockModel.isLocked) { _, isLocked in
+            reconcileMainConversationVisibility(isLockedOverride: isLocked)
         }
         .onChange(of: networkRecoveryMonitor.state) { previous, current in
             guard scenePhase == .active,
@@ -799,17 +835,65 @@ struct RootTabView: View {
             }
         }
         .onDisappear {
-            Task {
-                await momentModel.stop()
-                await togetherNowModel.stop()
-                await sharedAppointmentModel.stop()
-                await conversationModel.stop()
-            }
+            isMainConversationPresented = false
+            conversationModel.setConversationVisible(false)
+            relationshipUnreadRefreshGate.deactivate()
+            relationshipUnreadCount = nil
+#if os(iOS)
+            UIApplication.shared.applicationIconBadgeNumber = 0
+#endif
+            Task { await stopContentModels() }
         }
+    }
+
+    private func prepareForLocalSignOut() {
+        guard !isPreparingLocalSignOut else { return }
+        isPreparingLocalSignOut = true
+        isMainConversationPresented = false
+        conversationModel.setConversationVisible(false)
+        relationshipUnreadRefreshGate.deactivate()
+        Task {
+            await AuthenticatedContentTeardown.run(
+                stopActions: contentModelStopActions,
+                completion: onSignOut
+            )
+        }
+    }
+
+    private func stopContentModels() async {
+        await AuthenticatedContentTeardown.run(stopActions: contentModelStopActions)
+    }
+
+    private var contentModelStopActions: [AuthenticatedContentTeardown.StopAction] {
+        [
+            { await conversationModel.stop() },
+            { await sharedAppointmentModel.stop() },
+            { await momentModel.stop() },
+            { await togetherNowModel.stop() },
+        ]
+    }
+
+    private func reconcileMainConversationVisibility(
+        scenePhaseOverride: ScenePhase? = nil,
+        selectionOverride: PrimarySection? = nil,
+        presentedOverride: Bool? = nil,
+        isLockedOverride: Bool? = nil
+    ) {
+        let isVisible = MainConversationVisibilityPolicy.isVisible(
+            sceneIsActive: (scenePhaseOverride ?? scenePhase) == .active,
+            isConversationSelected: (selectionOverride ?? selection) == .conversation,
+            isPresented: presentedOverride ?? isMainConversationPresented,
+            isLocked: isLockedOverride ?? appLockModel.isLocked,
+            isAppointmentRoutePending: isRoutingToAppointmentDiscussion
+        )
+        conversationModel.setConversationVisible(isVisible)
+        guard isVisible else { return }
+        Task { await conversationModel.markVisibleMessagesRead() }
     }
 
     private func refreshRelationshipUnreadBadge() async {
         guard let technicalValidationClient, let relationshipID else { return }
+        guard let refreshGeneration = relationshipUnreadRefreshGate.begin() else { return }
         struct UnreadRow: Decodable {
             let totalUnreadCount: Int
             enum CodingKeys: String, CodingKey { case totalUnreadCount = "total_unread_count" }
@@ -824,11 +908,13 @@ struct RootTabView: View {
                 params: Parameters(targetRelationshipID: relationshipID)
             ).execute().value
             let count = rows.first?.totalUnreadCount ?? 0
+            guard relationshipUnreadRefreshGate.accepts(refreshGeneration) else { return }
             relationshipUnreadCount = count
 #if os(iOS)
             UIApplication.shared.applicationIconBadgeNumber = count
 #endif
         } catch {
+            guard relationshipUnreadRefreshGate.accepts(refreshGeneration) else { return }
             relationshipUnreadCount = nil
 #if os(iOS)
             UIApplication.shared.applicationIconBadgeNumber = displayedUnreadCount
@@ -841,6 +927,7 @@ struct RootTabView: View {
         sourceNavigationRequestID = requestID
         conversationFocusMessageID = nil
         appointmentDiscussionFocus = nil
+        isRoutingToAppointmentDiscussion = source.appointmentID != nil
         selection = .conversation
         Task { @MainActor in
             await Task.yield()
@@ -874,6 +961,47 @@ struct RootTabView: View {
             UIColor.systemBlue.setFill()
             context.fill(CGRect(origin: .zero, size: size))
         }
+    }
+}
+
+struct RelationshipUnreadRefreshGate {
+    private(set) var generation = 0
+    private(set) var isActive = false
+
+    mutating func activate() {
+        generation &+= 1
+        isActive = true
+    }
+
+    mutating func begin() -> Int? {
+        guard isActive else { return nil }
+        generation &+= 1
+        return generation
+    }
+
+    func accepts(_ candidate: Int) -> Bool {
+        isActive && candidate == generation
+    }
+
+    mutating func deactivate() {
+        isActive = false
+        generation &+= 1
+    }
+}
+
+enum MainConversationVisibilityPolicy {
+    static func isVisible(
+        sceneIsActive: Bool,
+        isConversationSelected: Bool,
+        isPresented: Bool,
+        isLocked: Bool,
+        isAppointmentRoutePending: Bool = false
+    ) -> Bool {
+        sceneIsActive
+            && isConversationSelected
+            && isPresented
+            && !isLocked
+            && !isAppointmentRoutePending
     }
 }
 
@@ -989,11 +1117,8 @@ private struct AccountSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var appLockModel: AppLockModel
     @AppStorage(CoupleSpaceTimeFormat.defaultsKey) private var timeFormatRawValue = CoupleSpaceTimeFormat.followSystem.rawValue
-    @AppStorage("push-content-preview-enabled") private var showsNotificationContent = false
     @State private var isConfirmingSignOut = false
-    @State private var isConfirmingOtherSessionsSignOut = false
     @State private var isShowingTechnicalValidation = false
-    @StateObject private var otherSessionsSignOutModel = OtherSessionsSignOutModel()
     @ObservedObject var togetherNowModel: TogetherNowModel
     let userToken: String?
     let statusMessage: String?
@@ -1016,32 +1141,6 @@ private struct AccountSettingsView: View {
                     Text("識別碼只顯示前 8 碼，可用來確認重新登入後是否仍是同一個 CoupleSpace 帳號。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                }
-
-                if technicalValidationClient != nil {
-                    Section("登入安全") {
-                        Button("登出其他所有登入", role: .destructive) {
-                            isConfirmingOtherSessionsSignOut = true
-                        }
-                        .disabled(otherSessionsSignOutModel.isWorking)
-                        .accessibilityIdentifier("other-sessions-sign-out")
-
-                        Text("保留目前裝置；其他登入需要重新使用 Apple 驗證。這不會解除配對或刪除任何內容。")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-
-                        if otherSessionsSignOutModel.isWorking {
-                            ProgressView("正在送出……")
-                                .accessibilityIdentifier("other-sessions-sign-out-progress")
-                        }
-
-                        if let statusMessage = otherSessionsSignOutModel.statusMessage {
-                            Text(statusMessage)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .accessibilityIdentifier("other-sessions-sign-out-status")
-                        }
-                    }
                 }
 
                 Section("App Lock") {
@@ -1067,16 +1166,6 @@ private struct AccountSettingsView: View {
                     .pickerStyle(.inline)
                     .accessibilityIdentifier("time-format-picker")
                     Text("此設定只影響這台裝置的時間顯示，不會改變共同資料或伴侶的設定。")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                }
-
-                Section("通知") {
-                    Toggle("顯示通知內容", isOn: $showsNotificationContent)
-                        .onChange(of: showsNotificationContent) { _, isEnabled in
-                            Task { await PushNotificationPlatformAdapter.shared.setContentPreviewEnabled(isEnabled) }
-                        }
-                    Text("開啟後，文字通知會顯示傳送者與內容；照片與共同約定仍不顯示私密細節。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -1151,22 +1240,6 @@ private struct AccountSettingsView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("完成") { dismiss() }
                 }
-            }
-            .alert(
-                "登出其他所有登入？",
-                isPresented: $isConfirmingOtherSessionsSignOut
-            ) {
-                Button("登出其他所有登入", role: .destructive) {
-                    guard let technicalValidationClient else { return }
-                    Task {
-                        await otherSessionsSignOutModel.signOutOtherSessions {
-                            try await technicalValidationClient.auth.signOut(scope: .others)
-                        }
-                    }
-                }
-                Button("取消", role: .cancel) {}
-            } message: {
-                Text("目前裝置會保持登入。其他裝置需要重新使用 Apple 登入；已簽發的存取權杖可能在到期前短暫有效。這不會解除配對、刪除共同內容或改變個人封存。")
             }
             .alert(
                 "要登出 CoupleSpace 嗎？",

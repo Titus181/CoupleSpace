@@ -100,15 +100,6 @@ struct AuthenticationState {
         )
     }
 
-    func restoringAfterSignOutFailure() -> Self {
-        AuthenticationState(
-            phase: .signedIn,
-            message: "登出失敗，請稍後再試。",
-            userID: userID,
-            userToken: userToken
-        )
-    }
-
     var isSignedIn: Bool {
         phase == .signedIn || phase == .signingOut
     }
@@ -116,23 +107,36 @@ struct AuthenticationState {
 
 @MainActor
 final class SupabaseAppleAuthenticationModel: ObservableObject {
-    @Published private(set) var state = AuthenticationState.checking
+    @Published private(set) var state: AuthenticationState
 
     var status: String { state.message }
     var userToken: String { state.userToken ?? "尚未登入" }
     var isSignedIn: Bool { state.isSignedIn }
 
     private let client: SupabaseClient
+    private let sessionSignOutService: AuthSessionSignOutServing
+    private let currentSession: () -> Session?
     private var rawNonce: String?
+    private var activeSignOutOperationID: UUID?
+    private var currentSessionSignOutOperationID: UUID?
 
-    init(client: SupabaseClient) {
+    init(
+        client: SupabaseClient,
+        sessionSignOutService: AuthSessionSignOutServing? = nil,
+        initialState: AuthenticationState = .checking,
+        currentSession: (() -> Session?)? = nil
+    ) {
         self.client = client
+        self.sessionSignOutService = sessionSignOutService
+            ?? SupabaseAuthSessionSignOutService(client: client)
+        self.currentSession = currentSession ?? { client.auth.currentSession }
+        state = initialState
     }
 
     func observeAuthState() async {
         for await (_, session) in client.auth.authStateChanges {
             guard !Task.isCancelled else { return }
-            apply(session: session)
+            reconcileObservedSession(session)
         }
     }
 
@@ -196,29 +200,60 @@ final class SupabaseAppleAuthenticationModel: ObservableObject {
     }
 
     func signOut() async {
-        let signedInState = state
+        guard activeSignOutOperationID == nil, state.isSignedIn else { return }
+        let operationID = UUID()
+        activeSignOutOperationID = operationID
+        currentSessionSignOutOperationID = operationID
+        defer {
+            if activeSignOutOperationID == operationID {
+                activeSignOutOperationID = nil
+            }
+            if currentSessionSignOutOperationID == operationID {
+                currentSessionSignOutOperationID = nil
+            }
+        }
+
         let signedInUserID = state.userID
         state = state.signingOut()
-        do {
-            try await client.auth.signOut()
-            if let signedInUserID {
-                if let relationship = try? RelationshipSnapshotStore().load(
-                    userID: signedInUserID
-                ) {
-                    await LocalSharedAppointmentReminderScheduler(
-                        relationshipID: relationship.relationshipID
-                    ).removeAll()
-                }
-                ConversationSnapshotStore().clearAll(userID: signedInUserID)
-                ConversationPhotoCacheStore().clearAll(userID: signedInUserID)
-                TodaySnapshotStore().clearAll(userID: signedInUserID)
-                SharedAppointmentSnapshotStore().clearAll(userID: signedInUserID)
-                // Keep the user-scoped relationship identity and mixed outbox so a
-                // partially uploaded chat photo can be retried or reconciled on sign-in.
-            }
+        try? await sessionSignOutService.signOutCurrentSession()
+        await clearLocalAuthenticatedState(userID: signedInUserID)
+
+        guard currentSessionSignOutOperationID == operationID else { return }
+        currentSessionSignOutOperationID = nil
+        apply(session: nil)
+    }
+
+    func reconcileObservedSession(_ session: Session?) {
+        guard currentSessionSignOutOperationID == nil else { return }
+
+        // Auth events are asynchronous and can be queued behind a completed
+        // logout. Only accept an event that still matches SDK storage so a
+        // late tokenRefreshed/signedOut event cannot resurrect or erase a
+        // newer local truth.
+        switch (session, currentSession()) {
+        case (nil, nil):
             apply(session: nil)
-        } catch {
-            state = signedInState.restoringAfterSignOutFailure()
+        case let (observedSession?, currentSession?)
+            where observedSession.accessToken == currentSession.accessToken:
+            apply(session: observedSession)
+        default:
+            break
+        }
+    }
+
+    private func clearLocalAuthenticatedState(userID: UUID?) async {
+        if let userID {
+            if let relationship = try? RelationshipSnapshotStore().load(userID: userID) {
+                await LocalSharedAppointmentReminderScheduler(
+                    relationshipID: relationship.relationshipID
+                ).removeAll()
+            }
+            ConversationSnapshotStore().clearAll(userID: userID)
+            ConversationPhotoCacheStore().clearAll(userID: userID)
+            TodaySnapshotStore().clearAll(userID: userID)
+            SharedAppointmentSnapshotStore().clearAll(userID: userID)
+            // Keep the user-scoped relationship identity and mixed outbox so a
+            // partially uploaded chat photo can be retried or reconciled on sign-in.
         }
     }
 

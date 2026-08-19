@@ -173,6 +173,7 @@ struct SharedAppointmentOperationOutboxEntry: Codable, Equatable, Sendable {
                 reminderAt: draft.reminderAt,
                 status: appointment.status,
                 sourceMessageID: appointment.sourceMessageID,
+                interactionBoundarySourceIdentity: appointment.interactionBoundarySourceIdentity,
                 createdAt: appointment.createdAt,
                 updatedAt: appointment.updatedAt,
                 deliveryState: appointment.deliveryState
@@ -188,6 +189,7 @@ struct SharedAppointmentOperationOutboxEntry: Codable, Equatable, Sendable {
                 reminderAt: appointment.reminderAt,
                 status: .cancelled,
                 sourceMessageID: appointment.sourceMessageID,
+                interactionBoundarySourceIdentity: appointment.interactionBoundarySourceIdentity,
                 createdAt: appointment.createdAt,
                 updatedAt: appointment.updatedAt,
                 deliveryState: appointment.deliveryState

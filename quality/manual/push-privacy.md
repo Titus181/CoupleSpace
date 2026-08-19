@@ -22,7 +22,16 @@
 4. 另建一筆未來提醒後，先由 A 登出，再由 B 點「開始解除配對（closing）」；B 的該 relationship 待送提醒與通知中心既有提醒須立即移除。離開該 relationship 的裝置不得保留或送達舊提醒，重新登入或重新配對也不得令它復活。
 5. 每一步前後記錄「對話」tab badge 與 App icon badge；本機提醒本身不得新增未讀、改變兩者，或改變 server-authoritative `relationship_unread_counts` 結果。以遠端約定建立／改期／取消通知另外依其既有案例驗證，不能用本機提醒代替。
 6. 拒絕通知權限後建立有提醒的約定；約定仍正常同步，畫面須明示這支手機不會在指定時間提醒，不得顯示已排入或假稱已送達。
+7. 以可控制的延遲讓 background appointment refresh／reminder reconcile 在途，分別於完成前執行目前裝置登出、切換帳號／relationship，以及進入 closing。最後完成的舊 refresh 不得重寫舊 relationship cache、重啟 observer 或重新加入已移除的提醒；local logout／closing cleanup 必須勝出。真機只核對可見結果，精確的先後競態以 `CoupleSpaceTests/CoupleSpaceTests.swift` 的 lifecycle generation、background revalidation 與 reminder conditional-activation tests 為準。
 
 ## 通過證據
 
 記錄 build、APNs environment、狀態、送達次數與去識別截圖。錯誤收件者、私密內容外洩或重複通知立即阻擋發布。
+
+## 2026-08-20 final candidate 結果
+
+- 結果：`PASS`。
+- 遠端推播：使用者在同一最終 W13 候選的兩支真實 iPhone 合併執行 LOCK／PUSH／5C／W8，明確回報流程正常。
+- 共同約定本機提醒：使用者另回報約定、討論與提醒正常；最後 lifecycle 階段亦正常，包含本清單延後到 closing 的 cleanup 範圍。
+- iPhone 機型／iOS、APNs environment、精確完成時間：`未記錄`。
+- 本結果只關閉 W13 引用的 `PUSH-002` 與提醒整合；不宣稱 production APNs、TestFlight Gate D 或全產品 release-ready。

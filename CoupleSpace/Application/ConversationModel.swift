@@ -3,6 +3,11 @@ import Foundation
 
 @MainActor
 final class ConversationModel: ObservableObject {
+    private struct LifecycleRequest {
+        let generation: Int
+        let requiresActiveModel: Bool
+    }
+
     @Published private(set) var messages: [ChatMessage] = []
     @Published private(set) var unreadCount = 0
     @Published private(set) var currentUserID: UUID?
@@ -25,9 +30,14 @@ final class ConversationModel: ObservableObject {
 
     private let service: ConversationRemoteServing
     private var hasStarted = false
+    private var lifecycleGeneration = 0
+    private var activeLifecycleWorkByGeneration: [Int: Int] = [:]
+    private var lifecycleWorkWaitersByGeneration: [Int: [CheckedContinuation<Void, Never>]] = [:]
+    private var observationTransitionTask: Task<Bool, Never>?
     private var isConversationVisible = false
-    private var refreshRequested = false
+    private var conversationVisibilityGeneration = 0
     private var scheduledDrain: Task<Void, Never>?
+    private var scheduledDrainID: UUID?
     private var pendingReactionAttempts: [UUID: ReactionAttempt] = [:]
     private var pendingMomentIDs: [UUID: UUID] = [:]
     private var terminalDeliveryMessage: String?
@@ -41,15 +51,27 @@ final class ConversationModel: ObservableObject {
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true
-        await loadCachedMessages()
-        await loadPendingMessages()
-        loadCachedPhotos()
-        await refresh()
-        let isObserving = await restartObservation()
-        let terminalRejectionMessage = await drainPendingMessages(
-            maximumAttemptsPerMessage: ConversationRecoveryRetryPolicy.maximumAttempts
+        lifecycleGeneration &+= 1
+        let request = LifecycleRequest(
+            generation: lifecycleGeneration,
+            requiresActiveModel: true
         )
-        await refresh()
+        await loadCachedMessages(for: request)
+        guard isCurrent(request) else { return }
+        await loadPendingMessages(for: request)
+        guard isCurrent(request) else { return }
+        loadCachedPhotos()
+        await refresh(for: request)
+        guard isCurrent(request) else { return }
+        let isObserving = await startObservation(for: request)
+        guard isCurrent(request) else { return }
+        let terminalRejectionMessage = await drainPendingMessages(
+            maximumAttemptsPerMessage: ConversationRecoveryRetryPolicy.maximumAttempts,
+            request: request
+        )
+        guard isCurrent(request) else { return }
+        await refresh(for: request)
+        guard isCurrent(request) else { return }
         if let terminalRejectionMessage {
             terminalDeliveryMessage = terminalRejectionMessage
             statusMessage = terminalRejectionMessage
@@ -59,15 +81,25 @@ final class ConversationModel: ObservableObject {
     }
 
     func stop() async {
+        let endingGeneration = lifecycleGeneration
+        setConversationVisible(false)
         hasStarted = false
+        lifecycleGeneration &+= 1
         scheduledDrain?.cancel()
         scheduledDrain = nil
-        await service.stopObservingChanges()
+        scheduledDrainID = nil
+        await stopObservation()
+        await waitForLifecycleWork(generation: endingGeneration)
     }
 
-    func setConversationVisible(_ isVisible: Bool) async {
+    func setConversationVisible(_ isVisible: Bool) {
+        guard isConversationVisible != isVisible else { return }
         isConversationVisible = isVisible
-        if isVisible { await markVisibleMessagesReadIfNeeded() }
+        conversationVisibilityGeneration &+= 1
+    }
+
+    func markVisibleMessagesRead() async {
+        await markVisibleMessagesReadIfNeeded()
     }
 
     func clearAllRelationshipUnreadForDebug() async {
@@ -79,47 +111,47 @@ final class ConversationModel: ObservableObject {
         }
     }
 
-    func markInteractionScopeRead() async {
-        do {
-            try await service.markInteractionScopeRead()
-            unreadRefreshGeneration &+= 1
-        } catch {
-            statusMessage = "無法更新未讀，請確認連線後再試。"
-        }
+    func refresh() async {
+        guard let request = lifecycleRequestAllowingInitialExplicitWork() else { return }
+        await refresh(for: request)
     }
 
-    func refresh() async {
-        if isLoadingMore {
-            refreshRequested = true
-            while isLoadingMore { await Task.yield() }
+    private func refresh(for request: LifecycleRequest) async {
+        while isLoadingMore {
+            guard isCurrent(request) else { return }
+            await Task.yield()
         }
-        if isLoading {
-            refreshRequested = true
-            while isLoading { await Task.yield() }
-            return
+        while isLoading {
+            guard isCurrent(request) else { return }
+            await Task.yield()
         }
-        repeat {
-            refreshRequested = false
-            isLoading = true
-            do {
-                let page = try await service.fetchPage(before: nil, limit: pageSize)
-                let snapshot = page.snapshot
-                currentUserID = snapshot.currentUserID
-                let unresolvedMessages = messages.filter { $0.deliveryState != .synced }
-                mergeRemoteMessages(snapshot.messages, unresolvedMessages: unresolvedMessages)
-                if !didLoadOlderMessages { hasMoreMessages = page.hasMore }
-                applyPendingReactionAttempts()
-                unreadCount = snapshot.unreadCount
-                savedMomentMessageIDs.formUnion(snapshot.savedMomentMessageIDs)
-                statusMessage = terminalDeliveryMessage
-                loadCachedPhotos()
-                if isConversationVisible { await markVisibleMessagesReadIfNeeded() }
-                await persistCurrentSnapshot()
-            } catch {
-                statusMessage = "無法更新對話，請稍後再試。"
-            }
+        guard isCurrent(request) else { return }
+        beginLifecycleWork(for: request)
+        isLoading = true
+        defer {
             isLoading = false
-        } while refreshRequested && hasStarted
+            endLifecycleWork(for: request)
+        }
+        do {
+            let page = try await service.fetchPage(before: nil, limit: pageSize)
+            guard isCurrent(request) else { return }
+            let snapshot = page.snapshot
+            currentUserID = snapshot.currentUserID
+            let unresolvedMessages = messages.filter { $0.deliveryState != .synced }
+            mergeRemoteMessages(snapshot.messages, unresolvedMessages: unresolvedMessages)
+            if !didLoadOlderMessages { hasMoreMessages = page.hasMore }
+            applyPendingReactionAttempts()
+            unreadCount = snapshot.unreadCount
+            savedMomentMessageIDs.formUnion(snapshot.savedMomentMessageIDs)
+            statusMessage = terminalDeliveryMessage
+            loadCachedPhotos()
+            if isConversationVisible { await markVisibleMessagesReadIfNeeded() }
+            guard isCurrent(request) else { return }
+            await persistCurrentSnapshot()
+        } catch {
+            guard isCurrent(request) else { return }
+            statusMessage = "無法更新對話，請稍後再試。"
+        }
     }
 
     @discardableResult
@@ -207,18 +239,26 @@ final class ConversationModel: ObservableObject {
         guard messages.contains(where: { $0.id == id && $0.deliveryState == .failed }) else {
             return
         }
-        await drainPendingMessages(maximumAttemptsPerMessage: 1)
+        guard let request = activeLifecycleRequest() else { return }
+        await drainPendingMessages(maximumAttemptsPerMessage: 1, request: request)
     }
 
     func recoverPendingMessages() async {
-        await loadPendingMessages()
+        guard let request = activeLifecycleRequest() else { return }
+        await loadPendingMessages(for: request)
+        guard isCurrent(request) else { return }
         loadCachedPhotos()
-        await refresh()
-        let isObserving = await restartObservation()
+        await refresh(for: request)
+        guard isCurrent(request) else { return }
+        let isObserving = await startObservation(for: request)
+        guard isCurrent(request) else { return }
         let terminalRejectionMessage = await drainPendingMessages(
-            maximumAttemptsPerMessage: ConversationRecoveryRetryPolicy.maximumAttempts
+            maximumAttemptsPerMessage: ConversationRecoveryRetryPolicy.maximumAttempts,
+            request: request
         )
-        await refresh()
+        guard isCurrent(request) else { return }
+        await refresh(for: request)
+        guard isCurrent(request) else { return }
         if let terminalRejectionMessage {
             terminalDeliveryMessage = terminalRejectionMessage
             statusMessage = terminalRejectionMessage
@@ -352,26 +392,42 @@ final class ConversationModel: ObservableObject {
     }
 
     private func markVisibleMessagesReadIfNeeded() async {
-        guard unreadCount > 0,
+        guard isConversationVisible,
+              unreadCount > 0,
               let lastMessageID = messages.last(where: { $0.deliveryState == .synced })?.id else {
             return
         }
+        let visibilityGeneration = conversationVisibilityGeneration
         do {
             try await service.markRead(through: lastMessageID)
+            guard isConversationVisible,
+                  visibilityGeneration == conversationVisibilityGeneration,
+                  messages.last(where: { $0.deliveryState == .synced })?.id == lastMessageID
+            else { return }
             unreadCount = 0
             unreadRefreshGeneration &+= 1
             await persistCurrentSnapshot()
         } catch {
+            guard isConversationVisible,
+                  visibilityGeneration == conversationVisibilityGeneration else { return }
             statusMessage = "未讀數尚未更新，請稍後再試。"
         }
     }
 
     private func scheduleSingleDrainIfNeeded() {
-        guard scheduledDrain == nil else { return }
+        guard scheduledDrain == nil,
+              let request = activeLifecycleRequest() else { return }
+        let drainID = UUID()
+        scheduledDrainID = drainID
         scheduledDrain = Task { [weak self] in
             guard let self else { return }
-            _ = await self.drainPendingMessages(maximumAttemptsPerMessage: 1)
+            _ = await self.drainPendingMessages(
+                maximumAttemptsPerMessage: 1,
+                request: request
+            )
+            guard self.scheduledDrainID == drainID else { return }
             self.scheduledDrain = nil
+            self.scheduledDrainID = nil
         }
     }
 
@@ -393,35 +449,50 @@ final class ConversationModel: ObservableObject {
         messages.sort(by: Self.messageOrder)
     }
 
-    private func loadPendingMessages() async {
+    private func loadPendingMessages(for request: LifecycleRequest) async {
         do {
             let pending = try await service.fetchPendingSnapshot()
+            guard isCurrent(request) else { return }
             currentUserID = pending.currentUserID
             mergeMessages(pending.messages)
         } catch {
+            guard isCurrent(request) else { return }
             statusMessage = "無法讀取待送訊息，請稍後再試。"
         }
     }
 
-    private func loadCachedMessages() async {
+    private func loadCachedMessages(for request: LifecycleRequest) async {
         do {
             guard let cached = try await service.fetchCachedSnapshot() else { return }
+            guard isCurrent(request) else { return }
             currentUserID = cached.currentUserID
             unreadCount = cached.unreadCount
             mergeMessages(cached.messages)
         } catch {
+            guard isCurrent(request) else { return }
             statusMessage = "無法讀取最近對話，請稍後再試。"
         }
     }
 
     @discardableResult
-    private func drainPendingMessages(maximumAttemptsPerMessage: Int) async -> String? {
-        guard !isSending else { return nil }
+    private func drainPendingMessages(
+        maximumAttemptsPerMessage: Int,
+        request: LifecycleRequest
+    ) async -> String? {
+        while isSending {
+            guard isCurrent(request) else { return nil }
+            await Task.yield()
+        }
+        guard isCurrent(request) else { return nil }
+        beginLifecycleWork(for: request)
         isSending = true
-        defer { isSending = false }
+        defer {
+            isSending = false
+            endLifecycleWork(for: request)
+        }
         var terminalRejectionMessage: String?
 
-        while hasStarted {
+        while isCurrent(request) {
             var attempt = 0
             var resolvedCurrentMessage = false
             while attempt < maximumAttemptsPerMessage {
@@ -431,8 +502,10 @@ final class ConversationModel: ObservableObject {
                         return terminalRejectionMessage
                     }
                     pendingMessage = next
+                    guard isCurrent(request) else { return terminalRejectionMessage }
                     mergeMessages([pendingMessage])
                 } catch {
+                    guard isCurrent(request) else { return terminalRejectionMessage }
                     statusMessage = "無法讀取待送訊息，請稍後再試。"
                     return terminalRejectionMessage
                 }
@@ -440,6 +513,7 @@ final class ConversationModel: ObservableObject {
                 do {
                     let result = try await service.deliverPendingMessage(pendingMessage)
                     try await service.acknowledgePendingMessage(clientID: pendingMessage.id)
+                    guard isCurrent(request) else { return terminalRejectionMessage }
                     switch result {
                     case let .accepted(acceptedAt):
                         updateMessage(
@@ -455,9 +529,11 @@ final class ConversationModel: ObservableObject {
                         terminalRejectionMessage = message
                     }
                     await persistCurrentSnapshot()
+                    guard isCurrent(request) else { return terminalRejectionMessage }
                     resolvedCurrentMessage = true
                     break
                 } catch {
+                    guard isCurrent(request) else { return terminalRejectionMessage }
                     attempt += 1
                     markUnresolvedMessagesFailed()
                     guard attempt < maximumAttemptsPerMessage,
@@ -469,7 +545,7 @@ final class ConversationModel: ObservableObject {
                     } catch {
                         return terminalRejectionMessage
                     }
-                    guard hasStarted else { return terminalRejectionMessage }
+                    guard isCurrent(request) else { return terminalRejectionMessage }
                 }
             }
             if !resolvedCurrentMessage { return terminalRejectionMessage }
@@ -477,13 +553,82 @@ final class ConversationModel: ObservableObject {
         return terminalRejectionMessage
     }
 
-    private func restartObservation() async -> Bool {
-        do {
-            try await service.startObservingChanges { [weak self] in await self?.refresh() }
-            return true
-        } catch {
+    private func activeLifecycleRequest() -> LifecycleRequest? {
+        guard hasStarted else { return nil }
+        return LifecycleRequest(
+            generation: lifecycleGeneration,
+            requiresActiveModel: true
+        )
+    }
+
+    private func lifecycleRequestAllowingInitialExplicitWork() -> LifecycleRequest? {
+        if let active = activeLifecycleRequest() { return active }
+        guard lifecycleGeneration == 0 else { return nil }
+        return LifecycleRequest(generation: 0, requiresActiveModel: false)
+    }
+
+    private func isCurrent(_ request: LifecycleRequest) -> Bool {
+        request.generation == lifecycleGeneration
+            && (!request.requiresActiveModel || hasStarted)
+    }
+
+    private func beginLifecycleWork(for request: LifecycleRequest) {
+        activeLifecycleWorkByGeneration[request.generation, default: 0] += 1
+    }
+
+    private func endLifecycleWork(for request: LifecycleRequest) {
+        let remaining = (activeLifecycleWorkByGeneration[request.generation] ?? 1) - 1
+        if remaining > 0 {
+            activeLifecycleWorkByGeneration[request.generation] = remaining
+        } else {
+            activeLifecycleWorkByGeneration[request.generation] = nil
+            let waiters = lifecycleWorkWaitersByGeneration.removeValue(
+                forKey: request.generation
+            ) ?? []
+            for waiter in waiters { waiter.resume() }
+        }
+    }
+
+    private func waitForLifecycleWork(generation: Int) async {
+        guard activeLifecycleWorkByGeneration[generation, default: 0] > 0 else { return }
+        await withCheckedContinuation { continuation in
+            guard activeLifecycleWorkByGeneration[generation, default: 0] > 0 else {
+                continuation.resume()
+                return
+            }
+            lifecycleWorkWaitersByGeneration[generation, default: []].append(continuation)
+        }
+    }
+
+    private func startObservation(for request: LifecycleRequest) async -> Bool {
+        let previous = observationTransitionTask
+        let transition = Task { @MainActor [weak self] in
+            _ = await previous?.value
+            guard let self, self.isCurrent(request) else { return false }
+            do {
+                try await self.service.startObservingChanges { [weak self] in
+                    guard let self, self.isCurrent(request) else { return }
+                    await self.refresh(for: request)
+                }
+                return self.isCurrent(request)
+            } catch {
+                return false
+            }
+        }
+        observationTransitionTask = transition
+        return await transition.value
+    }
+
+    private func stopObservation() async {
+        let previous = observationTransitionTask
+        let transition = Task { @MainActor [weak self] in
+            _ = await previous?.value
+            guard let self else { return false }
+            await self.service.stopObservingChanges()
             return false
         }
+        observationTransitionTask = transition
+        _ = await transition.value
     }
 
     private func markUnresolvedMessagesFailed() {

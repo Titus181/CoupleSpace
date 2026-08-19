@@ -45,7 +45,7 @@
 5. 建立一筆數分鐘後提醒的約定；A、B 各自在產品說明後允許通知，兩台只收到一次不含標題、地點與註記的通用通知。點擊後必須開啟同一筆約定詳情。
 6. 依序改動提醒時間、取消約定，再建立另一筆提醒後解除配對；舊時間、已取消約定及已解除關係都不得再送出通知。
 
-## W13 切片 5 加驗（待執行）
+## W13 切片 5 加驗（2026-08-20 final candidate PASS）
 
 1. 兩台先各記下「對話」tab badge 與 App icon badge；以不含私人內容的 fixture 建立同一筆五分鐘後的約定。B 收到約定建立的遠端通知後不得點開或回到 App；兩機各只收到一次本機提醒，且鎖定畫面只顯示「共同約定提醒／你有一筆即將開始的共同約定。」。
 2. 核對提醒不含約定標題、地點、註記、relationship、訊息、UUID 或任何可辨識伴侶的文字。提醒前後「對話」tab badge、App icon badge 與遠端未讀數均維持步驟 1 的數字。
@@ -54,7 +54,7 @@
 5. 另建一筆未來提醒，先在 A 登出、再由 B 點「開始解除配對（closing）」；B 的該 relationship 待送提醒與通知中心既有提醒須立即移除。各自離開 relationship 的裝置不得留下或送達舊提醒。重新登入或重新配對也不可令舊提醒復活。
 6. 在其中一台拒絕系統通知權限後重建一筆有提醒的約定；該台約定仍同步，畫面顯示「這支手機尚未允許通知；約定仍會同步，但不會在指定時間提醒。」或同義中性文案，不得假稱已排程。另一台已允許通知的行為不受影響。
 
-## 切片 7 正式解除配對加驗（待執行）
+## 切片 7 正式解除配對加驗（2026-08-20 final candidate PASS）
 
 1. A、B 維持 active relationship；兩台各記錄「對話」tab badge、App icon badge，並在 A 保留一筆可重試的待送內容。A 從「我們 → 帳號設定 → 關係與資料」進入，確認不存在 Release 的 W1 技術工具入口。
 2. A 按「解除配對」並在確認 dialog 確認；有待送內容時必須明確阻擋且仍在 active。完成或重試待送內容後，重新確認一次，A 必須自動 begin closing 並建立 A 的封存。
@@ -75,3 +75,5 @@
 2026-08-13 W10 實機複驗：`CoupleSpace 1.0 (1)`、兩支 iOS 26.6 真實 iPhone、`CoupleSpace-W1-Dev`（migration 021）完成步驟 1、3–6。雙方聊天照片可載入、全螢幕開啟並以下滑或右上角關閉；待送訊息不提供互動；已同步文字／照片可 set／replace／remove 常用與自訂 Emoji，`＋` 沿用 Today 的分類 picker；文字／照片收藏 Moment 不重複，來源可返回正確對話且顯示收藏標記。relationship、Moment 與 source client ID 前 8 碼未記錄。步驟 2 的近 quota 真機邊界與拒絕後 orphan 證據尚未執行，因此本清單仍為部分完成。
 
 2026-08-17 W11 四輪實機驗收：兩支真實 iPhone 已完成共同約定建立／編輯／取消、主對話與專屬討論重大紀錄、離線改期跨啟動恢復、提醒去重／通用內容／來源跳轉／取消清理，以及解除配對後雙 owner 封存。A、B 封存均顯示共同約定 12、專屬討論項目 5、重大事件 16 與「約定封存關聯完整」；刪除 A 封存後 B 維持相同計數與完整 audit。產品 UI 未顯示 appointment／operation／event ID 前 8 碼，本輪不虛構未記錄值，opaque identity 另由 27 份 pgTAP／441 項及內建 archive-local audit 覆蓋。G10／W11 的雙機核心、弱網、提醒及封存 gate 通過。
+
+2026-08-20 W13 final candidate：使用者在同一候選的兩支真實 iPhone 回報「約定、討論與提醒」及最後執行的 lifecycle 正常，故上述 W13 切片 5 與正式解除配對加驗在 W13 引用範圍記為 PASS。iPhone 機型／iOS、APNs environment、逐項 stable ID／count 與精確完成時間為 `未記錄`；本結果不宣稱 TestFlight Gate D、DR／UPGRADE 或 production APNs 完成。

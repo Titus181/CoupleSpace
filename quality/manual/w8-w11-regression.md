@@ -55,3 +55,12 @@
 - 複製 `quality/release-record-template.md` 到 `quality/releases/`，逐項記錄 `PASS／FAIL／BLOCKED／NOT_APPLICABLE` 與理由。
 - `.xcresult`、截圖、通知畫面與裝置 log 不直接提交含私人內容的原始檔；只記錄去識別後的統計、時間、環境及安全 artifact 位置。
 - 若本輪再次發現產品缺陷，先在最低可靠層級加入 regression，再更新 `quality/regression-history.md` 與相應 catalog ID。
+
+## 2026-08-20 final W13 candidate 結果
+
+- 結果：`PASS`（W13 引用範圍）。
+- W8：使用者在同一最終候選的 LOCK／PUSH／5C／W8 合併流程中回報正常。
+- W9／W10／W11：使用者依 W13 整合清單完成 active relationship regression 並回報正常；兩個 W10 故障注入的逐項 artifact／metadata 為 `未記錄`，本結果不得用來回溯改寫 2026-08-13 的部分完成紀錄或獨立宣稱完整 TestFlight Gate D。
+- W11 lifecycle／archive cleanup：依本清單順序延後至最後 destructive lifecycle，使用者回報正常。
+- iPhone 機型／iOS、精確網路條件、stable ID 前綴與完成時間：`未記錄`。
+- 本結果提供 `W13-INTEGRATION-001` closure credit；不宣稱 TestFlight Gate D、DR／UPGRADE 或全產品 release-ready。

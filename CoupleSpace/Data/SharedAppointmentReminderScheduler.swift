@@ -9,10 +9,15 @@ enum SharedAppointmentReminderAuthorization: Equatable {
 
 @MainActor
 protocol SharedAppointmentReminderScheduling {
+    func activate() async
     func authorizationStatus() async -> SharedAppointmentReminderAuthorization
     func requestAuthorization() async -> SharedAppointmentReminderAuthorization
     func reconcile(_ appointments: [SharedAppointment]) async throws
     func removeAll() async
+}
+
+extension SharedAppointmentReminderScheduling {
+    func activate() async {}
 }
 
 @MainActor
@@ -21,6 +26,56 @@ final class DisabledSharedAppointmentReminderScheduler: SharedAppointmentReminde
     func requestAuthorization() async -> SharedAppointmentReminderAuthorization { .authorized }
     func reconcile(_ appointments: [SharedAppointment]) async throws {}
     func removeAll() async {}
+}
+
+@MainActor
+final class SharedAppointmentReminderLifecycleGate {
+    private(set) var generation = 0
+    private(set) var isActive = false
+
+    @discardableResult
+    func activate() -> Int {
+        if !isActive {
+            generation &+= 1
+            isActive = true
+        }
+        return generation
+    }
+
+    func activate(ifGenerationMatches candidate: Int) -> Bool {
+        guard generation == candidate else { return false }
+        activate()
+        return true
+    }
+
+    @discardableResult
+    func deactivate() -> Int {
+        generation &+= 1
+        isActive = false
+        return generation
+    }
+
+    func begin() -> Int? {
+        isActive ? generation : nil
+    }
+
+    func accepts(_ candidate: Int) -> Bool {
+        isActive && candidate == generation
+    }
+}
+
+@MainActor
+private final class SharedAppointmentReminderLifecycleRegistry {
+    static let shared = SharedAppointmentReminderLifecycleRegistry()
+
+    private var gates: [UUID: SharedAppointmentReminderLifecycleGate] = [:]
+
+    func gate(for relationshipID: UUID) -> SharedAppointmentReminderLifecycleGate {
+        if let gate = gates[relationshipID] { return gate }
+        let gate = SharedAppointmentReminderLifecycleGate()
+        gates[relationshipID] = gate
+        return gate
+    }
 }
 
 struct SharedAppointmentReminderRequest: Equatable {
@@ -85,6 +140,18 @@ final class LocalSharedAppointmentReminderScheduler: SharedAppointmentReminderSc
         self.now = now
     }
 
+    func activate() async {
+        lifecycleGate.activate()
+    }
+
+    func lifecycleGeneration() async -> Int {
+        lifecycleGate.generation
+    }
+
+    func activate(ifLifecycleGenerationMatches generation: Int) async -> Bool {
+        lifecycleGate.activate(ifGenerationMatches: generation)
+    }
+
     func authorizationStatus() async -> SharedAppointmentReminderAuthorization {
         Self.authorization(from: await center.notificationSettings().authorizationStatus)
     }
@@ -101,9 +168,11 @@ final class LocalSharedAppointmentReminderScheduler: SharedAppointmentReminderSc
     }
 
     func reconcile(_ appointments: [SharedAppointment]) async throws {
+        guard let generation = lifecycleGate.begin() else { return }
         let status = await authorizationStatus()
+        guard lifecycleGate.accepts(generation) else { return }
         guard status == .authorized else {
-            await removeAll()
+            await removeScheduledNotifications()
             return
         }
 
@@ -114,6 +183,7 @@ final class LocalSharedAppointmentReminderScheduler: SharedAppointmentReminderSc
         )
         let desiredIdentifiers = Set(requests.map(\.identifier))
         let pending = await center.pendingNotificationRequests()
+        guard lifecycleGate.accepts(generation) else { return }
         let staleIdentifiers = pending
             .map(\.identifier)
             .filter { $0.hasPrefix(identifierPrefix) && !desiredIdentifiers.contains($0) }
@@ -121,6 +191,7 @@ final class LocalSharedAppointmentReminderScheduler: SharedAppointmentReminderSc
             center.removePendingNotificationRequests(withIdentifiers: staleIdentifiers)
         }
         let delivered = await center.deliveredNotifications()
+        guard lifecycleGate.accepts(generation) else { return }
         let staleDeliveredIdentifiers = delivered
             .map(\.request.identifier)
             .filter { $0.hasPrefix(identifierPrefix) && !desiredIdentifiers.contains($0) }
@@ -129,6 +200,7 @@ final class LocalSharedAppointmentReminderScheduler: SharedAppointmentReminderSc
         }
 
         for request in requests {
+            guard lifecycleGate.accepts(generation) else { return }
             let content = UNMutableNotificationContent()
             content.title = request.title
             content.body = request.body
@@ -139,15 +211,29 @@ final class LocalSharedAppointmentReminderScheduler: SharedAppointmentReminderSc
                 [.calendar, .timeZone, .year, .month, .day, .hour, .minute, .second],
                 from: request.fireDate
             )
-            try await center.add(UNNotificationRequest(
+            let notificationRequest = UNNotificationRequest(
                 identifier: request.identifier,
                 content: content,
                 trigger: UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
-            ))
+            )
+            try await center.add(notificationRequest)
+            guard lifecycleGate.accepts(generation) else {
+                center.removePendingNotificationRequests(withIdentifiers: [request.identifier])
+                return
+            }
         }
     }
 
     func removeAll() async {
+        lifecycleGate.deactivate()
+        await removeScheduledNotifications()
+    }
+
+    private var lifecycleGate: SharedAppointmentReminderLifecycleGate {
+        SharedAppointmentReminderLifecycleRegistry.shared.gate(for: relationshipID)
+    }
+
+    private func removeScheduledNotifications() async {
         let pending = await center.pendingNotificationRequests()
         let identifiers = pending.map(\.identifier).filter { $0.hasPrefix(identifierPrefix) }
         center.removePendingNotificationRequests(withIdentifiers: identifiers)

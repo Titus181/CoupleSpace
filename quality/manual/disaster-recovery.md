@@ -21,9 +21,9 @@
 2. 從 Git 鎖定版本部署 extensions、schema、RLS、RPC，再還原 Database artifact。
 3. 依 manifest 恢復被引用的 Storage object，逐一核對 bytes／checksum。
 4. 重建 Auth／Sign in with Apple callback、Realtime publication、Storage policy、Functions 與必要設定；輪替所有可能受影響的 secrets。
-   - 核對原 Supabase Auth user identity、Apple identity mapping 與 relationship／membership 對應未改變；舊 session 全部視為失效，裝置清單只由新主站有效 session 重建。
+   - 核對原 Supabase Auth user identity、Apple identity mapping 與 relationship／membership 對應未改變；舊 session 全部視為失效並要求重新驗證，但不建立產品 session／裝置清單。
 5. 重播 deletion journal，確認 sequence 連續且已刪除／解除配對／GC 資料不會恢復可見。
-   - 核對一般裝置 session 撤銷及本次 D4 session 全面失效都沒有建立 deletion tombstone。
+   - 核對本次 D4 session 全面失效沒有建立 deletion tombstone。依 PD-044，MVP 不提供一般遺失裝置的遠端撤銷；兩者不得混作同一產品控制。
 6. 驗證 signed service manifest 拒絕無效簽章、過期、錯 environment 及 version rollback，並可切換 `read_only／recovery／normal`。
 7. 完成全部自動化與真機核對後才開放寫入；舊站恢復後保持 forensic／read-only，不自動 failback。
 

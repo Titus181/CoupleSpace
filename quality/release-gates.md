@@ -1,6 +1,6 @@
 ---
 status: active
-last_updated: 2026-08-17
+last_updated: 2026-08-19
 ---
 
 # CoupleSpace 版本發布閘門
@@ -28,6 +28,8 @@ last_updated: 2026-08-17
 - 執行 `quality/scripts/run-full-automated-suite.sh --reset-local-database`。
 - 使用兩支真實 iPhone、兩個 Apple 身分完成所有適用 `manual/` 清單。
 - 若版本影響 W8–W11 的聊天、離線快照、Moment 來源或共同約定，依 `manual/w8-w11-regression.md` 的順序完成整合回歸；其中連結的個別 manual 清單仍是詳細步驟 SSOT。
+- 若版本影響 W13 的同帳號多裝置、目前裝置登出／重新登入恢復、App Lock、推播、未讀／badge、本機提醒或解除配對整合，完整執行 `manual/w13-integration.md`；Simulator preflight 不能取代其中的兩支真實 iPhone 證據。已退役 `SESSION-001` 不重跑，但必須確認正式 inventory／remote-revoke UI 與 runtime 均已移除。
+- `SESSION-001 = NOT_APPLICABLE (REMOVED)` 只記錄 PD-044 的 scope removal，不提供 G12／W13 PASS credit；`W13-INTEGRATION-001` 與其引用的全部適用 gate 仍須獨立通過。
 - 從空本機資料庫依 migrations 重建，完整 pgTAP 與 local schema lint 通過。
 - linked／staging migration history 與 schema lint 通過；任何部署仍需明確授權。
 - 以舊 build 建立資料與本機待送項目，再安裝 release candidate，確認升級、重登與恢復不重複、不錯序、不遺失。
@@ -64,7 +66,7 @@ Gate C 全部通過後，還必須完成：
 - `PASS`：本次版本、指定環境、指定 commit 的預期結果全部成立。
 - `FAIL`：實際結果不符合預期；阻擋相關 gate。
 - `BLOCKED`：因裝置、Apple 服務、權限或環境無法執行；不是通過。
-- `NOT_APPLICABLE`：本版確實不含該能力，且不削弱既有契約；必須寫理由。
+- `NOT_APPLICABLE`：本版確實不含該能力，或已由 accepted 決策明確移除且沒有殘留 UI／runtime；必須寫理由及取代決策，不能用來隱藏仍存在的必要能力或歷史 FAIL。
 - 不使用 `WAIVED` 把 Critical／High 風險帶入正式發布。
 
 ## 執行頻率

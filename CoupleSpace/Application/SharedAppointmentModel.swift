@@ -3,6 +3,11 @@ import Foundation
 
 @MainActor
 final class SharedAppointmentModel: ObservableObject {
+    private struct LifecycleRequest {
+        let generation: Int
+        let requiresActiveModel: Bool
+    }
+
     @Published private(set) var appointments: [SharedAppointment] = []
     @Published private(set) var appointmentEvents: [SharedAppointmentEvent] = []
     @Published private(set) var recentDiscussionSummaries: [SharedAppointmentDiscussionSummary] = []
@@ -18,6 +23,10 @@ final class SharedAppointmentModel: ObservableObject {
     private let now: () -> Date
     private let discussionModelFactory: ((UUID) -> ConversationModel)?
     private var hasStarted = false
+    private var lifecycleGeneration = 0
+    private var activeLifecycleWorkByGeneration: [Int: Int] = [:]
+    private var lifecycleWorkWaitersByGeneration: [Int: [CheckedContinuation<Void, Never>]] = [:]
+    private var observationTransitionTask: Task<Bool, Never>?
     private var isDraining = false
     private var isDrainingOperations = false
     private var deliveryStatusMessage: String?
@@ -84,39 +93,70 @@ final class SharedAppointmentModel: ObservableObject {
         return created
     }
 
-    func markInteractionRead(for appointmentID: UUID) async {
-        guard let discussionModel = discussionModel(for: appointmentID) else { return }
-        await discussionModel.markInteractionScopeRead()
-        await refresh()
+    func markInteractionRead(
+        for appointmentID: UUID,
+        visibleSourceIdentity: UUID?
+    ) async {
+        guard appointment(id: appointmentID) != nil else { return }
+        do {
+            try await service.markAppointmentInteractionsRead(
+                appointmentID: appointmentID,
+                visibleSourceIdentity: visibleSourceIdentity
+            )
+            await refresh()
+        } catch {
+            statusMessage = "無法更新約定未讀，請確認連線後再試。"
+        }
     }
 
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true
-        await loadCachedAppointments()
-        await loadPendingAppointments()
-        await loadPendingAppointmentOperations()
-        await refresh()
-        do {
-            try await service.startObservingChanges { [weak self] in
-                await self?.refresh()
-            }
-        } catch {
+        lifecycleGeneration &+= 1
+        let request = LifecycleRequest(
+            generation: lifecycleGeneration,
+            requiresActiveModel: true
+        )
+        guard isCurrent(request) else { return }
+        beginLifecycleWork(for: request)
+        await reminderScheduler.activate()
+        endLifecycleWork(for: request)
+        guard isCurrent(request) else { return }
+        await loadCachedAppointments(for: request)
+        guard isCurrent(request) else { return }
+        await loadPendingAppointments(for: request)
+        guard isCurrent(request) else { return }
+        await loadPendingAppointmentOperations(for: request)
+        guard isCurrent(request) else { return }
+        await refresh(for: request)
+        guard isCurrent(request) else { return }
+        let isObserving = await startObservation(for: request)
+        guard isCurrent(request) else { return }
+        if !isObserving {
             statusMessage = "共同約定的即時同步暫時無法連線。"
         }
         await drainPendingAppointments(
-            maximumAttemptsPerAppointment: ConversationRecoveryRetryPolicy.maximumAttempts
+            maximumAttemptsPerAppointment: ConversationRecoveryRetryPolicy.maximumAttempts,
+            request: request
         )
+        guard isCurrent(request) else { return }
         await drainPendingAppointmentOperations(
-            maximumAttemptsPerOperation: ConversationRecoveryRetryPolicy.maximumAttempts
+            maximumAttemptsPerOperation: ConversationRecoveryRetryPolicy.maximumAttempts,
+            request: request
         )
-        await refresh()
+        guard isCurrent(request) else { return }
+        await refresh(for: request)
     }
 
     func stop() async {
+        let endingGeneration = lifecycleGeneration
         hasStarted = false
-        await service.stopObservingChanges()
+        lifecycleGeneration &+= 1
+        let stoppedGeneration = lifecycleGeneration
+        await stopObservation()
+        await waitForLifecycleWork(generation: endingGeneration)
         for discussionModel in discussionModels.values {
+            guard !hasStarted, lifecycleGeneration == stoppedGeneration else { return }
             await discussionModel.stop()
         }
     }
@@ -124,15 +164,29 @@ final class SharedAppointmentModel: ObservableObject {
     func prepareReminderAuthorization() async {
         let status = await reminderScheduler.requestAuthorization()
         updateReminderStatus(for: status, userRequested: true)
-        if status == .authorized {
-            await reconcileReminders()
+        if status == .authorized,
+           let request = lifecycleRequestAllowingInitialExplicitWork() {
+            await reconcileReminders(for: request)
         }
     }
 
     func refresh() async {
-        guard !isLoading else { return }
+        guard let request = lifecycleRequestAllowingInitialExplicitWork() else { return }
+        await refresh(for: request)
+    }
+
+    private func refresh(for request: LifecycleRequest) async {
+        while isLoading {
+            guard isCurrent(request) else { return }
+            await Task.yield()
+        }
+        guard isCurrent(request) else { return }
+        beginLifecycleWork(for: request)
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            endLifecycleWork(for: request)
+        }
         do {
             async let remoteAppointments = service.fetchAppointments()
             async let remoteEvents = service.fetchAppointmentEvents()
@@ -142,6 +196,7 @@ final class SharedAppointmentModel: ObservableObject {
             let events = try await remoteEvents
             let summaries = try await remoteDiscussionSummaries
             let operations = try await pendingOperations
+            guard isCurrent(request) else { return }
             let remoteIDs = Set(remote.map(\.id))
             let pending = appointments.filter {
                 $0.deliveryState != .synced && !remoteIDs.contains($0.id)
@@ -150,7 +205,8 @@ final class SharedAppointmentModel: ObservableObject {
                 operations,
                 to: remote + pending
             ).sorted(by: Self.appointmentOrder)
-            await reconcileReminders()
+            await reconcileReminders(for: request)
+            guard isCurrent(request) else { return }
             replaceAppointmentEvents(events)
             recentDiscussionSummaries = summaries
                 .filter { remoteIDs.contains($0.appointmentID) }
@@ -163,6 +219,7 @@ final class SharedAppointmentModel: ObservableObject {
                 ?? operationDeliveryStatusMessage
                 ?? deliveryStatusMessage
         } catch {
+            guard isCurrent(request) else { return }
             statusMessage = operationDeliveryStatusMessage
                 ?? deliveryStatusMessage
                 ?? (appointments.isEmpty
@@ -209,7 +266,12 @@ final class SharedAppointmentModel: ObservableObject {
             return false
         }
 
-        await drainPendingAppointments(maximumAttemptsPerAppointment: 1)
+        if let request = lifecycleRequestAllowingInitialExplicitWork() {
+            await drainPendingAppointments(
+                maximumAttemptsPerAppointment: 1,
+                request: request
+            )
+        }
         return true
     }
 
@@ -217,7 +279,12 @@ final class SharedAppointmentModel: ObservableObject {
         guard appointments.contains(where: {
             $0.id == id && $0.deliveryState == .failed
         }) else { return }
-        await drainPendingAppointments(maximumAttemptsPerAppointment: 1)
+        if let request = lifecycleRequestAllowingInitialExplicitWork() {
+            await drainPendingAppointments(
+                maximumAttemptsPerAppointment: 1,
+                request: request
+            )
+        }
     }
 
     @discardableResult
@@ -266,7 +333,12 @@ final class SharedAppointmentModel: ObservableObject {
             statusMessage = "共同約定未保存到這支裝置，請再試一次。"
             return false
         }
-        await drainPendingAppointmentOperations(maximumAttemptsPerOperation: 1)
+        if let request = lifecycleRequestAllowingInitialExplicitWork() {
+            await drainPendingAppointmentOperations(
+                maximumAttemptsPerOperation: 1,
+                request: request
+            )
+        }
         return true
     }
 
@@ -304,39 +376,57 @@ final class SharedAppointmentModel: ObservableObject {
             statusMessage = "取消操作未保存到這支裝置，請再試一次。"
             return false
         }
-        await drainPendingAppointmentOperations(maximumAttemptsPerOperation: 1)
+        if let request = lifecycleRequestAllowingInitialExplicitWork() {
+            await drainPendingAppointmentOperations(
+                maximumAttemptsPerOperation: 1,
+                request: request
+            )
+        }
         return true
     }
 
     func recoverPendingAppointments() async {
-        await loadCachedAppointments()
-        await loadPendingAppointments()
-        await loadPendingAppointmentOperations()
+        guard let request = lifecycleRequestAllowingInitialExplicitWork() else { return }
+        await loadCachedAppointments(for: request)
+        guard isCurrent(request) else { return }
+        await loadPendingAppointments(for: request)
+        guard isCurrent(request) else { return }
+        await loadPendingAppointmentOperations(for: request)
+        guard isCurrent(request) else { return }
         await drainPendingAppointments(
-            maximumAttemptsPerAppointment: ConversationRecoveryRetryPolicy.maximumAttempts
+            maximumAttemptsPerAppointment: ConversationRecoveryRetryPolicy.maximumAttempts,
+            request: request
         )
+        guard isCurrent(request) else { return }
         await drainPendingAppointmentOperations(
-            maximumAttemptsPerOperation: ConversationRecoveryRetryPolicy.maximumAttempts
+            maximumAttemptsPerOperation: ConversationRecoveryRetryPolicy.maximumAttempts,
+            request: request
         )
-        await refresh()
+        guard isCurrent(request) else { return }
+        await refresh(for: request)
     }
 
-    private func loadCachedAppointments() async {
+    private func loadCachedAppointments(for request: LifecycleRequest) async {
         guard let cached = try? await service.fetchCachedAppointments() else { return }
+        guard isCurrent(request) else { return }
         mergeAppointments(cached)
     }
 
-    private func loadPendingAppointments() async {
+    private func loadPendingAppointments(for request: LifecycleRequest) async {
         do {
-            mergeAppointments(try await service.fetchPendingAppointments())
+            let pending = try await service.fetchPendingAppointments()
+            guard isCurrent(request) else { return }
+            mergeAppointments(pending)
         } catch {
+            guard isCurrent(request) else { return }
             statusMessage = "無法讀取待同步共同約定，請稍後再試。"
         }
     }
 
-    private func loadPendingAppointmentOperations() async {
+    private func loadPendingAppointmentOperations(for request: LifecycleRequest) async {
         do {
             let operations = try await service.fetchPendingAppointmentOperations()
+            guard isCurrent(request) else { return }
             guard !operations.isEmpty else { return }
             appointments = Self.applying(operations, to: appointments)
                 .sorted(by: Self.appointmentOrder)
@@ -344,15 +434,27 @@ final class SharedAppointmentModel: ObservableObject {
             operationDeliveryStatusMessage = message
             statusMessage = message
         } catch {
+            guard isCurrent(request) else { return }
             statusMessage = "無法讀取待同步的約定操作，請稍後再試。"
         }
     }
 
-    private func drainPendingAppointments(maximumAttemptsPerAppointment: Int) async {
-        guard !isDraining else { return }
+    private func drainPendingAppointments(
+        maximumAttemptsPerAppointment: Int,
+        request: LifecycleRequest
+    ) async {
+        while isDraining {
+            guard isCurrent(request) else { return }
+            await Task.yield()
+        }
+        guard isCurrent(request) else { return }
+        beginLifecycleWork(for: request)
         isDraining = true
-        defer { isDraining = false }
-        while true {
+        defer {
+            isDraining = false
+            endLifecycleWork(for: request)
+        }
+        while isCurrent(request) {
             var attempt = 0
             var resolved = false
             while attempt < maximumAttemptsPerAppointment {
@@ -362,8 +464,10 @@ final class SharedAppointmentModel: ObservableObject {
                         return
                     }
                     entry = next
+                    guard isCurrent(request) else { return }
                     mergeAppointments([entry.appointment])
                 } catch {
+                    guard isCurrent(request) else { return }
                     statusMessage = "無法讀取待同步共同約定，請稍後再試。"
                     return
                 }
@@ -371,14 +475,17 @@ final class SharedAppointmentModel: ObservableObject {
                 do {
                     let saved = try await service.deliverPendingAppointment(entry)
                     try await service.acknowledgePendingAppointment(clientID: entry.clientID)
+                    guard isCurrent(request) else { return }
                     appointments.removeAll { $0.id == entry.clientID }
                     mergeAppointments([saved])
-                    await reconcileReminders()
+                    await reconcileReminders(for: request)
+                    guard isCurrent(request) else { return }
                     deliveryStatusMessage = nil
                     statusMessage = "共同約定已同步。"
                     resolved = true
                     break
                 } catch {
+                    guard isCurrent(request) else { return }
                     attempt += 1
                     markPendingAppointmentsFailed()
                     let message = "共同約定已保存在這支裝置；請確認連線後重試。"
@@ -393,6 +500,7 @@ final class SharedAppointmentModel: ObservableObject {
                     } catch {
                         return
                     }
+                    guard isCurrent(request) else { return }
                 }
             }
             if !resolved { return }
@@ -408,11 +516,22 @@ final class SharedAppointmentModel: ObservableObject {
         }
     }
 
-    private func drainPendingAppointmentOperations(maximumAttemptsPerOperation: Int) async {
-        guard !isDrainingOperations else { return }
+    private func drainPendingAppointmentOperations(
+        maximumAttemptsPerOperation: Int,
+        request: LifecycleRequest
+    ) async {
+        while isDrainingOperations {
+            guard isCurrent(request) else { return }
+            await Task.yield()
+        }
+        guard isCurrent(request) else { return }
+        beginLifecycleWork(for: request)
         isDrainingOperations = true
-        defer { isDrainingOperations = false }
-        while true {
+        defer {
+            isDrainingOperations = false
+            endLifecycleWork(for: request)
+        }
+        while isCurrent(request) {
             var attempt = 0
             var resolved = false
             while attempt < maximumAttemptsPerOperation {
@@ -422,8 +541,10 @@ final class SharedAppointmentModel: ObservableObject {
                         return
                     }
                     entry = next
+                    guard isCurrent(request) else { return }
                     applyPendingOperation(entry)
                 } catch {
+                    guard isCurrent(request) else { return }
                     statusMessage = "無法讀取待同步的約定操作，請稍後再試。"
                     return
                 }
@@ -433,10 +554,12 @@ final class SharedAppointmentModel: ObservableObject {
                     try await service.acknowledgePendingAppointmentOperation(
                         operationID: entry.operationID
                     )
+                    guard isCurrent(request) else { return }
                     switch result {
                     case let .accepted(saved):
                         replaceAppointment(saved)
-                        await refreshAppointmentEvents()
+                        await refreshAppointmentEvents(for: request)
+                        guard isCurrent(request) else { return }
                         operationDeliveryStatusMessage = nil
                         switch entry.operation {
                         case .update:
@@ -455,10 +578,12 @@ final class SharedAppointmentModel: ObservableObject {
                         terminalOperationMessage = message
                         statusMessage = message
                     }
-                    await reconcileReminders()
+                    await reconcileReminders(for: request)
+                    guard isCurrent(request) else { return }
                     resolved = true
                     break
                 } catch {
+                    guard isCurrent(request) else { return }
                     attempt += 1
                     applyPendingOperation(entry)
                     let message = "約定變更已保存在這支裝置；請確認連線後重試。"
@@ -473,6 +598,7 @@ final class SharedAppointmentModel: ObservableObject {
                     } catch {
                         return
                     }
+                    guard isCurrent(request) else { return }
                 }
             }
             if !resolved { return }
@@ -484,18 +610,104 @@ final class SharedAppointmentModel: ObservableObject {
         replaceAppointment(entry.applying(to: current))
     }
 
-    private func refreshAppointmentEvents() async {
+    private func refreshAppointmentEvents(for request: LifecycleRequest) async {
         guard let events = try? await service.fetchAppointmentEvents() else { return }
+        guard isCurrent(request) else { return }
         replaceAppointmentEvents(events)
     }
 
-    private func reconcileReminders() async {
+    private func reconcileReminders(for request: LifecycleRequest) async {
+        guard isCurrent(request) else { return }
+        beginLifecycleWork(for: request)
+        defer { endLifecycleWork(for: request) }
         do {
             try await reminderScheduler.reconcile(appointments)
-            updateReminderStatus(for: await reminderScheduler.authorizationStatus())
+            guard isCurrent(request) else { return }
+            let authorization = await reminderScheduler.authorizationStatus()
+            guard isCurrent(request) else { return }
+            updateReminderStatus(for: authorization)
         } catch {
+            guard isCurrent(request) else { return }
             reminderStatusMessage = "這支手機暫時無法更新約定提醒，稍後會再試。"
         }
+    }
+
+    private func activeLifecycleRequest() -> LifecycleRequest? {
+        guard hasStarted else { return nil }
+        return LifecycleRequest(
+            generation: lifecycleGeneration,
+            requiresActiveModel: true
+        )
+    }
+
+    private func lifecycleRequestAllowingInitialExplicitWork() -> LifecycleRequest? {
+        if let active = activeLifecycleRequest() { return active }
+        guard lifecycleGeneration == 0 else { return nil }
+        return LifecycleRequest(generation: 0, requiresActiveModel: false)
+    }
+
+    private func isCurrent(_ request: LifecycleRequest) -> Bool {
+        request.generation == lifecycleGeneration
+            && (!request.requiresActiveModel || hasStarted)
+    }
+
+    private func beginLifecycleWork(for request: LifecycleRequest) {
+        activeLifecycleWorkByGeneration[request.generation, default: 0] += 1
+    }
+
+    private func endLifecycleWork(for request: LifecycleRequest) {
+        let remaining = (activeLifecycleWorkByGeneration[request.generation] ?? 1) - 1
+        if remaining > 0 {
+            activeLifecycleWorkByGeneration[request.generation] = remaining
+        } else {
+            activeLifecycleWorkByGeneration[request.generation] = nil
+            let waiters = lifecycleWorkWaitersByGeneration.removeValue(
+                forKey: request.generation
+            ) ?? []
+            for waiter in waiters { waiter.resume() }
+        }
+    }
+
+    private func waitForLifecycleWork(generation: Int) async {
+        guard activeLifecycleWorkByGeneration[generation, default: 0] > 0 else { return }
+        await withCheckedContinuation { continuation in
+            guard activeLifecycleWorkByGeneration[generation, default: 0] > 0 else {
+                continuation.resume()
+                return
+            }
+            lifecycleWorkWaitersByGeneration[generation, default: []].append(continuation)
+        }
+    }
+
+    private func startObservation(for request: LifecycleRequest) async -> Bool {
+        let previous = observationTransitionTask
+        let transition = Task { @MainActor [weak self] in
+            _ = await previous?.value
+            guard let self, self.isCurrent(request) else { return false }
+            do {
+                try await self.service.startObservingChanges { [weak self] in
+                    guard let self, self.isCurrent(request) else { return }
+                    await self.refresh(for: request)
+                }
+                return self.isCurrent(request)
+            } catch {
+                return false
+            }
+        }
+        observationTransitionTask = transition
+        return await transition.value
+    }
+
+    private func stopObservation() async {
+        let previous = observationTransitionTask
+        let transition = Task { @MainActor [weak self] in
+            _ = await previous?.value
+            guard let self else { return false }
+            await self.service.stopObservingChanges()
+            return false
+        }
+        observationTransitionTask = transition
+        _ = await transition.value
     }
 
     private func updateReminderStatus(

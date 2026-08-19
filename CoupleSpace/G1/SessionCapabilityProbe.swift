@@ -283,23 +283,11 @@ final class SessionCapabilityProbeModel: ObservableObject {
         }
     }
 
-    func revokeAllOtherSessions() async {
-        isWorking = true
-        defer { isWorking = false }
-
-        do {
-            try await client.auth.signOut(scope: .others)
-            status = "已送出登出所有其他 session；這不是目標裝置已失效的證據。"
-        } catch {
-            status = "無法送出登出所有其他 session。"
-        }
-    }
 }
 
 struct SessionCapabilityProbeView: View {
     @StateObject private var model: SessionCapabilityProbeModel
     @StateObject private var protectedDataModel: SessionProtectedDataProbeModel
-    @State private var isConfirmingRevoke = false
 
     init(client: SupabaseClient) {
         _model = StateObject(wrappedValue: SessionCapabilityProbeModel(client: client))
@@ -340,25 +328,9 @@ struct SessionCapabilityProbeView: View {
             .disabled(model.isWorking)
             .accessibilityIdentifier("session-probe-refresh")
 
-            Button("登出所有其他 session", role: .destructive) {
-                isConfirmingRevoke = true
-            }
-            .disabled(model.isWorking || !model.hasCurrentSession)
-            .accessibilityIdentifier("session-probe-revoke-others")
         }
         .task {
             await model.inspectCurrentSession()
-        }
-        .alert(
-            "登出所有其他 session？",
-            isPresented: $isConfirmingRevoke
-        ) {
-            Button("登出所有其他 session", role: .destructive) {
-                Task { await model.revokeAllOtherSessions() }
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("只在可清理的測試專案執行。它會保留目前手機的 session，並撤銷全部其他 session，不能指定一支裝置。")
         }
 
         Section("遠端受保護資料") {

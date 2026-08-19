@@ -13,6 +13,10 @@ protocol SharedAppointmentRemoteServing: AnyObject {
     func fetchAppointments() async throws -> [SharedAppointment]
     func fetchAppointmentEvents() async throws -> [SharedAppointmentEvent]
     func fetchRecentDiscussionSummaries() async throws -> [SharedAppointmentDiscussionSummary]
+    func markAppointmentInteractionsRead(
+        appointmentID: UUID,
+        visibleSourceIdentity: UUID?
+    ) async throws
     func enqueueAppointment(
         _ draft: SharedAppointmentDraft,
         clientID: UUID,
@@ -49,6 +53,7 @@ private struct SharedAppointmentRow: Decodable {
     let reminderAt: Date?
     let status: String
     let sourceSharedItemClientID: UUID?
+    let interactionBoundarySourceIdentity: UUID?
     let createdAt: Date
     let updatedAt: Date
 
@@ -61,6 +66,7 @@ private struct SharedAppointmentRow: Decodable {
         case reminderAt = "reminder_at"
         case status
         case sourceSharedItemClientID = "source_shared_item_client_id"
+        case interactionBoundarySourceIdentity = "interaction_boundary_source_identity"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -79,6 +85,7 @@ private struct SharedAppointmentRow: Decodable {
             reminderAt: reminderAt,
             status: status,
             sourceMessageID: sourceSharedItemClientID,
+            interactionBoundarySourceIdentity: interactionBoundarySourceIdentity,
             createdAt: createdAt,
             updatedAt: updatedAt
         )
@@ -146,6 +153,18 @@ private struct RecentAppointmentDiscussionsParameters: Encodable {
 
     enum CodingKeys: String, CodingKey {
         case targetRelationshipID = "target_relationship_id"
+    }
+}
+
+private struct MarkAppointmentInteractionsReadParameters: Encodable {
+    let targetRelationshipID: UUID
+    let targetAppointmentClientID: UUID
+    let targetVisibleSourceIdentity: UUID?
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+        case targetAppointmentClientID = "target_appointment_client_id"
+        case targetVisibleSourceIdentity = "target_visible_source_identity"
     }
 }
 
@@ -238,6 +257,8 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
     private let outboxStore: SharedAppointmentOutboxStore
     private let operationOutboxStore: SharedAppointmentOperationOutboxStore
     private let snapshotStore: SharedAppointmentSnapshotStore
+    private let appointmentSessionUserID: @MainActor () async throws -> UUID
+    private let fetchAppointmentsOverride: (@MainActor () async throws -> [SharedAppointment])?
     private var realtimeChannel: RealtimeChannelV2?
     private var realtimeTasks: [Task<Void, Never>] = []
 
@@ -247,7 +268,9 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
         relationshipID: UUID,
         outboxStore: SharedAppointmentOutboxStore,
         operationOutboxStore: SharedAppointmentOperationOutboxStore = .init(),
-        snapshotStore: SharedAppointmentSnapshotStore = .init()
+        snapshotStore: SharedAppointmentSnapshotStore = .init(),
+        appointmentSessionUserID: (@MainActor () async throws -> UUID)? = nil,
+        fetchAppointmentsOverride: (@MainActor () async throws -> [SharedAppointment])? = nil
     ) {
         self.client = client
         self.currentUserID = currentUserID
@@ -255,6 +278,10 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
         self.outboxStore = outboxStore
         self.operationOutboxStore = operationOutboxStore
         self.snapshotStore = snapshotStore
+        self.appointmentSessionUserID = appointmentSessionUserID ?? {
+            try await client.auth.session.user.id
+        }
+        self.fetchAppointmentsOverride = fetchAppointmentsOverride
     }
 
     func fetchCachedAppointments() async throws -> [SharedAppointment]? {
@@ -282,23 +309,42 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
     }
 
     func fetchAppointments() async throws -> [SharedAppointment] {
-        let session = try await client.auth.session
-        guard session.user.id == currentUserID else {
+        try await fetchAppointments(persistSnapshot: true)
+    }
+
+    func fetchAppointmentsWithoutUpdatingSnapshot() async throws -> [SharedAppointment] {
+        try await fetchAppointments(persistSnapshot: false)
+    }
+
+    private func fetchAppointments(
+        persistSnapshot: Bool
+    ) async throws -> [SharedAppointment] {
+        guard try await appointmentSessionUserID() == currentUserID else {
             throw SharedAppointmentServiceError.accountChanged
         }
-        let rows: [SharedAppointmentRow] = try await client
-            .from("shared_appointments")
-            .select("client_id,creator_user_id,title,starts_at,location,note,reminder_at,status,source_shared_item_client_id,created_at,updated_at")
-            .eq("relationship_id", value: relationshipID)
-            .order("starts_at", ascending: true)
-            .execute()
-            .value
-        let appointments = try rows.map { try $0.appointment() }
-        try snapshotStore.save(
-            appointments,
-            userID: currentUserID,
-            relationshipID: relationshipID
-        )
+        let appointments: [SharedAppointment]
+        if let fetchAppointmentsOverride {
+            appointments = try await fetchAppointmentsOverride()
+        } else {
+            let rows: [SharedAppointmentRow] = try await client
+                .from("shared_appointments")
+                .select("client_id,creator_user_id,title,starts_at,location,note,reminder_at,status,source_shared_item_client_id,interaction_boundary_source_identity,created_at,updated_at")
+                .eq("relationship_id", value: relationshipID)
+                .order("starts_at", ascending: true)
+                .execute()
+                .value
+            appointments = try rows.map { try $0.appointment() }
+        }
+        if persistSnapshot {
+            guard try await appointmentSessionUserID() == currentUserID else {
+                throw SharedAppointmentServiceError.accountChanged
+            }
+            try snapshotStore.save(
+                appointments,
+                userID: currentUserID,
+                relationshipID: relationshipID
+            )
+        }
         return appointments
     }
 
@@ -330,6 +376,24 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
             )
         ).execute().value
         return rows.map(\.summary)
+    }
+
+    func markAppointmentInteractionsRead(
+        appointmentID: UUID,
+        visibleSourceIdentity: UUID?
+    ) async throws {
+        let session = try await client.auth.session
+        guard session.user.id == currentUserID else {
+            throw SharedAppointmentServiceError.accountChanged
+        }
+        try await client.rpc(
+            "mark_appointment_interactions_read_through_source",
+            params: MarkAppointmentInteractionsReadParameters(
+                targetRelationshipID: relationshipID,
+                targetAppointmentClientID: appointmentID,
+                targetVisibleSourceIdentity: visibleSourceIdentity
+            )
+        ).execute()
     }
 
     func enqueueAppointment(
@@ -562,7 +626,7 @@ final class SupabaseSharedAppointmentService: SharedAppointmentRemoteServing {
     private func fetchAppointment(id: UUID) async throws -> SharedAppointment? {
         let rows: [SharedAppointmentRow] = try await client
             .from("shared_appointments")
-            .select("client_id,creator_user_id,title,starts_at,location,note,reminder_at,status,source_shared_item_client_id,created_at,updated_at")
+            .select("client_id,creator_user_id,title,starts_at,location,note,reminder_at,status,source_shared_item_client_id,interaction_boundary_source_identity,created_at,updated_at")
             .eq("relationship_id", value: relationshipID)
             .eq("client_id", value: id)
             .limit(1)
@@ -681,6 +745,26 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
         discussionSummaries
     }
 
+    func markAppointmentInteractionsRead(
+        appointmentID: UUID,
+        visibleSourceIdentity: UUID?
+    ) async throws {
+        guard let appointment = appointments.first(where: { $0.id == appointmentID }),
+              appointment.interactionBoundarySourceIdentity == visibleSourceIdentity
+        else { throw SharedAppointmentServiceError.invalidServerState }
+    }
+
+    func markDiscussionMessagesRead(appointmentID: UUID) {
+        discussionSummaries = discussionSummaries.map { summary in
+            guard summary.appointmentID == appointmentID else { return summary }
+            return SharedAppointmentDiscussionSummary(
+                appointmentID: summary.appointmentID,
+                latestActivityAt: summary.latestActivityAt,
+                unreadCount: 0
+            )
+        }
+    }
+
     func fetchPendingAppointments() async throws -> [SharedAppointment] {
         let failed = (pendingEntries.first?.attemptCount ?? 0) > 0
         return pendingEntries.map { entry in
@@ -727,6 +811,7 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
             reminderAt: entry.draft.reminderAt,
             status: .scheduled,
             sourceMessageID: entry.draft.sourceMessageID,
+            interactionBoundarySourceIdentity: entry.clientID,
             createdAt: .now,
             updatedAt: .now
         )
@@ -817,6 +902,7 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
             reminderAt: normalized.reminderAt,
             status: .scheduled,
             sourceMessageID: current.sourceMessageID,
+            interactionBoundarySourceIdentity: operationID,
             createdAt: current.createdAt,
             updatedAt: .now
         )
@@ -857,6 +943,7 @@ final class InMemorySharedAppointmentService: SharedAppointmentRemoteServing {
             reminderAt: current.reminderAt,
             status: .cancelled,
             sourceMessageID: current.sourceMessageID,
+            interactionBoundarySourceIdentity: operationID,
             createdAt: current.createdAt,
             updatedAt: .now
         )

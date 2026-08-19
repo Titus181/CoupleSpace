@@ -13,6 +13,7 @@ struct PairingGateView: View {
     let accountUserToken: String?
     let accountStatusMessage: String?
     let onSignOut: () -> Void
+    let refreshesPairingOnActivation: Bool
 
     var body: some View {
         Group {
@@ -66,7 +67,7 @@ struct PairingGateView: View {
             }
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
+            guard refreshesPairingOnActivation, phase == .active else { return }
             Task { await model.refresh() }
         }
 #if DEBUG

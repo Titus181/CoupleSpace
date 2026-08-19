@@ -94,7 +94,6 @@ Deno.test("sandbox request uses generic APNs headers and body", async () => {
     "94000000-0000-0000-0000-000000000010",
     "chat_message_created",
     3,
-    undefined,
     "provider.jwt",
     "sandbox",
     async (input, init) => {
@@ -121,13 +120,38 @@ Deno.test("sandbox request uses generic APNs headers and body", async () => {
   );
 });
 
+Deno.test("legacy content preview preference cannot alter APNs body", async () => {
+  const legacyDevice = {
+    token: "a1b2c3d4",
+    content_preview_enabled: true,
+  };
+  let requestInit: RequestInit | undefined;
+
+  await sendGenericPush(
+    legacyDevice.token,
+    "94000000-0000-0000-0000-000000000010",
+    "chat_message_created",
+    1,
+    "provider.jwt",
+    "sandbox",
+    async (_input, init) => {
+      requestInit = init;
+      return new Response(null, { status: 200 });
+    },
+  );
+
+  const payload = JSON.parse(requestInit?.body as string);
+  assertEquals(payload.aps.alert.title, "CoupleSpace 有新動態");
+  assertEquals(payload.aps.alert.body, "打開 App 查看");
+  assert(!JSON.stringify(payload).includes("content_preview_enabled"));
+});
+
 Deno.test("APNs rejection returns only its bounded reason", async () => {
   const result = await sendGenericPush(
     "a1b2c3d4",
     "94000000-0000-0000-0000-000000000010",
     "appointment_discussion_message_created",
     0,
-    undefined,
     "provider.jwt",
     "production",
     async () =>

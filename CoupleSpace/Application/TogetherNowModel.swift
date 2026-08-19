@@ -3,6 +3,11 @@ import Foundation
 
 @MainActor
 final class TogetherNowModel: ObservableObject {
+    private struct LifecycleRequest {
+        let generation: Int
+        let requiresActiveModel: Bool
+    }
+
     @Published private(set) var snapshot: TogetherNowSnapshot?
     @Published private(set) var isLoading = false
     @Published private(set) var isSaving = false
@@ -12,6 +17,10 @@ final class TogetherNowModel: ObservableObject {
     private let now: () -> Date
     private let calendar: Calendar
     private var hasStarted = false
+    private var lifecycleGeneration = 0
+    private var activeLifecycleWorkByGeneration: [Int: Int] = [:]
+    private var lifecycleWorkWaitersByGeneration: [Int: [CheckedContinuation<Void, Never>]] = [:]
+    private var observationTransitionTask: Task<Bool, Never>?
     private var expirationTask: Task<Void, Never>?
     private var pendingStatusAttempt: (draft: CurrentStatusDraft, momentID: UUID?)?
 
@@ -28,35 +37,57 @@ final class TogetherNowModel: ObservableObject {
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true
+        lifecycleGeneration &+= 1
+        let request = LifecycleRequest(
+            generation: lifecycleGeneration,
+            requiresActiveModel: true
+        )
         if let cached = service.cachedSnapshot() {
-            apply(cached)
+            apply(cached, request: request)
         }
-        await refresh()
-        do {
-            try await service.startObservingChanges { [weak self] in
-                await self?.refresh()
-            }
-        } catch {
+        await refresh(for: request)
+        guard isCurrent(request) else { return }
+        let isObserving = await startObservation(for: request)
+        guard isCurrent(request) else { return }
+        if !isObserving {
             statusMessage = "即時同步暫時無法連線；重新開啟畫面時會再讀取。"
         }
     }
 
     func stop() async {
+        let endingGeneration = lifecycleGeneration
         hasStarted = false
+        lifecycleGeneration &+= 1
         expirationTask?.cancel()
         expirationTask = nil
-        await service.stopObservingChanges()
+        await stopObservation()
+        await waitForLifecycleWork(generation: endingGeneration)
     }
 
     func refresh() async {
-        guard !isLoading else { return }
+        guard let request = lifecycleRequestAllowingInitialExplicitWork() else { return }
+        await refresh(for: request)
+    }
+
+    private func refresh(for request: LifecycleRequest) async {
+        while isLoading {
+            guard isCurrent(request) else { return }
+            await Task.yield()
+        }
+        guard isCurrent(request) else { return }
+        beginLifecycleWork(for: request)
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            endLifecycleWork(for: request)
+        }
         do {
             let fetched = try await service.fetchSnapshot()
-            apply(fetched)
+            guard isCurrent(request) else { return }
+            apply(fetched, request: request)
             statusMessage = nil
         } catch {
+            guard isCurrent(request) else { return }
             statusMessage = "無法更新現在的我們，請稍後再試。"
         }
     }
@@ -154,7 +185,85 @@ final class TogetherNowModel: ObservableObject {
         }
     }
 
-    private func scheduleExpirationRefresh() {
+    private func activeLifecycleRequest() -> LifecycleRequest? {
+        guard hasStarted else { return nil }
+        return LifecycleRequest(
+            generation: lifecycleGeneration,
+            requiresActiveModel: true
+        )
+    }
+
+    private func lifecycleRequestAllowingInitialExplicitWork() -> LifecycleRequest? {
+        if let active = activeLifecycleRequest() { return active }
+        guard lifecycleGeneration == 0 else { return nil }
+        return LifecycleRequest(generation: 0, requiresActiveModel: false)
+    }
+
+    private func isCurrent(_ request: LifecycleRequest) -> Bool {
+        request.generation == lifecycleGeneration
+            && (!request.requiresActiveModel || hasStarted)
+    }
+
+    private func beginLifecycleWork(for request: LifecycleRequest) {
+        activeLifecycleWorkByGeneration[request.generation, default: 0] += 1
+    }
+
+    private func endLifecycleWork(for request: LifecycleRequest) {
+        let remaining = (activeLifecycleWorkByGeneration[request.generation] ?? 1) - 1
+        if remaining > 0 {
+            activeLifecycleWorkByGeneration[request.generation] = remaining
+        } else {
+            activeLifecycleWorkByGeneration[request.generation] = nil
+            let waiters = lifecycleWorkWaitersByGeneration.removeValue(
+                forKey: request.generation
+            ) ?? []
+            for waiter in waiters { waiter.resume() }
+        }
+    }
+
+    private func waitForLifecycleWork(generation: Int) async {
+        guard activeLifecycleWorkByGeneration[generation, default: 0] > 0 else { return }
+        await withCheckedContinuation { continuation in
+            guard activeLifecycleWorkByGeneration[generation, default: 0] > 0 else {
+                continuation.resume()
+                return
+            }
+            lifecycleWorkWaitersByGeneration[generation, default: []].append(continuation)
+        }
+    }
+
+    private func startObservation(for request: LifecycleRequest) async -> Bool {
+        let previous = observationTransitionTask
+        let transition = Task { @MainActor [weak self] in
+            _ = await previous?.value
+            guard let self, self.isCurrent(request) else { return false }
+            do {
+                try await self.service.startObservingChanges { [weak self] in
+                    guard let self, self.isCurrent(request) else { return }
+                    await self.refresh(for: request)
+                }
+                return self.isCurrent(request)
+            } catch {
+                return false
+            }
+        }
+        observationTransitionTask = transition
+        return await transition.value
+    }
+
+    private func stopObservation() async {
+        let previous = observationTransitionTask
+        let transition = Task { @MainActor [weak self] in
+            _ = await previous?.value
+            guard let self else { return false }
+            await self.service.stopObservingChanges()
+            return false
+        }
+        observationTransitionTask = transition
+        _ = await transition.value
+    }
+
+    private func scheduleExpirationRefresh(for request: LifecycleRequest) {
         expirationTask?.cancel()
         let dates = [snapshot?.currentStatus?.expiresAt, snapshot?.partnerStatus?.expiresAt]
             .compactMap { $0 }
@@ -166,12 +275,15 @@ final class TogetherNowModel: ObservableObject {
         let delay = max(0, nextExpiration.timeIntervalSince(now()))
         expirationTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(delay))
-            guard !Task.isCancelled else { return }
-            await self?.refresh()
+            guard !Task.isCancelled,
+                  let self,
+                  self.isCurrent(request) else { return }
+            await self.refresh(for: request)
         }
     }
 
-    private func apply(_ fetched: TogetherNowSnapshot) {
+    private func apply(_ fetched: TogetherNowSnapshot, request: LifecycleRequest) {
+        guard isCurrent(request) else { return }
         snapshot = TogetherNowSnapshot(
             currentUserID: fetched.currentUserID,
             partnerUserID: fetched.partnerUserID,
@@ -185,6 +297,6 @@ final class TogetherNowModel: ObservableObject {
                 ? fetched.partnerStatus
                 : nil
         )
-        scheduleExpirationRefresh()
+        scheduleExpirationRefresh(for: request)
     }
 }

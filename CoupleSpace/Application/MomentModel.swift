@@ -3,6 +3,11 @@ import Foundation
 
 @MainActor
 final class MomentModel: ObservableObject {
+    private struct LifecycleRequest {
+        let generation: Int
+        let requiresActiveModel: Bool
+    }
+
     @Published private(set) var moments: [Moment] = []
     @Published private(set) var photoDataByMomentID: [UUID: Data] = [:]
     @Published private(set) var isLoading = false
@@ -15,6 +20,10 @@ final class MomentModel: ObservableObject {
 
     private let service: MomentRemoteServing
     private var hasStarted = false
+    private var lifecycleGeneration = 0
+    private var activeLifecycleWorkByGeneration: [Int: Int] = [:]
+    private var lifecycleWorkWaitersByGeneration: [Int: [CheckedContinuation<Void, Never>]] = [:]
+    private var observationTransitionTask: Task<Bool, Never>?
     private var pendingResponseAttempts: [UUID: (draft: MomentResponseDraft, clientID: UUID)] = [:]
     private var optimisticResponses: [UUID: MomentResponse] = [:]
     private var pendingAnswerAttempts: [UUID: (answer: String, clientID: UUID)] = [:]
@@ -29,21 +38,28 @@ final class MomentModel: ObservableObject {
     func start() async {
         guard !hasStarted else { return }
         hasStarted = true
+        lifecycleGeneration &+= 1
+        let request = LifecycleRequest(
+            generation: lifecycleGeneration,
+            requiresActiveModel: true
+        )
         do {
-            currentUserID = try await service.currentUserID()
+            let userID = try await service.currentUserID()
+            guard isCurrent(request) else { return }
+            currentUserID = userID
         } catch {
+            guard isCurrent(request) else { return }
             statusMessage = "無法確認 Moment 留下者，請稍後再試。"
         }
+        guard isCurrent(request) else { return }
         if let cached = service.cachedMoments() {
             moments = cached
             loadCachedPhotos()
         }
-        await refresh()
-        do {
-            try await service.startObservingChanges { [weak self] in
-                await self?.refresh()
-            }
-        } catch {
+        await refresh(for: request)
+        guard isCurrent(request) else { return }
+        let isObserving = await startObservation(for: request)
+        if !isObserving, isCurrent(request) {
             statusMessage = "即時同步暫時無法連線；重新開啟畫面時會再讀取。"
         }
     }
@@ -79,16 +95,33 @@ final class MomentModel: ObservableObject {
     }
 
     func stop() async {
+        let endingGeneration = lifecycleGeneration
         hasStarted = false
-        await service.stopObservingChanges()
+        lifecycleGeneration &+= 1
+        await stopObservation()
+        await waitForLifecycleWork(generation: endingGeneration)
     }
 
     func refresh() async {
-        guard !isLoading else { return }
+        guard let request = lifecycleRequestAllowingInitialExplicitWork() else { return }
+        await refresh(for: request)
+    }
+
+    private func refresh(for request: LifecycleRequest) async {
+        while isLoading {
+            guard isCurrent(request) else { return }
+            await Task.yield()
+        }
+        guard isCurrent(request) else { return }
+        beginLifecycleWork(for: request)
         isLoading = true
-        defer { isLoading = false }
+        defer {
+            isLoading = false
+            endLifecycleWork(for: request)
+        }
         do {
             let page = try await service.fetchMomentsPage(before: nil, limit: pageSize)
+            guard isCurrent(request) else { return }
             let hadLoadedOlderPages = moments.count > page.moments.count
             let previousHasMore = hasMoreMoments
             moments = merge(page.moments, with: moments)
@@ -96,6 +129,7 @@ final class MomentModel: ObservableObject {
             mergeOptimisticResponses()
             statusMessage = nil
         } catch {
+            guard isCurrent(request) else { return }
             statusMessage = "無法更新 Moment，請稍後再試。"
         }
     }
@@ -264,6 +298,84 @@ final class MomentModel: ObservableObject {
             else { continue }
             photoDataByMomentID[moment.id] = data
         }
+    }
+
+    private func activeLifecycleRequest() -> LifecycleRequest? {
+        guard hasStarted else { return nil }
+        return LifecycleRequest(
+            generation: lifecycleGeneration,
+            requiresActiveModel: true
+        )
+    }
+
+    private func lifecycleRequestAllowingInitialExplicitWork() -> LifecycleRequest? {
+        if let active = activeLifecycleRequest() { return active }
+        guard lifecycleGeneration == 0 else { return nil }
+        return LifecycleRequest(generation: 0, requiresActiveModel: false)
+    }
+
+    private func isCurrent(_ request: LifecycleRequest) -> Bool {
+        request.generation == lifecycleGeneration
+            && (!request.requiresActiveModel || hasStarted)
+    }
+
+    private func beginLifecycleWork(for request: LifecycleRequest) {
+        activeLifecycleWorkByGeneration[request.generation, default: 0] += 1
+    }
+
+    private func endLifecycleWork(for request: LifecycleRequest) {
+        let remaining = (activeLifecycleWorkByGeneration[request.generation] ?? 1) - 1
+        if remaining > 0 {
+            activeLifecycleWorkByGeneration[request.generation] = remaining
+        } else {
+            activeLifecycleWorkByGeneration[request.generation] = nil
+            let waiters = lifecycleWorkWaitersByGeneration.removeValue(
+                forKey: request.generation
+            ) ?? []
+            for waiter in waiters { waiter.resume() }
+        }
+    }
+
+    private func waitForLifecycleWork(generation: Int) async {
+        guard activeLifecycleWorkByGeneration[generation, default: 0] > 0 else { return }
+        await withCheckedContinuation { continuation in
+            guard activeLifecycleWorkByGeneration[generation, default: 0] > 0 else {
+                continuation.resume()
+                return
+            }
+            lifecycleWorkWaitersByGeneration[generation, default: []].append(continuation)
+        }
+    }
+
+    private func startObservation(for request: LifecycleRequest) async -> Bool {
+        let previous = observationTransitionTask
+        let transition = Task { @MainActor [weak self] in
+            _ = await previous?.value
+            guard let self, self.isCurrent(request) else { return false }
+            do {
+                try await self.service.startObservingChanges { [weak self] in
+                    guard let self, self.isCurrent(request) else { return }
+                    await self.refresh(for: request)
+                }
+                return self.isCurrent(request)
+            } catch {
+                return false
+            }
+        }
+        observationTransitionTask = transition
+        return await transition.value
+    }
+
+    private func stopObservation() async {
+        let previous = observationTransitionTask
+        let transition = Task { @MainActor [weak self] in
+            _ = await previous?.value
+            guard let self else { return false }
+            await self.service.stopObservingChanges()
+            return false
+        }
+        observationTransitionTask = transition
+        _ = await transition.value
     }
 
     private func responseContent(for draft: MomentResponseDraft) -> MomentResponseContent? {

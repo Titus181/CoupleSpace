@@ -501,6 +501,10 @@ struct MomentPhotoGridView: View {
                                                 photo(moment)
                                             }
                                             .buttonStyle(.plain)
+                                            .frame(maxWidth: .infinity)
+                                            .aspectRatio(1, contentMode: .fit)
+                                            .contentShape(Rectangle())
+                                            .clipped()
                                             .id(moment.id)
                                             .task(id: moment.id) {
                                                 await model.loadPhotoIfNeeded(moment)
@@ -549,9 +553,9 @@ struct MomentPhotoGridView: View {
 
     @ViewBuilder
     private func photo(_ moment: Moment) -> some View {
-        Color.clear
-            .aspectRatio(1, contentMode: .fit)
-            .overlay {
+        GeometryReader { proxy in
+            ZStack {
+                Color.secondary.opacity(0.12)
                 if let data = model.photoDataByMomentID[moment.id],
                    let image = UIImage(data: data)
                 {
@@ -559,12 +563,13 @@ struct MomentPhotoGridView: View {
                         .resizable()
                         .scaledToFill()
                 } else {
-                    Color.secondary.opacity(0.12)
                     Image(systemName: "photo")
                         .foregroundStyle(.secondary)
                 }
             }
+            .frame(width: proxy.size.width, height: proxy.size.height)
             .clipped()
+        }
     }
 
     private func monthTitle(_ date: Date) -> String {
@@ -659,6 +664,7 @@ struct MomentCard: View {
                         .frame(maxWidth: .infinity)
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                         .allowsHitTesting(false)
+                        .accessibilityIdentifier("moment-card")
                 } else {
                     ZStack {
                         RoundedRectangle(cornerRadius: 16)
@@ -703,7 +709,6 @@ struct MomentCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
-        .accessibilityIdentifier("moment-card")
         .sheet(isPresented: $isWritingResponse) {
             MomentTextResponseView(moment: moment, model: model)
         }

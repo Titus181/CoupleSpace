@@ -32,7 +32,6 @@ protocol ConversationRemoteServing: AnyObject {
     func removeReaction(messageID: UUID) async throws
     func saveAsMoment(messageID: UUID, momentClientID: UUID) async throws -> UUID
     func markRead(through messageID: UUID) async throws
-    func markInteractionScopeRead() async throws
     func markAllRelationshipInteractionsRead() async throws
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws
     func stopObservingChanges() async
@@ -187,13 +186,15 @@ private struct PushDeliveryInvocation: Encodable {
     enum CodingKeys: String, CodingKey { case jobID = "job_id" }
 }
 
-private struct MarkRelationshipInteractionsReadParameters: Encodable {
+private struct MarkRelationshipInteractionsReadThroughMessageParameters: Encodable {
     let targetRelationshipID: UUID
     let targetScopeID: UUID
+    let targetMessageClientID: UUID
 
     enum CodingKeys: String, CodingKey {
         case targetRelationshipID = "target_relationship_id"
         case targetScopeID = "target_scope_id"
+        case targetMessageClientID = "target_message_client_id"
     }
 }
 
@@ -700,10 +701,11 @@ final class SupabaseConversationService: ConversationRemoteServing {
         case let .appointment(appointmentID): scopeID = appointmentID
         }
         try await client.rpc(
-            "mark_relationship_interactions_read",
-            params: MarkRelationshipInteractionsReadParameters(
+            "mark_relationship_interactions_read_through_message",
+            params: MarkRelationshipInteractionsReadThroughMessageParameters(
                 targetRelationshipID: relationshipID,
-                targetScopeID: scopeID
+                targetScopeID: scopeID,
+                targetMessageClientID: messageID
             )
         ).execute()
     }
@@ -713,21 +715,6 @@ final class SupabaseConversationService: ConversationRemoteServing {
         try await client.rpc(
             "mark_all_relationship_interactions_read",
             params: ConversationRelationshipParameters(targetRelationshipID: relationshipID)
-        ).execute()
-    }
-
-    func markInteractionScopeRead() async throws {
-        let scopeID: UUID
-        switch scope {
-        case .main: scopeID = relationshipID
-        case let .appointment(appointmentID): scopeID = appointmentID
-        }
-        try await client.rpc(
-            "mark_relationship_interactions_read",
-            params: MarkRelationshipInteractionsReadParameters(
-                targetRelationshipID: relationshipID,
-                targetScopeID: scopeID
-            )
         ).execute()
     }
 
@@ -900,6 +887,7 @@ final class InMemoryConversationService: ConversationRemoteServing {
     private var sendFailuresRemaining: Int
     private var savedMomentByMessageID: [UUID: UUID] = [:]
     private let returnsCachedSnapshot: Bool
+    private let onMarkRead: @MainActor (UUID) async -> Void
 
     init(
         currentUserID: UUID = UUID(),
@@ -907,7 +895,8 @@ final class InMemoryConversationService: ConversationRemoteServing {
         unreadCount: Int = 0,
         sendFailuresRemaining: Int = 0,
         photoDataByMessageID: [UUID: Data] = [:],
-        returnsCachedSnapshot: Bool = true
+        returnsCachedSnapshot: Bool = true,
+        onMarkRead: @escaping @MainActor (UUID) async -> Void = { _ in }
     ) {
         self.currentUserID = currentUserID
         self.messages = messages
@@ -915,6 +904,7 @@ final class InMemoryConversationService: ConversationRemoteServing {
         self.sendFailuresRemaining = sendFailuresRemaining
         self.photoDataByMessageID = photoDataByMessageID
         self.returnsCachedSnapshot = returnsCachedSnapshot
+        self.onMarkRead = onMarkRead
     }
 
     func fetchPendingSnapshot() async throws -> ConversationPendingSnapshot {
@@ -1063,11 +1053,10 @@ final class InMemoryConversationService: ConversationRemoteServing {
             throw ConversationServiceError.invalidMessage
         }
         unreadCount = 0
+        await onMarkRead(messageID)
     }
 
     func markAllRelationshipInteractionsRead() async throws {}
-
-    func markInteractionScopeRead() async throws {}
 
     func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {}
     func stopObservingChanges() async {}

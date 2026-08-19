@@ -3,7 +3,6 @@ import {
   APNsConfiguration,
   APNsEnvironment,
   createProviderToken,
-  NotificationPreview,
   sendGenericPush,
 } from "./apns.ts";
 
@@ -19,7 +18,6 @@ type ClaimedJob = {
 
 type DeviceRow = {
   token: string;
-  content_preview_enabled: boolean;
 };
 
 const jsonHeaders = { "Content-Type": "application/json" };
@@ -119,7 +117,7 @@ Deno.serve(async (request) => {
 
   const { data: deviceRows, error: deviceError } = await service
     .from("push_devices")
-    .select("token,content_preview_enabled")
+    .select("token")
     .eq("user_id", job.recipient_user_id)
     .eq("environment", environment)
     .eq("bundle_id", "com.titus.CoupleSpace")
@@ -155,25 +153,12 @@ Deno.serve(async (request) => {
     return response("apns_key_invalid", 500);
   }
 
-  const preview = async (device: DeviceRow): Promise<NotificationPreview | undefined> => {
-    if (!device.content_preview_enabled || !job.source_item_id) return undefined;
-    const { data } = await service.from("shared_items")
-      .select("item_kind,text_content,creator_user_id")
-      .eq("id", job.source_item_id).limit(1).maybeSingle();
-    if (!data) return undefined;
-    if (data.item_kind === "photo") return { title: "CoupleSpace 有新動態", body: "傳送了一張照片" };
-    if (typeof data.text_content !== "string") return undefined;
-    const { data: profile } = await service.from("user_profiles")
-      .select("display_name").eq("user_id", data.creator_user_id).maybeSingle();
-    return { title: profile?.display_name ?? "CoupleSpace 有新訊息", body: data.text_content.slice(0, 140) };
-  };
-  const deliveries = await Promise.all(devices.map(async (device) =>
+  const deliveries = await Promise.all(devices.map((device) =>
     sendGenericPush(
       device.token,
       job.source_item_id,
       job.event_kind,
       job.badge_count,
-      await preview(device),
       providerToken,
       environment,
     ).catch(() => ({ ok: false, status: 0, reason: "apns_network_failed" }))

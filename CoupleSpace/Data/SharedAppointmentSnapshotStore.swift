@@ -14,6 +14,7 @@ private struct SharedAppointmentCachedItem: Codable {
     let reminderAt: Date?
     let status: SharedAppointmentStatus
     let sourceMessageID: UUID?
+    let interactionBoundarySourceIdentity: UUID?
     let createdAt: Date
     let updatedAt: Date
 
@@ -27,6 +28,7 @@ private struct SharedAppointmentCachedItem: Codable {
         reminderAt = appointment.reminderAt
         status = appointment.status
         sourceMessageID = appointment.sourceMessageID
+        interactionBoundarySourceIdentity = appointment.interactionBoundarySourceIdentity
         createdAt = appointment.createdAt
         updatedAt = appointment.updatedAt
     }
@@ -42,6 +44,7 @@ private struct SharedAppointmentCachedItem: Codable {
             reminderAt: reminderAt,
             status: status,
             sourceMessageID: sourceMessageID,
+            interactionBoundarySourceIdentity: interactionBoundarySourceIdentity,
             createdAt: createdAt,
             updatedAt: updatedAt
         )

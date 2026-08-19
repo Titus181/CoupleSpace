@@ -48,9 +48,7 @@ function privateKeyBytes(pem: string): Uint8Array {
   }
 }
 
-export type NotificationPreview = { title: string; body: string };
-
-export function genericPayload(eventID: string, eventKind: string, badgeCount = 0, preview?: NotificationPreview) {
+export function genericPayload(eventID: string, eventKind: string, badgeCount = 0) {
   if (
     ![
       "chat_message_created",
@@ -66,8 +64,8 @@ export function genericPayload(eventID: string, eventKind: string, badgeCount = 
   return {
     aps: {
       alert: {
-        title: preview?.title ?? "CoupleSpace 有新動態",
-        body: preview?.body ?? "打開 App 查看",
+        title: "CoupleSpace 有新動態",
+        body: "打開 App 查看",
       },
       sound: "default",
       badge: Math.max(0, badgeCount),
@@ -110,7 +108,6 @@ export async function sendGenericPush(
   eventID: string,
   eventKind: string,
   badgeCount: number,
-  preview: NotificationPreview | undefined,
   providerToken: string,
   environment: APNsEnvironment,
   fetcher: Fetcher = fetch,
@@ -132,7 +129,7 @@ export async function sendGenericPush(
       "apns-topic": topic,
       "content-type": "application/json",
     },
-    body: JSON.stringify(genericPayload(eventID, eventKind, badgeCount, preview)),
+    body: JSON.stringify(genericPayload(eventID, eventKind, badgeCount)),
   });
 
   let reason: string | null = null;

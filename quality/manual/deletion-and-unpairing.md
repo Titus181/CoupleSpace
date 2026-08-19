@@ -14,7 +14,7 @@
 10. 在「個人封存已完成」建立新的配對邀請時，必須進入 waiting 邀請流程；既有個人封存不得被刪除、改寫或誤分享給新關係。
 11. 從 W1 技術工具開始解除配對後，發起裝置必須立即離開 active relationship 並進入正式「解除配對」畫面。任一方建立封存或按「重新確認解除配對狀態」後，畫面須收斂至等待另一方或「個人封存已完成」；不得要求強制結束 App 才更新，也不得因封存後的本機 outbox 清理失敗而將已成功的伺服器封存顯示為配對失敗。
 
-## 切片 7：正式解除配對入口（待真機驗證）
+## 切片 7：正式解除配對入口
 
 1. 以兩個測試帳號建立一段 active relationship，準備至少一筆已同步文字、照片與共同約定；記下兩台的「對話」tab badge 與 App icon badge。
 2. 在 A 開啟「我們 → 帳號設定 → 關係與資料 → 解除配對」。確認畫面明確說明：共同空間會停止新增內容、雙方各有 owner-only 唯讀封存、對方不能管理本人的封存、舊 relationship 不能恢復但可重新配對。
@@ -38,3 +38,10 @@
 記錄 fixture 數量、兩位 owner 的可見範圍、匯出核對、刪除前後 metadata／object count 與 relationship 最終狀態；W11 另記錄上述穩定 ID 前 8 碼、每份封存的 appointment／discussion／event count 及 archive-local 關聯核對。越權、資料遺失、關聯斷裂、重複、過早 GC 或雙方不一致都阻擋發布。
 
 2026-08-17 W11 第四輪實機驗收：兩支真實 iPhone 在解除配對前完成含來源訊息的共同約定、雙方專屬討論文字、照片、Emoji、改期與取消 fixture；兩位 owner 建立個人封存後均顯示封存共同約定 12、封存專屬討論項目 5、封存重大事件 16，且 archive-local audit 為「約定封存關聯完整」。A 刪除自己的封存後三項歸零並回到未核定狀態，B 仍維持 12／5／16 與完整 audit，沒有異常畫面或過早影響另一份封存。產品 UI 未顯示穩定 ID 前 8 碼，本輪以兩台相同計數、內建關聯 audit、25-case archive pgTAP 與既有 owner-only RLS 證據核對 identity／關聯，不把未顯示的 ID 虛構為已記錄。
+
+## 2026-08-20 final candidate 結果
+
+- 結果：`PASS`。
+- 證據：使用者在同一最終 W13 候選完成所有 active relationship gate 後，最後執行 destructive lifecycle，明確回報流程正常；約定、討論、提醒與 cleanup 亦於相同候選正常。
+- iPhone 機型／iOS、fixture count、穩定 ID 前綴與精確完成時間：`未記錄`，不得補造。
+- 本結果關閉 W13 引用的 `LIFECYCLE-001`；完整 TestFlight Gate D、DR／UPGRADE 與未在本輪提供的壓力 metadata 不在此結論範圍。

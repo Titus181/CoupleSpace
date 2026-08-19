@@ -24,6 +24,43 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    private func tapWhenHittable(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        timeout: TimeInterval = 3,
+        maximumScrollAttempts: Int = 5,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        for attempt in 0...maximumScrollAttempts {
+            let expectation = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "exists == true AND hittable == true"),
+                object: element
+            )
+            if XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed {
+                element.tap()
+                return
+            }
+
+            guard attempt < maximumScrollAttempts else { break }
+
+            guard element.exists else {
+                app.swipeUp()
+                continue
+            }
+
+            let windowFrame = app.windows.firstMatch.frame
+            if element.frame.minY < windowFrame.minY {
+                app.swipeDown()
+            } else {
+                app.swipeUp()
+            }
+        }
+
+        XCTFail("Expected element to become hittable.", file: file, line: line)
+    }
+
+    @MainActor
     func testLaunchAnimationCompletes() throws {
         let app = XCUIApplication()
         app.launch()
@@ -152,7 +189,15 @@ final class CoupleSpaceUITests: XCTestCase {
         app.launch()
 
         app.tabBars.buttons["對話"].tap()
-        XCTAssertTrue(app.staticTexts["分頁訊息 0"].waitForExistence(timeout: 3))
+        XCTAssertTrue(
+            app.descendants(matching: .any)["conversation-screen"]
+                .waitForExistence(timeout: 2)
+        )
+        let newest = app.staticTexts["分頁訊息 0"]
+        for _ in 0..<12 where !newest.exists {
+            app.swipeUp()
+        }
+        XCTAssertTrue(newest.waitForExistence(timeout: 3))
         XCTAssertFalse(app.buttons["load-older-conversation-messages"].exists)
 
         let oldest = app.staticTexts["分頁訊息 54"]
@@ -217,9 +262,9 @@ final class CoupleSpaceUITests: XCTestCase {
         app.launch()
 
         app.tabBars.buttons["對話"].tap()
-        let photo = app.images["聊天照片"]
-        XCTAssertTrue(photo.waitForExistence(timeout: 3))
-        photo.press(forDuration: 1)
+        let message = app.staticTexts["晚餐後一起散步"]
+        XCTAssertTrue(message.waitForExistence(timeout: 3))
+        message.press(forDuration: 1)
         XCTAssertTrue(app.buttons["更多 Emoji"].waitForExistence(timeout: 1))
         app.buttons["更多 Emoji"].tap()
 
@@ -264,9 +309,8 @@ final class CoupleSpaceUITests: XCTestCase {
         app.launchArguments = ["--ui-testing", "--ui-testing-w10-chat"]
         app.launch()
 
-        let sourceButton = app.buttons["查看原對話"]
-        XCTAssertTrue(sourceButton.waitForExistence(timeout: 3))
-        sourceButton.tap()
+        let sourceButton = app.buttons["open-source-conversation"]
+        tapWhenHittable(sourceButton, in: app)
 
         XCTAssertTrue(app.descendants(matching: .any)["conversation-screen"].waitForExistence(timeout: 2))
         let sourceMessage = app.staticTexts["晚餐後一起散步"]
@@ -527,7 +571,11 @@ final class CoupleSpaceUITests: XCTestCase {
         XCTAssertTrue(app.alerts["要取消這筆共同約定嗎？"].waitForExistence(timeout: 1))
         app.alerts.buttons["取消約定"].tap()
 
-        XCTAssertTrue(app.staticTexts["狀態, 已取消"].waitForExistence(timeout: 2))
+        let cancelledStatus = app.descendants(matching: .any)[
+            "shared-appointment-detail-status"
+        ]
+        XCTAssertTrue(cancelledStatus.waitForExistence(timeout: 2))
+        XCTAssertTrue(cancelledStatus.label.contains("已取消"))
         XCTAssertFalse(app.buttons["edit-shared-appointment"].exists)
         XCTAssertTrue(
             app.staticTexts["這筆約定已取消；原內容會保留在你們的過往約定中。"].exists
@@ -552,7 +600,11 @@ final class CoupleSpaceUITests: XCTestCase {
         app.buttons["cancel-shared-appointment"].tap()
         XCTAssertTrue(app.alerts["要取消這筆共同約定嗎？"].waitForExistence(timeout: 1))
         app.alerts.buttons["取消約定"].tap()
-        XCTAssertTrue(app.staticTexts["狀態, 已取消"].waitForExistence(timeout: 2))
+        let detailStatus = app.descendants(matching: .any)[
+            "shared-appointment-detail-status"
+        ]
+        XCTAssertTrue(detailStatus.waitForExistence(timeout: 2))
+        XCTAssertTrue(detailStatus.label.contains("已取消"))
 
         app.navigationBars["約定詳情"].buttons["對話"].tap()
         let cancelledStatus = app.descendants(matching: .any)[
@@ -619,7 +671,11 @@ final class CoupleSpaceUITests: XCTestCase {
         app.navigationBars["約定詳情"].buttons["共同日程"].tap()
         app.staticTexts["取消的電影約會"].tap()
 
-        XCTAssertTrue(app.staticTexts["狀態, 已取消"].waitForExistence(timeout: 2))
+        let cancelledStatus = app.descendants(matching: .any)[
+            "shared-appointment-detail-status"
+        ]
+        XCTAssertTrue(cancelledStatus.waitForExistence(timeout: 2))
+        XCTAssertTrue(cancelledStatus.label.contains("已取消"))
         app.buttons["open-appointment-discussion"].tap()
         XCTAssertTrue(app.staticTexts["電影票已經退好了"].waitForExistence(timeout: 2))
         XCTAssertTrue(
@@ -710,9 +766,8 @@ final class CoupleSpaceUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["從約定留下的 Moment"].waitForExistence(timeout: 3))
-        let openSource = app.buttons["查看原對話"]
-        XCTAssertTrue(openSource.waitForExistence(timeout: 2))
-        openSource.tap()
+        let openSource = app.buttons["open-source-conversation"]
+        tapWhenHittable(openSource, in: app)
 
         XCTAssertTrue(
             app.descendants(matching: .any)["appointment-discussion-screen"]
@@ -731,7 +786,7 @@ final class CoupleSpaceUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.staticTexts["第一個約定來源"].waitForExistence(timeout: 3))
-        app.buttons["查看原對話"].tap()
+        tapWhenHittable(app.buttons["open-source-conversation"], in: app)
         XCTAssertTrue(
             app.descendants(matching: .any)["appointment-discussion-screen"]
                 .waitForExistence(timeout: 3)
@@ -739,11 +794,9 @@ final class CoupleSpaceUITests: XCTestCase {
 
         app.tabBars.buttons["我們"].tap()
         XCTAssertTrue(app.staticTexts["第二個約定來源"].waitForExistence(timeout: 2))
-        let sourceButtons = app.buttons.matching(
-            NSPredicate(format: "label == '查看原對話'")
-        )
+        let sourceButtons = app.buttons.matching(identifier: "open-source-conversation")
         XCTAssertEqual(sourceButtons.count, 3)
-        sourceButtons.element(boundBy: 2).tap()
+        tapWhenHittable(sourceButtons.element(boundBy: 2), in: app)
 
         let secondSourceMessage = app.staticTexts
             .matching(identifier: "conversation-message-d4000000-0000-0000-0000-000000000022")
@@ -762,9 +815,11 @@ final class CoupleSpaceUITests: XCTestCase {
 
         app.tabBars.buttons["我們"].tap()
         XCTAssertTrue(app.staticTexts["一般聊天來源"].waitForExistence(timeout: 2))
-        app.buttons.matching(NSPredicate(format: "label == '查看原對話'"))
-            .element(boundBy: 1)
-            .tap()
+        tapWhenHittable(
+            app.buttons.matching(identifier: "open-source-conversation")
+                .element(boundBy: 1),
+            in: app
+        )
 
         XCTAssertTrue(
             app.descendants(matching: .any)["conversation-screen"]
@@ -808,6 +863,11 @@ final class CoupleSpaceUITests: XCTestCase {
         )
         XCTAssertTrue(app.staticTexts["週末去看展"].exists)
         XCTAssertTrue(app.images["聊天照片"].waitForExistence(timeout: 2))
+
+        let backToConversation = app.navigationBars["專屬討論"].buttons["對話"]
+        tapWhenHittable(backToConversation, in: app)
+        XCTAssertTrue(app.staticTexts["近期約定討論"].waitForExistence(timeout: 5))
+        XCTAssertFalse(app.staticTexts["未讀 2 則"].exists)
     }
 
     @MainActor
@@ -844,7 +904,10 @@ final class CoupleSpaceUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["伴侶留下的"].waitForExistence(timeout: 3))
 
         app.tabBars.buttons["我們"].tap()
-        app.buttons["account-settings"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["us-screen"].waitForExistence(timeout: 2))
+        let accountSettings = app.buttons["account-settings"]
+        XCTAssertTrue(accountSettings.waitForExistence(timeout: 2))
+        accountSettings.tap()
 
         let displayName = app.textFields["display-name-input"]
         XCTAssertTrue(displayName.waitForExistence(timeout: 1))
@@ -853,9 +916,16 @@ final class CoupleSpaceUITests: XCTestCase {
         let partnerName = app.textFields["private-partner-name-input"]
         partnerName.tap()
         partnerName.typeText("小月亮")
+        if app.keyboards.buttons["return"].exists {
+            app.keyboards.buttons["return"].tap()
+        }
         app.buttons["save-relationship-names"].tap()
 
-        XCTAssertTrue(app.staticTexts["稱呼已更新。"].waitForExistence(timeout: 2))
+        expectation(
+            for: NSPredicate(format: "isEnabled == true"),
+            evaluatedWith: app.buttons["clear-display-name"]
+        )
+        waitForExpectations(timeout: 3)
         app.buttons["完成"].tap()
         app.tabBars.buttons["今天"].tap()
         XCTAssertTrue(app.staticTexts["小日"].waitForExistence(timeout: 2))
@@ -866,7 +936,9 @@ final class CoupleSpaceUITests: XCTestCase {
         )
 
         app.tabBars.buttons["我們"].tap()
-        app.buttons["account-settings"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["us-screen"].waitForExistence(timeout: 2))
+        XCTAssertTrue(accountSettings.waitForExistence(timeout: 2))
+        accountSettings.tap()
         XCTAssertTrue(app.buttons["clear-display-name"].waitForExistence(timeout: 1))
         app.buttons["clear-display-name"].tap()
         expectation(
@@ -1004,19 +1076,26 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
-    func testAccountSettingsUsesAnAlertAndKeepsW1ValidationToolsReachable() throws {
+    func testAccountSettingsKeepsCurrentDeviceSignOutAndOmitsRemoteSignOut() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing"]
         app.launch()
 
         app.tabBars.buttons["我們"].tap()
-        app.buttons["account-settings"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["us-screen"].waitForExistence(timeout: 2))
+        let accountSettings = app.buttons["account-settings"]
+        XCTAssertTrue(accountSettings.waitForExistence(timeout: 2))
+        accountSettings.tap()
+        let remoteSignOutButton = app.buttons["other-sessions-sign-out"]
+        XCTAssertFalse(remoteSignOutButton.exists)
 
         let signOutButton = app.buttons["登出"]
         for _ in 0..<4 where !signOutButton.waitForExistence(timeout: 1) {
             app.swipeUp()
+            XCTAssertFalse(remoteSignOutButton.exists)
         }
         XCTAssertTrue(signOutButton.waitForExistence(timeout: 2))
+        XCTAssertFalse(remoteSignOutButton.exists)
         signOutButton.tap()
         XCTAssertTrue(app.alerts["要登出 CoupleSpace 嗎？"].waitForExistence(timeout: 1))
         app.alerts.buttons["取消"].tap()
@@ -1024,33 +1103,12 @@ final class CoupleSpaceUITests: XCTestCase {
         let toolsButton = app.buttons["w1-technical-tools"]
         for _ in 0..<4 where !toolsButton.waitForExistence(timeout: 1) {
             app.swipeDown()
+            XCTAssertFalse(remoteSignOutButton.exists)
         }
         XCTAssertTrue(toolsButton.waitForExistence(timeout: 1))
+        XCTAssertFalse(remoteSignOutButton.exists)
         toolsButton.tap()
         XCTAssertTrue(app.navigationBars["W1 技術驗證"].waitForExistence(timeout: 2))
-    }
-
-    @MainActor
-    func testAccountSettingsExplainsAllOtherSessionSignOutBeforeSubmitting() throws {
-        let app = XCUIApplication()
-        app.launchArguments = ["--ui-testing"]
-        app.launch()
-
-        app.tabBars.buttons["我們"].tap()
-        app.buttons["account-settings"].tap()
-
-        let otherSessionsButton = app.buttons["other-sessions-sign-out"]
-        if !otherSessionsButton.waitForExistence(timeout: 1) {
-            app.swipeUp()
-        }
-        XCTAssertTrue(otherSessionsButton.waitForExistence(timeout: 2))
-        otherSessionsButton.tap()
-
-        let alert = app.alerts["登出其他所有登入？"]
-        XCTAssertTrue(alert.waitForExistence(timeout: 1))
-        XCTAssertTrue(alert.staticTexts["目前裝置會保持登入。其他裝置需要重新使用 Apple 登入；已簽發的存取權杖可能在到期前短暫有效。這不會解除配對、刪除共同內容或改變個人封存。"].exists)
-        alert.buttons["取消"].tap()
-        XCTAssertFalse(alert.exists)
     }
 
     @MainActor
@@ -1091,14 +1149,13 @@ final class CoupleSpaceUITests: XCTestCase {
         app.tabBars.buttons["我們"].tap()
         app.buttons["account-settings"].tap()
 
-        let timeFormatPicker = app.pickers["time-format-picker"]
-        if !timeFormatPicker.waitForExistence(timeout: 1) {
+        let twelveHourChoice = app.buttons["12 小時"]
+        for _ in 0..<4 where !twelveHourChoice.waitForExistence(timeout: 1) {
             app.swipeUp()
         }
-        XCTAssertTrue(timeFormatPicker.waitForExistence(timeout: 2))
-        XCTAssertTrue(app.staticTexts["12 小時"].exists)
-        XCTAssertTrue(app.staticTexts["24 小時"].exists)
-        XCTAssertTrue(app.staticTexts["跟隨系統設置"].exists)
+        XCTAssertTrue(twelveHourChoice.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["24 小時"].exists)
+        XCTAssertTrue(app.buttons["跟隨系統設置"].exists)
     }
 
     @MainActor
@@ -1108,6 +1165,7 @@ final class CoupleSpaceUITests: XCTestCase {
         app.launch()
 
         XCTAssertTrue(app.descendants(matching: .any)["pairing-screen"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["other-sessions-sign-out"].exists)
 
         let acceptButton = app.buttons["accept-pairing-invitation"]
         let declineButton = app.buttons["decline-pairing-invitation"]
@@ -1130,8 +1188,12 @@ final class CoupleSpaceUITests: XCTestCase {
         app.tabBars.buttons["我們"].tap()
         XCTAssertTrue(app.buttons["account-settings"].waitForExistence(timeout: 2))
         app.buttons["account-settings"].tap()
-        XCTAssertTrue(app.buttons["open-unpairing-settings"].waitForExistence(timeout: 2))
-        app.buttons["open-unpairing-settings"].tap()
+        let unpairingSettings = app.buttons["open-unpairing-settings"]
+        for _ in 0..<5 where !unpairingSettings.waitForExistence(timeout: 1) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(unpairingSettings.waitForExistence(timeout: 2))
+        unpairingSettings.tap()
 
         XCTAssertTrue(app.navigationBars["關係與資料"].waitForExistence(timeout: 2))
         XCTAssertTrue(app.staticTexts["雙方各自保留一份只屬於自己的唯讀封存"].exists)

@@ -12,12 +12,23 @@ final class PairingModel: ObservableObject {
     @Published private(set) var archiveExportFileName = "CoupleSpace-personal-archive"
 
     private let service: PairingRemoteServing
+    private let removeRelationshipReminders: @MainActor (UUID) async -> Void
     private var sessionGeneration = 0
     private var archiveExportStagingURL: URL?
 
-    init(service: PairingRemoteServing, initialState: PairingState = .checking) {
+    init(
+        service: PairingRemoteServing,
+        initialState: PairingState = .checking,
+        removeRelationshipReminders: @escaping @MainActor (UUID) async -> Void = {
+            relationshipID in
+            await LocalSharedAppointmentReminderScheduler(
+                relationshipID: relationshipID
+            ).removeAll()
+        }
+    ) {
         self.service = service
         self.state = initialState
+        self.removeRelationshipReminders = removeRelationshipReminders
     }
 
     convenience init(client: SupabaseClient, initialState: PairingState = .checking) {
@@ -49,6 +60,7 @@ final class PairingModel: ObservableObject {
             let relationship = try await service.currentRelationship()
             guard generation == sessionGeneration else { return }
             try await apply(relationship: relationship)
+            guard generation == sessionGeneration else { return }
             statusMessage = nil
         } catch {
             guard generation == sessionGeneration else { return }
@@ -58,6 +70,7 @@ final class PairingModel: ObservableObject {
             } else if state == .checking {
                 state = .unpaired
             }
+            guard generation == sessionGeneration else { return }
             statusMessage = message(for: error)
         }
     }
@@ -70,6 +83,7 @@ final class PairingModel: ObservableObject {
             let relationship = try await service.currentRelationship()
             guard generation == sessionGeneration else { return }
             try await apply(relationship: relationship)
+            guard generation == sessionGeneration else { return }
             statusMessage = nil
         } catch {
             guard generation == sessionGeneration else { return }
@@ -170,12 +184,15 @@ final class PairingModel: ObservableObject {
         defer { finishOperation(generation: generation) }
 
         do {
-            closingPersonalArchive = try await service.sealPersonalArchive(
+            let archive = try await service.sealPersonalArchive(
                 relationshipID: relationship.id
             )
+            guard generation == sessionGeneration else { return }
+            closingPersonalArchive = archive
             let refreshedRelationship = try await service.currentRelationship()
             guard generation == sessionGeneration else { return }
             try await apply(relationship: refreshedRelationship)
+            guard generation == sessionGeneration else { return }
             statusMessage = refreshedRelationship == nil
                 ? "解除配對已完成；你的個人封存可以匯出。"
                 : "你的個人封存已建立，等待另一方完成。"
@@ -210,15 +227,20 @@ final class PairingModel: ObservableObject {
                 memberCount: relationship.memberCount,
                 status: "closing"
             ))
+            await removeRelationshipReminders(relationship.id)
+            guard generation == sessionGeneration else { return }
             closingPersonalArchive = nil
             statusMessage = "共同空間已停止新增內容，正在建立你的個人封存。"
 
-            closingPersonalArchive = try await service.sealPersonalArchive(
+            let archive = try await service.sealPersonalArchive(
                 relationshipID: relationship.id
             )
+            guard generation == sessionGeneration else { return }
+            closingPersonalArchive = archive
             let refreshedRelationship = try await service.currentRelationship()
             guard generation == sessionGeneration else { return }
             try await apply(relationship: refreshedRelationship)
+            guard generation == sessionGeneration else { return }
             statusMessage = refreshedRelationship == nil
                 ? "解除配對已完成；你的個人封存可以匯出。"
                 : "你的個人封存已安全保存，等待另一方完成。"
@@ -279,8 +301,20 @@ final class PairingModel: ObservableObject {
     }
 
     private func apply(relationship: PairingRelationship?) async throws {
+        let applicationGeneration = sessionGeneration
+        let previousRelationshipID = relationshipID(in: state)
         guard let relationship else {
-            if let archive = try await service.ownPersonalArchive() {
+            if let previousRelationshipID {
+                await removeRelationshipReminders(previousRelationshipID)
+            }
+            guard applicationGeneration == sessionGeneration else { return }
+            let archive = try await service.ownPersonalArchive()
+            if let archive,
+               archive.relationshipID != previousRelationshipID {
+                await removeRelationshipReminders(archive.relationshipID)
+            }
+            guard applicationGeneration == sessionGeneration else { return }
+            if let archive {
                 state = .archived(archive)
                 closingPersonalArchive = archive
             } else {
@@ -292,8 +326,36 @@ final class PairingModel: ObservableObject {
 
         if relationship.status == "closing" {
             state = .closing(relationship)
+            await removeRelationshipReminders(relationship.id)
+            guard applicationGeneration == sessionGeneration else { return }
             if let archive = try? await service.personalArchive(relationshipID: relationship.id) {
+                guard applicationGeneration == sessionGeneration else { return }
                 closingPersonalArchive = archive
+            }
+            return
+        }
+
+        if relationship.status == "archived" {
+            state = .closing(relationship)
+            await removeRelationshipReminders(relationship.id)
+            guard applicationGeneration == sessionGeneration else { return }
+            let relationshipArchive = try await service.personalArchive(
+                relationshipID: relationship.id
+            )
+            guard applicationGeneration == sessionGeneration else { return }
+            let archive: PersonalArchive?
+            if let relationshipArchive {
+                archive = relationshipArchive
+            } else {
+                archive = try await service.ownPersonalArchive()
+            }
+            guard applicationGeneration == sessionGeneration else { return }
+            if let archive {
+                state = .archived(archive)
+                closingPersonalArchive = archive
+            } else {
+                state = .unpaired
+                closingPersonalArchive = nil
             }
             return
         }
@@ -311,6 +373,19 @@ final class PairingModel: ObservableObject {
                 currentInvitation = nil
             }
             state = .waiting(relationship, invitation: currentInvitation)
+        }
+    }
+
+    private func relationshipID(in state: PairingState) -> UUID? {
+        switch state {
+        case let .waiting(relationship, _),
+             let .paired(relationship),
+             let .closing(relationship):
+            relationship.id
+        case let .archived(archive):
+            archive.relationshipID
+        case .checking, .unpaired:
+            nil
         }
     }
 

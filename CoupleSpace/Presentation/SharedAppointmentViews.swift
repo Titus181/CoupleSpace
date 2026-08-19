@@ -322,6 +322,7 @@ struct AppointmentDiscussionView: View {
     let appointmentID: UUID
     let appointmentTitle: String
     let allowsSending: Bool
+    let visibleInteractionBoundarySourceIdentity: UUID?
     let initialFocusMessageID: UUID?
     let onMomentSaved: @MainActor () async -> Void
 
@@ -331,6 +332,7 @@ struct AppointmentDiscussionView: View {
         appointmentID: UUID,
         appointmentTitle: String,
         allowsSending: Bool,
+        visibleInteractionBoundarySourceIdentity: UUID?,
         initialFocusMessageID: UUID? = nil,
         onMomentSaved: @escaping @MainActor () async -> Void = {}
     ) {
@@ -339,6 +341,7 @@ struct AppointmentDiscussionView: View {
         self.appointmentID = appointmentID
         self.appointmentTitle = appointmentTitle
         self.allowsSending = allowsSending
+        self.visibleInteractionBoundarySourceIdentity = visibleInteractionBoundarySourceIdentity
         _focusMessageID = State(initialValue: nil)
         self.initialFocusMessageID = initialFocusMessageID
         self.onMomentSaved = onMomentSaved
@@ -368,16 +371,36 @@ struct AppointmentDiscussionView: View {
         }
         .task(id: initialFocusMessageID) {
             await discussionModel.start()
-            await discussionModel.setConversationVisible(true)
-            await discussionModel.markInteractionScopeRead()
+            if Task.isCancelled {
+                await discussionModel.stop()
+                return
+            }
+            discussionModel.setConversationVisible(true)
+            await discussionModel.markVisibleMessagesRead()
+            if Task.isCancelled {
+                await discussionModel.stop()
+                return
+            }
+            await sharedAppointmentModel.markInteractionRead(
+                for: appointmentID,
+                visibleSourceIdentity: visibleInteractionBoundarySourceIdentity
+            )
+            if Task.isCancelled {
+                await discussionModel.stop()
+                return
+            }
             if let initialFocusMessageID {
                 await discussionModel.focusSourceMessage(id: initialFocusMessageID)
+            }
+            if Task.isCancelled {
+                await discussionModel.stop()
+                return
             }
             focusMessageID = initialFocusMessageID
         }
         .onDisappear {
+            discussionModel.setConversationVisible(false)
             Task {
-                await discussionModel.setConversationVisible(false)
                 await discussionModel.stop()
                 await sharedAppointmentModel.refresh()
             }
@@ -386,10 +409,13 @@ struct AppointmentDiscussionView: View {
 }
 
 struct SharedAppointmentDetailView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @EnvironmentObject private var appLockModel: AppLockModel
     @ObservedObject var model: SharedAppointmentModel
     let appointmentID: UUID
     @State private var isEditing = false
     @State private var isConfirmingCancellation = false
+    @State private var isPresented = false
     let onMomentSaved: @MainActor () async -> Void
 
     init(
@@ -432,6 +458,7 @@ struct SharedAppointmentDetailView: View {
                             "狀態",
                             value: appointment.status == .scheduled ? "已安排" : "已取消"
                         )
+                        .accessibilityIdentifier("shared-appointment-detail-status")
                     }
 
                     if let discussionModel = model.discussionModel(for: appointment.id) {
@@ -443,6 +470,8 @@ struct SharedAppointmentDetailView: View {
                                     appointmentID: appointment.id,
                                     appointmentTitle: appointment.title,
                                     allowsSending: appointment.status == .scheduled,
+                                    visibleInteractionBoundarySourceIdentity:
+                                        appointment.interactionBoundarySourceIdentity,
                                     onMomentSaved: onMomentSaved
                                 )
                             } label: {
@@ -493,6 +522,25 @@ struct SharedAppointmentDetailView: View {
                 } message: {
                     Text("取消後不會刪除內容，雙方仍可在過往約定中查看。")
                 }
+                .task(id: SharedAppointmentDetailReadTaskID(
+                    appointmentID: appointment.id,
+                    visibleSourceIdentity: appointment.interactionBoundarySourceIdentity,
+                    isVisible: SharedAppointmentDetailVisibilityPolicy.isVisible(
+                        sceneIsActive: scenePhase == .active,
+                        isPresented: isPresented,
+                        isLocked: appLockModel.isLocked
+                    )
+                )) {
+                    guard SharedAppointmentDetailVisibilityPolicy.isVisible(
+                        sceneIsActive: scenePhase == .active,
+                        isPresented: isPresented,
+                        isLocked: appLockModel.isLocked
+                    ) else { return }
+                    await model.markInteractionRead(
+                        for: appointmentID,
+                        visibleSourceIdentity: appointment.interactionBoundarySourceIdentity
+                    )
+                }
             } else {
                 ContentUnavailableView(
                     "找不到共同約定",
@@ -501,10 +549,25 @@ struct SharedAppointmentDetailView: View {
             }
         }
         .accessibilityIdentifier("shared-appointment-detail")
-        .task(id: appointmentID) {
-            await model.markInteractionRead(for: appointmentID)
-        }
+        .onAppear { isPresented = true }
+        .onDisappear { isPresented = false }
     }
+}
+
+enum SharedAppointmentDetailVisibilityPolicy {
+    static func isVisible(
+        sceneIsActive: Bool,
+        isPresented: Bool,
+        isLocked: Bool
+    ) -> Bool {
+        sceneIsActive && isPresented && !isLocked
+    }
+}
+
+private struct SharedAppointmentDetailReadTaskID: Hashable {
+    let appointmentID: UUID
+    let visibleSourceIdentity: UUID?
+    let isVisible: Bool
 }
 
 struct SharedAppointmentComposerView: View {

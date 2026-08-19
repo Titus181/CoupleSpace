@@ -324,11 +324,11 @@ last_updated: 2026-08-19
 - **決策：** CoupleSpace 將受 relationship RLS 保護的 Supabase 產品資料與 Private Storage 視為已同步內容的遠端 SSOT。手機遺失、損壞、換機或重新安裝後，使用者只要以同一帳號完成驗證，即可在不持有舊手機、不掃描換機碼、不重新配對及不手動搬移資料的情況下恢復本人有權存取的完整共同歷史。
 - **介面語意：** App 不提供容易讓使用者誤以為要自行維護副本的「立即備份」主操作；在「我們 → 設定 → 資料與恢復」顯示待送項目數、最近成功同步時間，以及換機使用同一 Apple 帳號登入的說明。`所有內容已同步` 只能在 `normal` 模式且伺服器已確認最新狀態時顯示；`read_only／recovery` 必須改為服務狀態、內容截至時間及待送數量。尚未經伺服器接受的內容維持 `傳送中` 或 `失敗`，不得標示為已備份或已同步。
 - **恢復體驗：** 新裝置先恢復帳號、relationship、membership、名稱及仍有效的目前狀態，再顯示最近聊天與 Moment；較舊歷史以穩定游標分頁取得，照片依可見範圍載入。各資料類型須顯示可理解的恢復中、完成或可重試狀態，單一照片或分頁失敗不得讓已恢復內容看似消失，也不得阻塞核心入口。
-- **裝置安全（逐一管理部分由 PD-043 取代）：** 本決策原定帳號設定查看目前登入裝置並撤銷其他裝置 session；W13 capability record 確認目前官方能力不足後，MVP 攨採「登出其他所有登入」，不建立裝置清單或指定 session 撤銷。遺失手機後的遠端撤銷仍不得解除配對、刪除共同資料、變更個人封存或建立 deletion tombstone。D4 金鑰輪替可使全部舊 session 失效並要求 Apple 重新驗證，但須保留同一 Auth user identity、relationship／membership 與內容授權，不得要求重新配對。App Lock 與遠端 session 撤銷是不同控制，兩者都不能取代同帳號身分驗證。
+- **裝置安全（由 PD-044 收斂）：** 本決策原定帳號設定查看目前登入裝置並撤銷其他裝置 session；W13 capability record 與真機 `SESSION-001` 未證明 inventory 或遠端撤銷可可靠交付，因此 MVP 不提供這兩項操作。使用者可在每台裝置各自登出；同一帳號重新登入後仍由遠端 SSOT 恢復既有 relationship、共同資料與本人個人封存，不要求重新配對。D4 金鑰輪替可在災難復原情境使全部舊 session 失效並要求 Apple 重新驗證，但不是一般使用者的舊裝置撤銷功能，且仍須保留同一 Auth user identity、relationship／membership 與內容授權。App Lock、本機登出與 D4 事故控制彼此分離。
 - **權益邊界：** 已同步的文字、照片、Moment、共同約定、討論、時間線與個人封存之基本換機／重裝恢復屬信任與資料安全能力，不設 Plus 付費牆。Plus 可提供更高媒體額度或進階匯出，但退訂不得使既有內容無法恢復。
 - **災難復原：** 裝置換機與雲端事故是不同問題。Supabase Database backup／PITR 只保護資料庫及 Storage metadata，實際 Storage objects 必須有獨立保護；正式公開前須從同一恢復點演練 Database 與 Storage 的一致還原，不能以「備份已啟用」、裝置 cache、分析事件或使用者匯出代替。
 - **LINE 調研取捨：** LINE 將帳號移轉、標準聊天備份與付費進階備份分開；標準備份依賴 iCloud Drive／Google Drive、只含文字且限相同 OS，換機碼一般自動帶走最近 14 天，進階備份才提供含媒體的即時與跨 OS 恢復。CoupleSpace 借鏡其清楚呈現可恢復範圍、進度與舊裝置安全處理，但不採用換機前手動備份、14 天限制、舊機依賴或核心歷史付費解鎖。
-- **排程影響：** W10 維持聊天首版完整範圍；W12／G11 承接長期歷史分頁與媒體漸進載入，W13／G12 承接裝置 session 管理，W14／G13 承接匯出與資料生命週期，G15 前完成清空本機狀態真機換機／重裝及 Database＋Storage restore drill。這些排程不得被目前小量測試資料一次載入成功提前宣稱完成。
+- **排程影響：** W10 維持聊天首版完整範圍；W12／G11 承接長期歷史分頁與媒體漸進載入，W13／G12 承接同帳號多裝置、目前裝置登出與裝置隱私整合，W14／G13 承接匯出與資料生命週期，G15 前完成清空本機狀態真機換機／重裝及 Database＋Storage restore drill。這些排程不得被目前小量測試資料一次載入成功提前宣稱完成。
 
 ### PD-034：雲端災難復原是基本信任能力，採一人可營運的冷備援
 
@@ -437,13 +437,25 @@ last_updated: 2026-08-19
 
 ### PD-043：裝置安全採「登出其他所有登入」，不建立逐一裝置清單
 
-- **狀態：** accepted
+- **狀態：** superseded
+- **由下列決策取代：** PD-044
 - **日期：** 2026-08-19
+- **歷史邊界：** 以下保留當時接受的產品語意供稽核，不再授權目前 UI、runtime 或發布聲明。
 - **決策：** iPhone MVP 的遠端登入安全採 Supabase Auth 原生 `others` scope：從目前登入送出「登出其他所有登入」，保留呼叫端並撤銷其餘 Auth sessions 的 refresh tokens。產品不顯示登入裝置／session inventory，也不提供選取一支裝置或指定 session 撤銷；本決策取代 PD-033「查看目前登入裝置並撤銷其他裝置 session」中超出目前官方能力的逐一管理描述，PD-033 的遠端同步恢復與資料生命週期原則不變。
 - **能力依據：** 目前鎖定的 `supabase-swift 2.54.1` 只有 `local`、`global`、`others` sign-out，沒有 client／Admin session-list 或 target-session revoke API；runtime JWT 的 optional `session_id` 亦不可保證存在。`push_devices`、APNs token、Apple ID、裝置名稱與本機 install ID 都不是 Auth 授權真相，不得用來補造裝置清單。
 - **產品文案：** 帳號設定只提供「登出其他所有登入」。操作前須說明目前裝置保持登入、其他登入都會受影響、需要重新以 Apple 驗證、已簽發 access JWT 可能在到期前短暫有效，以及操作不會解除配對、刪除共同內容或改變任一方個人封存。成功回應只能顯示「已送出」，不得宣稱其他裝置已立即失效。
 - **安全與資料邊界：** 遠端撤銷以 refresh 失敗及 access JWT 到期後的受保護 RLS 讀取拒絕為完成證據；不能以 HTTP success、本機登出、App 重開或畫面返回登入單獨判定。操作不得更新 relationship／membership、共同歷史、個人封存、deletion tombstone 或 production Auth policy。
 - **Stop condition：** 若未來需求改為可信裝置名稱、last-seen、逐一撤銷或更短的 access JWT 殘留窗口，停止擴充現有 UI 並另案評估 server-verified registry、敏感操作重新驗證與 Auth policy；在 threat model、資料最小化、migration／RLS 與雙裝置證據完成前，不得把 `others` 包裝成逐一裝置管理。
+
+### PD-044：MVP 移除 session inventory 與遠端撤銷，只保留目前裝置登出
+
+- **狀態：** accepted
+- **日期：** 2026-08-19
+- **決策：** PD-043 的「登出其他所有登入」不納入 iPhone MVP；帳號設定不顯示 session／裝置 inventory，也不提供 `.others`、`.global`、指定 session 或任何形式的遠端撤銷。每台裝置只提供目前裝置的 `.local` 登出，且不得把 App Lock、APNs token 移除、解除配對、資料刪除或 Apple 身分操作包裝成替代撤銷。本決策取代 PD-043，並收斂 PD-033 的舊裝置安全描述；遠端同步恢復與資料生命週期原則不變。
+- **多裝置語意：** 同一 Supabase 帳號可以同時登入多台裝置；各裝置讀寫同一份受 RLS 保護的 server SSOT，重新登入後恢復同一帳號既有 relationship、共同歷史、約定、未讀狀態與本人個人封存，不要求重新配對。本機 App Lock、通知權限、提醒、cache 與 APNs routing 仍各裝置獨立，不能由內容一致反推 session 身分或遠端撤銷能力。
+- **真機依據：** 2026-08-19 的 `SESSION-001` 中，A 送出 `.others` 後保持登入，B 以既有 JWT 成功讀取受保護資料；B 隨後手動 refresh 仍成功，Access JWT expiry 從基線截圖的 9:29 PM 更新為 9:44 PM，Auth session 與基線資料均保留。精確操作時間、HTTP status、Auth audit event 與兩端可驗證 `session_id` 均為 `未記錄`。此結果是原 all-others 產品契約的 **FAIL** 證據；不能把它歸類為 access JWT 殘留窗口，也不能由既有 Simulator preflight 推翻。
+- **驗收語意：** `SESSION-001` 保留為 retired stable ID 與歷史 FAIL，不再是 G12／W13 候選版的 blocking gate；正式候選須把它記為 `NOT_APPLICABLE (REMOVED)`，不能改寫成 PASS。G12／W13 仍須驗證兩台同帳號的 server SSOT 一致性、其中一台 `.local` 登出不影響另一台、登出裝置重新登入後恢復既有授權資料，以及 LOCK／PUSH／activity-badge／reminder／lifecycle／W8–W11 全部整合 gate。
+- **未來重開條件：** 只有供應商或另案 server contract 能提供可驗證的 session identity、明確且可觀察的 revoke result、失敗／逾時語意、資料最小化 threat model，以及兩支真實 iPhone 的 refresh／重開／受保護讀取證據後，才可另立新決策重新加入遠端 session 安全控制。不得以 `push_devices`、APNs token、Apple ID、裝置名稱、本機 install ID、縮短 JWT expiry 或虛構 registry 補上缺口。
 
 ## 待決策事項
 
@@ -468,6 +480,6 @@ last_updated: 2026-08-19
 - Widget 是否納入首版或第一個小版本。
 - Apple Watch、iPad、Mac 與 Apple TV 的正式版本、日期、最低系統版本、同步／登入技術及各平台 Free／Plus 最終分界；平台角色、隱私原則與建議驗證順序已由 PD-032 定案。
 - Android 是否立項、正式版本、最低系統版本、client 技術、登入方式、推播與商店計費方案；延後至 iPhone 上市驗證後評估、自由配對目標與現行架構相容原則已由 PD-042 定案。
-- 「資料與恢復」畫面的最終文案、同步時間顯示精度、歷史分頁大小與縮圖策略；MVP 不提供裝置命名或逐一 session 撤銷，all-others 操作與未來升級 stop condition 已由 PD-043 定案。
+- 「資料與恢復」畫面的最終文案、同步時間顯示精度、歷史分頁大小與縮圖策略；MVP 不提供 session／裝置 inventory 或遠端撤銷，只保留目前裝置登出，未來重開條件已由 PD-044 定案。
 - 共同約定的基本提醒預設值、取消後通知方式，以及活動後建立 Moment 的具體文案。
 - 輕量生活提醒原型的通過門檻、正式名稱與實作版本；三向聯動、低壓邊界及不納入目前 MVP 已由 PD-027 定案。

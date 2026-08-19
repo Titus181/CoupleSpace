@@ -1328,6 +1328,364 @@ struct CoupleSpaceTests {
 
         #expect(token.hex == "00abff10")
     }
+
+    @Test func partnerObservedClosingRelationshipClearsLocalReminders() async {
+        let relationshipID = UUID()
+        let activeRelationship = PairingRelationship(
+            id: relationshipID,
+            memberCount: 2
+        )
+        let closingRelationship = PairingRelationship(
+            id: relationshipID,
+            memberCount: 2,
+            status: "closing"
+        )
+        let service = ReminderLifecyclePairingServiceFake(
+            currentRelationship: closingRelationship
+        )
+        var cleanedRelationshipIDs: [UUID] = []
+        let model = PairingModel(
+            service: service,
+            initialState: .paired(activeRelationship),
+            removeRelationshipReminders: { cleanedRelationshipIDs.append($0) }
+        )
+
+        await model.refresh()
+
+        #expect(model.state == .closing(closingRelationship))
+        #expect(cleanedRelationshipIDs == [relationshipID])
+    }
+
+    @Test func nilRelationshipClearsRemindersFromWaitingAndClosingStates() async {
+        let relationshipID = UUID()
+        let relationship = PairingRelationship(
+            id: relationshipID,
+            memberCount: 1
+        )
+        let archive = PersonalArchive(id: UUID(), relationshipID: relationshipID)
+        let cases: [(PairingState, PersonalArchive?, PairingState)] = [
+            (.waiting(relationship, invitation: nil), archive, .archived(archive)),
+            (
+                .closing(PairingRelationship(
+                    id: relationshipID,
+                    memberCount: 2,
+                    status: "closing"
+                )),
+                nil,
+                .unpaired
+            ),
+        ]
+
+        for (initialState, ownArchive, expectedState) in cases {
+            let service = ReminderLifecyclePairingServiceFake(
+                currentRelationship: nil,
+                ownPersonalArchive: ownArchive
+            )
+            var cleanedRelationshipIDs: [UUID] = []
+            let model = PairingModel(
+                service: service,
+                initialState: initialState,
+                removeRelationshipReminders: { cleanedRelationshipIDs.append($0) }
+            )
+
+            await model.refresh()
+
+            #expect(model.state == expectedState)
+            #expect(cleanedRelationshipIDs == [relationshipID])
+        }
+    }
+
+    @Test func archiveDiscoveredWithoutPriorRelationshipClearsItsReminders() async {
+        let relationshipID = UUID()
+        let archive = PersonalArchive(id: UUID(), relationshipID: relationshipID)
+        let service = ReminderLifecyclePairingServiceFake(
+            currentRelationship: nil,
+            ownPersonalArchive: archive
+        )
+        var cleanedRelationshipIDs: [UUID] = []
+        let model = PairingModel(
+            service: service,
+            removeRelationshipReminders: { cleanedRelationshipIDs.append($0) }
+        )
+
+        await model.refresh()
+
+        #expect(model.state == .archived(archive))
+        #expect(cleanedRelationshipIDs == [relationshipID])
+    }
+
+    @Test func explicitlyArchivedRelationshipClearsRemindersAndRestoresArchive() async {
+        let relationshipID = UUID()
+        let activeRelationship = PairingRelationship(
+            id: relationshipID,
+            memberCount: 2
+        )
+        let archivedRelationship = PairingRelationship(
+            id: relationshipID,
+            memberCount: 0,
+            status: "archived"
+        )
+        let archive = PersonalArchive(id: UUID(), relationshipID: relationshipID)
+        let service = ReminderLifecyclePairingServiceFake(
+            currentRelationship: archivedRelationship,
+            ownPersonalArchive: archive
+        )
+        var cleanedRelationshipIDs: [UUID] = []
+        let model = PairingModel(
+            service: service,
+            initialState: .paired(activeRelationship),
+            removeRelationshipReminders: { cleanedRelationshipIDs.append($0) }
+        )
+
+        await model.refresh()
+
+        #expect(model.state == .archived(archive))
+        #expect(cleanedRelationshipIDs == [relationshipID])
+    }
+
+    @Test func terminalRefreshCannotOverwriteANewerAuthenticatedSessionDuringCleanup() async {
+        let relationshipID = UUID()
+        let archive = PersonalArchive(id: UUID(), relationshipID: relationshipID)
+        let service = ReminderLifecyclePairingServiceFake(
+            currentRelationship: nil,
+            ownPersonalArchive: archive
+        )
+        let suspendedCleanup = SuspendedRelationshipReminderCleanup()
+        let model = PairingModel(
+            service: service,
+            initialState: .paired(PairingRelationship(
+                id: relationshipID,
+                memberCount: 2
+            )),
+            removeRelationshipReminders: { relationshipID in
+                await suspendedCleanup.run(relationshipID: relationshipID)
+            }
+        )
+        let staleRefresh = Task { await model.refresh() }
+        while suspendedCleanup.relationshipIDs.isEmpty {
+            await Task.yield()
+        }
+
+        model.resetForAuthenticatedSession()
+        suspendedCleanup.resume()
+        await staleRefresh.value
+
+        #expect(suspendedCleanup.relationshipIDs == [relationshipID])
+        #expect(model.state == .checking)
+        #expect(model.closingPersonalArchive == nil)
+        #expect(model.statusMessage == nil)
+    }
+
+    @Test func backgroundAppointmentRefreshSkipsReconcileAfterAccountSwitch() async throws {
+        let relationshipID = UUID()
+        let initialContext = BackgroundAppointmentReminderContext(
+            userID: UUID(),
+            relationshipID: relationshipID,
+            relationshipStatus: "active"
+        )
+        let switchedContext = BackgroundAppointmentReminderContext(
+            userID: UUID(),
+            relationshipID: relationshipID,
+            relationshipStatus: "active"
+        )
+        var fetchCallCount = 0
+        var reconcileCallCount = 0
+        let orchestrator = BackgroundAppointmentReminderReconcileOrchestrator(
+            initialContext: initialContext,
+            fetchAppointments: { _ in
+                fetchCallCount += 1
+                return []
+            },
+            revalidatedContext: { switchedContext },
+            reconcile: { _, _ in reconcileCallCount += 1 }
+        )
+
+        let didReconcile = try await orchestrator.run()
+
+        #expect(fetchCallCount == 1)
+        #expect(!didReconcile)
+        #expect(reconcileCallCount == 0)
+    }
+
+    @Test func backgroundAppointmentRefreshSkipsReconcileAfterLogout() async throws {
+        let initialContext = BackgroundAppointmentReminderContext(
+            userID: UUID(),
+            relationshipID: UUID(),
+            relationshipStatus: "active"
+        )
+        var reconcileCallCount = 0
+        let orchestrator = BackgroundAppointmentReminderReconcileOrchestrator(
+            initialContext: initialContext,
+            fetchAppointments: { _ in [] },
+            revalidatedContext: { nil },
+            reconcile: { _, _ in reconcileCallCount += 1 }
+        )
+
+        let didReconcile = try await orchestrator.run()
+
+        #expect(!didReconcile)
+        #expect(reconcileCallCount == 0)
+    }
+
+    @Test func backgroundAppointmentRefreshSkipsReconcileAfterRelationshipClosing() async throws {
+        let userID = UUID()
+        let relationshipID = UUID()
+        let initialContext = BackgroundAppointmentReminderContext(
+            userID: userID,
+            relationshipID: relationshipID,
+            relationshipStatus: "active"
+        )
+        let closingContext = BackgroundAppointmentReminderContext(
+            userID: userID,
+            relationshipID: relationshipID,
+            relationshipStatus: "closing"
+        )
+        var reconcileCallCount = 0
+        let orchestrator = BackgroundAppointmentReminderReconcileOrchestrator(
+            initialContext: initialContext,
+            fetchAppointments: { _ in [] },
+            revalidatedContext: { closingContext },
+            reconcile: { _, _ in reconcileCallCount += 1 }
+        )
+
+        let didReconcile = try await orchestrator.run()
+
+        #expect(!didReconcile)
+        #expect(reconcileCallCount == 0)
+    }
+
+    @Test func backgroundAppointmentRefreshSkipsReconcileAfterRelationshipSwitch() async throws {
+        let userID = UUID()
+        let initialContext = BackgroundAppointmentReminderContext(
+            userID: userID,
+            relationshipID: UUID(),
+            relationshipStatus: "active"
+        )
+        let switchedContext = BackgroundAppointmentReminderContext(
+            userID: userID,
+            relationshipID: UUID(),
+            relationshipStatus: "active"
+        )
+        var reconcileCallCount = 0
+        let orchestrator = BackgroundAppointmentReminderReconcileOrchestrator(
+            initialContext: initialContext,
+            fetchAppointments: { _ in [] },
+            revalidatedContext: { switchedContext },
+            reconcile: { _, _ in reconcileCallCount += 1 }
+        )
+
+        let didReconcile = try await orchestrator.run()
+
+        #expect(!didReconcile)
+        #expect(reconcileCallCount == 0)
+    }
+
+    @Test func backgroundAppointmentRefreshReconcilesUnchangedActiveContext() async throws {
+        let context = BackgroundAppointmentReminderContext(
+            userID: UUID(),
+            relationshipID: UUID(),
+            relationshipStatus: "active"
+        )
+        var reconcileCallCount = 0
+        var events: [String] = []
+        let orchestrator = BackgroundAppointmentReminderReconcileOrchestrator(
+            initialContext: context,
+            fetchAppointments: { _ in
+                events.append("fetch")
+                return []
+            },
+            revalidatedContext: {
+                events.append("revalidate")
+                return context
+            },
+            reconcile: { receivedContext, appointments in
+                events.append("reconcile")
+                #expect(receivedContext == context)
+                #expect(appointments.isEmpty)
+                reconcileCallCount += 1
+            }
+        )
+
+        let didReconcile = try await orchestrator.run()
+
+        #expect(didReconcile)
+        #expect(reconcileCallCount == 1)
+        #expect(events == ["fetch", "revalidate", "reconcile"])
+    }
+
+    @Test func backgroundAppointmentRefreshSkipsReconcileWhenTerminalCleanupWins() async throws {
+        let context = BackgroundAppointmentReminderContext(
+            userID: UUID(),
+            relationshipID: UUID(),
+            relationshipStatus: "active"
+        )
+        var events: [String] = []
+        let orchestrator = BackgroundAppointmentReminderReconcileOrchestrator(
+            initialContext: context,
+            fetchAppointments: { _ in
+                events.append("fetch")
+                return []
+            },
+            revalidatedContext: {
+                events.append("revalidate")
+                return context
+            },
+            reconcile: { _, _ in
+                events.append("reconcile")
+            },
+            activateIfContextUnchanged: {
+                events.append("activate")
+                return false
+            }
+        )
+
+        let didReconcile = try await orchestrator.run()
+
+        #expect(!didReconcile)
+        #expect(events == ["fetch", "revalidate", "activate"])
+    }
+
+    @Test func reminderLifecycleConditionalActivationRejectsAStaleGeneration() {
+        let gate = SharedAppointmentReminderLifecycleGate()
+        let coldGeneration = gate.generation
+
+        #expect(gate.activate(ifGenerationMatches: coldGeneration))
+        #expect(gate.isActive)
+
+        let activeGeneration = gate.generation
+        gate.deactivate()
+
+        #expect(!gate.activate(ifGenerationMatches: activeGeneration))
+        #expect(!gate.isActive)
+    }
+
+    @Test func localSignOutWaitsForAuthenticatedContentTeardown() async {
+        var events: [String] = []
+        var stopContinuation: CheckedContinuation<Void, Never>?
+        let teardown = Task {
+            await AuthenticatedContentTeardown.run(
+                stopActions: [{
+                    events.append("stop-began")
+                    await withCheckedContinuation { continuation in
+                        stopContinuation = continuation
+                    }
+                    events.append("stop-finished")
+                }],
+                completion: { events.append("sign-out") }
+            )
+        }
+
+        while stopContinuation == nil {
+            await Task.yield()
+        }
+        #expect(events == ["stop-began"])
+
+        stopContinuation?.resume()
+        stopContinuation = nil
+        await teardown.value
+
+        #expect(events == ["stop-began", "stop-finished", "sign-out"])
+    }
 #endif
 
     @Test func meaningfulInteractionRequiresBothExpectedParticipantsOnOneObject() {
@@ -1496,4 +1854,85 @@ struct CoupleSpaceTests {
         // https://developer.apple.com/documentation/testing
     }
 
+}
+
+private final class ReminderLifecyclePairingServiceFake: PairingRemoteServing {
+    var currentRelationshipValue: PairingRelationship?
+    var ownPersonalArchiveValue: PersonalArchive?
+
+    init(
+        currentRelationship: PairingRelationship?,
+        ownPersonalArchive: PersonalArchive? = nil
+    ) {
+        currentRelationshipValue = currentRelationship
+        ownPersonalArchiveValue = ownPersonalArchive
+    }
+
+    func currentRelationship() async throws -> PairingRelationship? {
+        currentRelationshipValue
+    }
+
+    func createInvitation() async throws -> PairingInvitation {
+        throw ReminderLifecyclePairingServiceFakeError.unusedMethod
+    }
+
+    func acceptInvitation(identifier _: String) async throws -> UUID {
+        throw ReminderLifecyclePairingServiceFakeError.unusedMethod
+    }
+
+    func declineInvitation(identifier _: String) async throws {
+        throw ReminderLifecyclePairingServiceFakeError.unusedMethod
+    }
+
+    func cancelInvitation() async throws {
+        throw ReminderLifecyclePairingServiceFakeError.unusedMethod
+    }
+
+    func unpairingReadiness(relationshipID _: UUID) async throws -> UnpairingReadiness {
+        throw ReminderLifecyclePairingServiceFakeError.unusedMethod
+    }
+
+    func beginUnpairing(relationshipID _: UUID) async throws {
+        throw ReminderLifecyclePairingServiceFakeError.unusedMethod
+    }
+
+    func sealPersonalArchive(relationshipID _: UUID) async throws -> PersonalArchive {
+        throw ReminderLifecyclePairingServiceFakeError.unusedMethod
+    }
+
+    func ownPersonalArchive() async throws -> PersonalArchive? {
+        ownPersonalArchiveValue
+    }
+
+    func personalArchive(relationshipID _: UUID) async throws -> PersonalArchive? {
+        nil
+    }
+
+    func preparePersonalArchiveExport(
+        archive _: PersonalArchive
+    ) async throws -> PersonalArchiveExportPreparation {
+        throw ReminderLifecyclePairingServiceFakeError.unusedMethod
+    }
+}
+
+private enum ReminderLifecyclePairingServiceFakeError: Error {
+    case unusedMethod
+}
+
+@MainActor
+private final class SuspendedRelationshipReminderCleanup {
+    private(set) var relationshipIDs: [UUID] = []
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    func run(relationshipID: UUID) async {
+        relationshipIDs.append(relationshipID)
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+        }
+    }
+
+    func resume() {
+        continuation?.resume()
+        continuation = nil
+    }
 }

@@ -105,6 +105,7 @@ struct ConversationView: View {
     @Binding private var appointmentDiscussionFocus: AppointmentDiscussionFocus?
     private let savedMomentSourceIDs: Set<UUID>
     private let onMomentSaved: @MainActor () async -> Void
+    private let onVisibilityChanged: @MainActor (Bool) -> Void
     private let mode: ConversationPresentationMode
     private let embedsNavigationStack: Bool
     private let allowsSending: Bool
@@ -126,7 +127,8 @@ struct ConversationView: View {
         mode: ConversationPresentationMode = .main,
         embedsNavigationStack: Bool = true,
         allowsSending: Bool = true,
-        onMomentSaved: @escaping @MainActor () async -> Void = {}
+        onMomentSaved: @escaping @MainActor () async -> Void = {},
+        onVisibilityChanged: @escaping @MainActor (Bool) -> Void = { _ in }
     ) {
         self.model = model
         self.sharedAppointmentModel = sharedAppointmentModel
@@ -137,20 +139,21 @@ struct ConversationView: View {
         self.embedsNavigationStack = embedsNavigationStack
         self.allowsSending = allowsSending
         self.onMomentSaved = onMomentSaved
+        self.onVisibilityChanged = onVisibilityChanged
     }
 
     var body: some View {
         Group {
             if embedsNavigationStack {
                 NavigationStack {
-                    conversationLayout
+                    visibleConversationLayout
                         .navigationDestination(item: $appointmentDiscussionFocus) { focus in
                             appointmentDiscussionDestination(focus)
                         }
                 }
                     .accessibilityIdentifier("conversation-screen")
             } else {
-                conversationLayout
+                visibleConversationLayout
             }
         }
         .overlayPreferenceValue(ConversationMessageBoundsKey.self) { bounds in
@@ -193,6 +196,12 @@ struct ConversationView: View {
         }
     }
 
+    private var visibleConversationLayout: some View {
+        conversationLayout
+            .onAppear { onVisibilityChanged(true) }
+            .onDisappear { onVisibilityChanged(false) }
+    }
+
     @ViewBuilder
     private func appointmentDiscussionDestination(_ focus: AppointmentDiscussionFocus) -> some View {
         if let appointment = sharedAppointmentModel.appointment(id: focus.appointmentID),
@@ -203,6 +212,8 @@ struct ConversationView: View {
                 appointmentID: appointment.id,
                 appointmentTitle: appointment.title,
                 allowsSending: appointment.status == .scheduled,
+                visibleInteractionBoundarySourceIdentity:
+                    appointment.interactionBoundarySourceIdentity,
                 initialFocusMessageID: focus.messageID,
                 onMomentSaved: onMomentSaved
             )
@@ -284,6 +295,8 @@ struct ConversationView: View {
                                     appointmentID: entry.appointment.id,
                                     appointmentTitle: entry.appointment.title,
                                     allowsSending: entry.appointment.status == .scheduled,
+                                    visibleInteractionBoundarySourceIdentity:
+                                        entry.appointment.interactionBoundarySourceIdentity,
                                     onMomentSaved: onMomentSaved
                                 )
                             }
@@ -382,13 +395,20 @@ struct ConversationView: View {
                     loadOlderMessages(using: proxy)
                 }
                 .onAppear {
-                    if focusMessageID == nil {
+                    guard focusMessageID == nil, highlightedMessageID == nil else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        guard focusMessageID == nil, highlightedMessageID == nil else { return }
                         scrollToLatest(using: proxy)
                     }
                 }
                 .onChange(of: timelineItems.last?.id) { _, _ in
-                    guard focusMessageID == nil else { return }
-                    scrollToLatest(using: proxy)
+                    guard focusMessageID == nil, highlightedMessageID == nil else { return }
+                    Task { @MainActor in
+                        await Task.yield()
+                        guard focusMessageID == nil, highlightedMessageID == nil else { return }
+                        scrollToLatest(using: proxy)
+                    }
                 }
                 .onChange(of: focusMessageID, initial: true) { _, messageID in
                     guard let messageID else { return }

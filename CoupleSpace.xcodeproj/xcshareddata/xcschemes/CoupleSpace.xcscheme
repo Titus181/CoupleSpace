@@ -78,7 +78,7 @@
       <CommandLineArguments>
          <CommandLineArgument
             argument = "--session-capability-probe"
-            isEnabled = "YES">
+            isEnabled = "NO">
          </CommandLineArgument>
       </CommandLineArguments>
    </LaunchAction>

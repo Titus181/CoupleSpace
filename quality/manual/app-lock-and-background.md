@@ -22,3 +22,10 @@
 ## 證據與阻擋規則
 
 記錄 build、iPhone 機型／iOS、測試帳號與 relationship 的去識別前綴、每一項結果，以及不含私密內容的鎖定／App switcher 截圖。任何未驗證即顯示私密內容、無法安全退出、設定未持久化，或驗證導致 session、relationship、Outbox 改變，都使 `LOCK-001` 為 FAIL 並阻擋 G12 關閉。
+
+## 2026-08-20 final candidate 結果
+
+- 結果：`PASS`。
+- 證據：使用者在同一最終 W13 候選的兩支真實 iPhone 合併執行 LOCK／PUSH／5C／W8，明確回報流程正常；本輪取代最後行為變更前的舊 LOCK 證據。
+- iPhone 機型／iOS、精確完成時間：`未記錄`。
+- 本結果只關閉 W13 引用的 `LOCK-001`；不代表 TestFlight Gate D 或全產品 release-ready。
