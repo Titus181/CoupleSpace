@@ -5,6 +5,9 @@ import UniformTypeIdentifiers
 struct PairingGateView: View {
     @Environment(\.scenePhase) private var scenePhase
     @ObservedObject var model: PairingModel
+#if DEBUG
+    @State private var isShowingSessionCapabilityProbe = false
+#endif
     let supabaseClient: SupabaseClient
     let accountUserID: UUID?
     let accountUserToken: String?
@@ -66,7 +69,45 @@ struct PairingGateView: View {
             guard phase == .active else { return }
             Task { await model.refresh() }
         }
+#if DEBUG
+        .overlay(alignment: .topTrailing) {
+            if showsSessionCapabilityProbeEntry,
+               SessionCapabilityProbeAvailability.isEnabled(
+                   arguments: ProcessInfo.processInfo.arguments
+               ) {
+                Button {
+                    isShowingSessionCapabilityProbe = true
+                } label: {
+                    Label("W13 session 測試", systemImage: "checkmark.shield")
+                        .font(.caption.weight(.semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityIdentifier("session-capability-probe-gate-entry")
+                .padding()
+            }
+        }
+        .sheet(isPresented: $isShowingSessionCapabilityProbe) {
+            NavigationStack {
+                SessionCapabilityProbeScreen(client: supabaseClient)
+                    .navigationTitle("W13 session 測試")
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("完成") {
+                                isShowingSessionCapabilityProbe = false
+                            }
+                        }
+                    }
+            }
+        }
+#endif
     }
+
+#if DEBUG
+    private var showsSessionCapabilityProbeEntry: Bool {
+        if case .paired = model.state { return false }
+        return true
+    }
+#endif
 }
 
 private struct ArchivedPersonalArchiveView: View {

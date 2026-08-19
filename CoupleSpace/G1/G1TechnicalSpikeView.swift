@@ -9,6 +9,7 @@ struct G1TechnicalSpikeView: View {
     @StateObject private var authModel: SupabaseAppleAuthenticationModel
     @StateObject private var pairingModel: SupabasePairingPoC
     @StateObject private var networkRecoveryMonitor = NetworkRecoveryMonitor()
+    private let client: SupabaseClient
     private let onRelationshipLifecycleChanged: @MainActor () async -> Void
 #if os(iOS)
     @State private var supabaseSelectedPhoto: PhotosPickerItem?
@@ -22,6 +23,7 @@ struct G1TechnicalSpikeView: View {
         supabaseClient: SupabaseClient,
         onRelationshipLifecycleChanged: @escaping @MainActor () async -> Void = {}
     ) {
+        client = supabaseClient
         _authModel = StateObject(
             wrappedValue: SupabaseAppleAuthenticationModel(client: supabaseClient)
         )
@@ -53,6 +55,14 @@ struct G1TechnicalSpikeView: View {
                         .frame(height: 44)
                     }
                 }
+
+#if DEBUG
+                if SessionCapabilityProbeAvailability.isEnabled(
+                    arguments: ProcessInfo.processInfo.arguments
+                ) {
+                    SessionCapabilityProbeView(client: client)
+                }
+#endif
 
                 if authModel.isSignedIn {
                     Section("Supabase 雙身分 RLS") {

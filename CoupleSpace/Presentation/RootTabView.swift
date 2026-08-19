@@ -9,6 +9,9 @@ struct RootTabView: View {
     @State private var appointmentDiscussionFocus: AppointmentDiscussionFocus?
     @State private var sourceNavigationRequestID: UUID?
     @State private var relationshipUnreadCount: Int?
+#if DEBUG
+    @State private var isShowingSessionCapabilityProbe = false
+#endif
 
     private var displayedUnreadCount: Int {
         relationshipUnreadCount
@@ -678,6 +681,38 @@ struct RootTabView: View {
                     )
                 }
             }
+#if DEBUG
+            .overlay(alignment: .topTrailing) {
+                if SessionCapabilityProbeAvailability.isEnabled(
+                    arguments: ProcessInfo.processInfo.arguments
+                ), let technicalValidationClient {
+                    Button {
+                        isShowingSessionCapabilityProbe = true
+                    } label: {
+                        Label("W13 session 測試", systemImage: "checkmark.shield")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .accessibilityIdentifier("session-capability-probe-entry")
+                    .padding()
+                }
+            }
+            .sheet(isPresented: $isShowingSessionCapabilityProbe) {
+                if let technicalValidationClient {
+                    NavigationStack {
+                        SessionCapabilityProbeScreen(client: technicalValidationClient)
+                            .navigationTitle("W13 session 測試")
+                            .toolbar {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button("完成") {
+                                        isShowingSessionCapabilityProbe = false
+                                    }
+                                }
+                            }
+                    }
+                }
+            }
+#endif
         }
         .tint(.accentColor)
         .task {
@@ -956,7 +991,9 @@ private struct AccountSettingsView: View {
     @AppStorage(CoupleSpaceTimeFormat.defaultsKey) private var timeFormatRawValue = CoupleSpaceTimeFormat.followSystem.rawValue
     @AppStorage("push-content-preview-enabled") private var showsNotificationContent = false
     @State private var isConfirmingSignOut = false
+    @State private var isConfirmingOtherSessionsSignOut = false
     @State private var isShowingTechnicalValidation = false
+    @StateObject private var otherSessionsSignOutModel = OtherSessionsSignOutModel()
     @ObservedObject var togetherNowModel: TogetherNowModel
     let userToken: String?
     let statusMessage: String?
@@ -979,6 +1016,32 @@ private struct AccountSettingsView: View {
                     Text("識別碼只顯示前 8 碼，可用來確認重新登入後是否仍是同一個 CoupleSpace 帳號。")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+
+                if technicalValidationClient != nil {
+                    Section("登入安全") {
+                        Button("登出其他所有登入", role: .destructive) {
+                            isConfirmingOtherSessionsSignOut = true
+                        }
+                        .disabled(otherSessionsSignOutModel.isWorking)
+                        .accessibilityIdentifier("other-sessions-sign-out")
+
+                        Text("保留目前裝置；其他登入需要重新使用 Apple 驗證。這不會解除配對或刪除任何內容。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+
+                        if otherSessionsSignOutModel.isWorking {
+                            ProgressView("正在送出……")
+                                .accessibilityIdentifier("other-sessions-sign-out-progress")
+                        }
+
+                        if let statusMessage = otherSessionsSignOutModel.statusMessage {
+                            Text(statusMessage)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("other-sessions-sign-out-status")
+                        }
+                    }
                 }
 
                 Section("App Lock") {
@@ -1088,6 +1151,22 @@ private struct AccountSettingsView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("完成") { dismiss() }
                 }
+            }
+            .alert(
+                "登出其他所有登入？",
+                isPresented: $isConfirmingOtherSessionsSignOut
+            ) {
+                Button("登出其他所有登入", role: .destructive) {
+                    guard let technicalValidationClient else { return }
+                    Task {
+                        await otherSessionsSignOutModel.signOutOtherSessions {
+                            try await technicalValidationClient.auth.signOut(scope: .others)
+                        }
+                    }
+                }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text("目前裝置會保持登入。其他裝置需要重新使用 Apple 登入；已簽發的存取權杖可能在到期前短暫有效。這不會解除配對、刪除共同內容或改變個人封存。")
             }
             .alert(
                 "要登出 CoupleSpace 嗎？",

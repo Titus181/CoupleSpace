@@ -7,6 +7,27 @@ import UIKit
 
 struct AppSkeletonTests {
     @MainActor
+    @Test func otherSessionsSignOutOnlyReportsTheSubmittedOperationOutcome() async {
+        let model = OtherSessionsSignOutModel()
+        var operationCount = 0
+
+        await model.signOutOtherSessions {
+            operationCount += 1
+        }
+
+        #expect(operationCount == 1)
+        #expect(model.isWorking == false)
+        #expect(model.statusMessage == OtherSessionsSignOutModel.successMessage)
+
+        await model.signOutOtherSessions {
+            throw OtherSessionsSignOutTestError.failed
+        }
+
+        #expect(model.isWorking == false)
+        #expect(model.statusMessage == OtherSessionsSignOutModel.failureMessage)
+    }
+
+    @MainActor
     @Test func appLockLocksOnInactiveAndBackgroundAndOnlyUnlocksAfterDeviceAuthentication() async {
         let preferences = UserDefaults(suiteName: "AppSkeletonTests.appLock")!
         preferences.removePersistentDomain(forName: "AppSkeletonTests.appLock")
@@ -165,6 +186,56 @@ struct AppSkeletonTests {
             ])
         }
     }
+
+#if DEBUG
+    @Test func sessionCapabilityProbeRequiresItsExplicitLaunchArgument() {
+        #expect(SessionCapabilityProbeAvailability.isEnabled(arguments: []) == false)
+        #expect(SessionCapabilityProbeAvailability.isEnabled(arguments: [
+            "--ui-testing",
+            SessionCapabilityProbeAvailability.launchArgument,
+        ]))
+    }
+
+    @Test func sessionCapabilityProbeUsesAOneWayShortFingerprint() {
+        let firstSessionID = "11111111-2222-3333-4444-555555555555"
+        let secondSessionID = "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"
+
+        let first = SessionCapabilityProbeIdentity(sessionID: firstSessionID, expiresAt: 1_800_000_000)
+        let duplicate = SessionCapabilityProbeIdentity(sessionID: firstSessionID, expiresAt: 1_800_000_000)
+        let second = SessionCapabilityProbeIdentity(sessionID: secondSessionID, expiresAt: 1_800_000_000)
+
+        #expect(first.fingerprint == duplicate.fingerprint)
+        #expect(first.fingerprint != second.fingerprint)
+        #expect(first.fingerprint.count == 12)
+        #expect(first.fingerprint.contains(firstSessionID) == false)
+    }
+
+    @MainActor
+    @Test func sessionProtectedDataProbePublishesOnlyRemoteMetadataEvidence() async {
+        let expected = SessionProtectedDataSnapshot(
+            hasAuthSession: true,
+            relationship: .succeeded(SessionProtectedRelationshipEvidence(
+                fingerprint: "A1B2C3D4E5F6",
+                status: "active"
+            )),
+            activeMemberCount: .succeeded(2),
+            sharedItemCount: .succeeded(3),
+            personalArchive: .succeeded(SessionProtectedArchiveEvidence(
+                fingerprint: "010203040506",
+                relationshipFingerprint: "A1B2C3D4E5F6"
+            )),
+            personalArchiveItemCount: .succeeded(3)
+        )
+        let inspector = SessionProtectedDataInspectorFake(snapshot: expected)
+        let model = SessionProtectedDataProbeModel(inspector: inspector)
+
+        await model.inspect()
+
+        #expect(inspector.inspectionCount == 1)
+        #expect(model.isWorking == false)
+        #expect(model.snapshot == expected)
+    }
+#endif
 
     @Test func primarySectionsStayInAcceptedOrderAndOpenOnToday() {
         #expect(PrimarySection.allCases == [.today, .conversation, .us])
@@ -3091,6 +3162,27 @@ struct AppSkeletonTests {
         #expect(model.statusMessage != nil)
     }
 }
+
+private enum OtherSessionsSignOutTestError: Error {
+    case failed
+}
+
+#if DEBUG
+@MainActor
+private final class SessionProtectedDataInspectorFake: SessionProtectedDataInspecting {
+    private let snapshot: SessionProtectedDataSnapshot
+    private(set) var inspectionCount = 0
+
+    init(snapshot: SessionProtectedDataSnapshot) {
+        self.snapshot = snapshot
+    }
+
+    func inspect() async -> SessionProtectedDataSnapshot {
+        inspectionCount += 1
+        return snapshot
+    }
+}
+#endif
 
 @MainActor
 private final class AppLockAuthenticatorFake: AppLockAuthenticating {

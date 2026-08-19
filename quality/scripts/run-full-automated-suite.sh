@@ -96,6 +96,10 @@ run_step "Full iPhone scheme" \
     -resultBundlePath "$evidence_root/CoupleSpace.xcresult" \
     -parallel-testing-enabled NO
 
+run_step "Auth session SDK capability" \
+    env COUPLESPACE_DERIVED_DATA_ROOT="$evidence_root/DerivedData" \
+    "$repo_root/quality/scripts/verify-session-capability.sh"
+
 if (( include_watch == 1 )); then
     run_step "Watch scheme" \
         rtk xcodebuild test \

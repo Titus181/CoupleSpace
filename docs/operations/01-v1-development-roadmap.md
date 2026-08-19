@@ -1,7 +1,7 @@
 ---
 title: 第一版開發路線圖
 status: active
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # 第一版開發路線圖
@@ -49,7 +49,7 @@ last_updated: 2026-08-18
 | W11，10/12–10/18 | **G10 基本共同約定與專屬討論（已完成）** | 可由長按訊息確認、輸入列「＋」、今天或共同日程建立同一筆基本共同約定；主對話卡片、近期列表、月曆、詳情與通知同步同一狀態且重試不重複；雙方可進入同一個專屬討論，活動後可挑選內容建立相關 Moment，且不建立第二套訊息系統 |
 | 立即插入，G10 最終雙機複驗前 | **G4A 邀請短碼與頻繁重配對修正（已完成）** | 保留內部高熵 token，新增 `XXXX-XXXX` 八位短碼、現有邀請相容、輸入正規化、伺服器限流與中性錯誤；兩支真實 iPhone 完成至少五輪解除後重新建立邀請、短碼接受、雙方收斂與舊碼失效，不等待 Universal Link、落地頁或動畫 |
 | W12，10/19–10/25 | **G11「我們」與基本回顧（已完成）** | 共同時間線不只依序無限堆疊，須按月份分組並支援日期／月份快速跳轉及最小內容類型篩選；「我們 → 照片」以三欄網格只瀏覽照片 Moment，月份由上到下從舊到新，首次進入定位底部最新內容、向上載入更早月份，詳情可顯示來源並返回正確對話／約定且保留原捲動位置；聊天與 Moment 的長期歷史使用穩定游標分頁，媒體依可見範圍漸進載入；使用正確顯示名稱／私人稱呼標示參與者與建立時間；可查看過往約定並返回相關討論；基本每週回顧採規則式彙整，不使用 AI |
-| W13，10/26–11/1 | **G12 推播與裝置隱私** | 一般對話、約定討論與基本提醒送達正確使用者；鎖定畫面預設不顯示私密內容；Face ID／裝置密碼 App Lock 可用；可查看目前登入裝置並撤銷遺失或不再使用的其他裝置 session，且不影響 relationship 或既有內容 |
+| W13，10/26–11/1 | **G12 推播與裝置隱私** | 一般對話、約定討論與基本提醒送達正確使用者；鎖定畫面預設不顯示私密內容；Face ID／裝置密碼 App Lock 可用；依 PD-043 提供「登出其他所有登入」，不能查看登入裝置或撤銷指定 session；逐一裝置管理須另案產品決策 |
 | W14，11/2–11/8 | **G13 資料生命週期** | 解除配對、帳號刪除、目前狀態、名稱／私人稱呼、共同約定與討論、共同資料處理及基本匯出均依核准規則運作；雙方結果一致且可稽核 |
 | W15，11/9–11/15 | **G14 分析、監控與端到端測試** | 能以伴侶對追蹤配對、首次互動、Moment、共同約定、討論、聊天與回訪；不記錄私密訊息、狀態正文或私人稱呼；核心流程具自動化測試 |
 | W16，11/16–11/22 | **G15 TestFlight 候選版** | 兩個新帳號能完成首版十一項完成條件；G4B 品牌化邀請連結、系統分享、接受確認與減少動態效果相容的成功動畫已完成；通過真機、弱網、離線、狀態過期、通知、約定提醒、清空本機狀態換機／重裝、舊裝置撤銷、刪除與隱私測試；Database 與 Storage 已完成一致版本 restore drill；沒有阻斷級問題 |
@@ -100,6 +100,7 @@ last_updated: 2026-08-18
 - 第一個本機切片提供 opt-in App Lock：帳號設定可啟用 Face ID／裝置密碼保護；啟用後 app 進入 inactive 或 background 立即以不含內容的鎖定畫面遮蔽，回到 active 時透過 `.deviceOwnerAuthentication` 驗證才回到既有流程。驗證取消、失敗或此裝置無法驗證時維持遮蔽；關閉設定立即恢復內容，偏好保留於本機。功能不改變 Supabase session、relationship、內容或待送佇列。
 - 已加入 Face ID usage description、App Lock lifecycle／取消／失敗／無法驗證仍保留遮蔽、啟用／停用與偏好恢復的 unit，以及未啟用啟動與已儲存偏好遮蔽的 UI regression。iPhone Simulator build、Harness 與 diff hygiene 通過；2026-08-18 已依 `LOCK-001` 由真實 iPhone 確認 Face ID／裝置密碼、冷啟動、背景返回、App switcher snapshot、鎖屏檢查，以及 session／relationship／Outbox 不變。跨裝置 session inventory／遠端撤銷與 production APNs 隱私尚未開始，G12 尚未關閉。
 - 第二個切片「關係互動未讀、約定 lifecycle 與 App Badge」已完成：伺服器以穩定互動 identity 記錄對方的主對話／約定討論文字與照片，以及共同約定的建立、有效修改與取消；同一 operation 重送不重複增加未讀或推播。對話分頁、近期約定與 App icon 讀取同一份 relationship authoritative 未讀數，進入主對話、指定約定詳情或討論後才標記對應 scope 已查看。推播帶入權威 badge，預設為泛化文案；文字內容預覽僅在收件者裝置明確開啟時送出，照片與約定 lifecycle 維持不含私人內容的文案。空資料庫 migration、pgTAP、APNs Function regression、Simulator regression 與兩支真實 iPhone 已確認文字、照片、建立／修改／取消、前景／背景／終止／鎖定、重送去重、讀取收斂與 badge 一致。此證據只關閉第二個切片；本機提醒 W13 回歸及 session capability／撤銷仍未開始，G12 保持進行中。
+- 切片 7 已完成 Supabase Auth capability record、無私密資料的 SDK source／remote metadata probe 與受控三 Simulator 驗證：`supabase-swift 2.54.1` 只有 `local`／`global`／`others` sign-out，沒有 session inventory 或指定 session revoke；測試 JWT 也沒有 optional `session_id`。A／B 以同一 user S 建立兩個 session，C 以另一位 owner P 登入；三台撤銷前後以單向指紋／count 驗證 active relationship、共同 `shared_items` 與兩份 owner archive。A 從正式入口送出 `.others` 後仍可 refresh，C 不受影響；B 的既有 JWT 曾在撤銷後繼續 remote read，之後於顯示 `exp` 前兩分鐘自動回到登入，符合 proactive refresh 被拒後清除 session。B 重開未恢復舊 session，重新 Apple 驗證及背景／前景後才建立可用新 session；最終三台的 relationship／shared count／owner archive 完全不變。`SESSION-001` 對 PD-043 all-others App 路徑為 PASS；未保存 raw JWT、未宣稱即時 bearer-token 失效，也仍禁止逐一裝置 UI。沒有建立 registry、migration、Edge Function、service-role secret 或變更 production Auth policy。若未來需要逐一裝置管理，須另案評估 server-verified registry。詳見 [W13 Auth session capability record](../architecture/02-w13-auth-session-capability.md)。
 
 ### G10 完成證據（2026-08-17）
 

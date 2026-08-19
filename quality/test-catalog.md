@@ -1,6 +1,6 @@
 ---
 status: active
-last_updated: 2026-08-18
+last_updated: 2026-08-19
 ---
 
 # CoupleSpace 測試目錄
@@ -45,6 +45,7 @@ last_updated: 2026-08-18
 | APPOINTMENT-001 | W11 基本共同約定／W12 過往入口 | 非伴侶讀寫、建立或編輯／取消 Outbox 在離線／重啟／ack 遺失後造成遺失、重複、錯序或重複刷新時間、來源訊息產生重複卡片、長按未確認便建立、取消後被較晚編輯復活、提醒晚於開始時間、未授權卻假裝已排程、編輯／取消／解除配對後留下舊提醒、通知洩漏標題／地點／註記或點擊開錯約定，或專屬討論文字／照片跨約定／主對話串線、未讀游標混用、近期入口排序／未讀／取消保留錯誤或洩漏內容、過期／已取消約定未保留或排序錯誤、無法返回原討論、已取消討論仍可輸入、照片繞過私有 Storage／quota、closing 清除 scoped Outbox 造成 orphan、離線混合 FIFO 遺失／重複／錯序、重大時間變更／取消紀錄可被偽造／遺失／重複或一般文字編輯造成洗版，收藏後遺失約定來源、重複 Moment、無法返回原討論訊息，或解除配對封存遺失約定、來源、討論 scope、原建立者及重大事件關聯／洩漏另一 owner 封存 | pgTAP／Unit／UI＋真機 | `shared_appointments.test.sql`、`appointment_discussions.test.sql`、`appointment_discussion_photos.test.sql`、`recent_appointment_discussions.test.sql`、`appointment_discussion_moments.test.sql`、`appointment_archive_lifecycle.test.sql`、`CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/two-iphone.md`、`manual/weak-network.md`、`manual/deletion-and-unpairing.md` | A、B、D |
 | TODAY-001 | W9 離線 Today 顯示 | 離線冷啟動只顯示載入、Moment／照片／狀態消失、過期狀態重現、錯帳號或錯 relationship 快照外洩、重連後不校正 | Unit＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`manual/weak-network.md` | A、B、D |
 | LOCK-001 | W13 App Lock | 未啟用時改變既有啟動、啟用／停用或偏好重啟恢復錯誤、進入 inactive／background 時未遮蔽私密畫面、驗證取消／失敗／無法驗證後顯示內容，或驗證流程改變登入／relationship／待送內容 | Unit／UI＋真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`manual/app-lock-and-background.md` | A、B、D |
+| SESSION-001 | W13 Supabase Auth session capability | 將 APNs／本機 device identifier 偽裝成 Auth inventory、把 `.others` 說成逐一撤銷、成功回應誤寫成已立即失效、操作錯誤影響目前登入，或 refresh／前景／重開／relationship／共同內容／個人封存未驗證 | Unit／UI＋SDK source probe＋受控雙 session 真機 | `CoupleSpaceTests/AppSkeletonTests.swift`、`CoupleSpaceUITests/CoupleSpaceUITests.swift`、`quality/scripts/verify-session-capability.sh`、`manual/session-capability.md`、`docs/architecture/02-w13-auth-session-capability.md` | B、D |
 | DR-001 | G15／G17 雲端災難復原 | 備份存在但無法還原、Database／Storage 不一致、刪除復活、RLS／Auth／設定缺失、雙主分叉、manifest 遭竄改或切換後要求重新配對 | Integration＋restore drill＋真機 | `manual/disaster-recovery.md`、`manual/upgrade-and-recovery.md`、`docs/architecture/01-disaster-recovery.md` | C、D |
 | EVAL-001 | Agent 行為 | 未讀文件、越權遠端寫入、跳過測試或洩漏私人資料 | Agent Eval／Harness | `evals/README.md`、`.harness/` | B、D |
 
@@ -65,6 +66,7 @@ Gate A／B／D 定義見 [版本發布閘門](release-gates.md)。`CHAT-001` 只
 | DR-001 | Database／Storage／設定／刪除 journal 一致還原與異區冷重建 | `manual/disaster-recovery.md` |
 | LIFECYCLE-001 | 匯出、刪除、解除配對與雙方一致性 | `manual/deletion-and-unpairing.md` |
 | LOCK-001 | App Lock、背景切換與重新啟動 | `manual/app-lock-and-background.md` |
+| SESSION-001 | 同帳號兩個 Auth session、所有其他 session 撤銷、JWT／refresh／重開與資料生命週期 | `manual/session-capability.md` |
 
 W8–W11 的跨 catalog 完整改版順序見 `manual/w8-w11-regression.md`；它只編排既有責任，不建立新的 PASS 狀態。
 
@@ -75,3 +77,4 @@ W8–W11 的跨 catalog 完整改版順序見 `manual/w8-w11-regression.md`；�
 - `DR-001` 尚未完成；Database／Storage／設定／刪除 journal restore drill 必須使用同一 recovery point，並實測 signed manifest、異區冷重建、RLS、checksum 與清空本機狀態真機恢復，不能用單純「備份已開啟」代替。
 - W9 的本機自動化不得取代兩支真實 iPhone 的離線、force-quit、重連、去重與 FIFO 證據。
 - W10 的本機自動化不得取代兩支真實 iPhone 對 mixed FIFO、reaction 即時同步、來源跳轉與私有照片讀取的證據。
+- `SESSION-001`：unit／UI regression 已確認正式入口的 all-others 語意、二次確認與保守文案；SDK source probe 確認 2.54.1 API surface，remote-only probe 不讀正文／raw ID／本機 cache。2026-08-19 三 Simulator 以 A／B 同 user S、C 另一位 owner P 完成受控驗證：A 送出 `.others` 後維持 refresh／遠端資料，C 不受影響；B 的舊 JWT 曾於撤銷後成功 remote read，隨後在顯示 `exp` 前兩分鐘自動回到登入，重開未恢復，Apple 重新驗證後才建立可用新 session。最終 A／B／C 的 active relationship、`shared_items` count 與兩份不同 owner archive 指紋／count 全部不變，因此 PD-043 App 路徑為 **PASS**。JWT 無 `session_id`、未保存／重播 raw JWT，也沒有可信 inventory 或指定 B revoke 證據；逐一裝置 UI 仍須另案接受 server-verified registry。

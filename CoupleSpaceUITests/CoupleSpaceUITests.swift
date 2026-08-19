@@ -1013,7 +1013,7 @@ final class CoupleSpaceUITests: XCTestCase {
         app.buttons["account-settings"].tap()
 
         let signOutButton = app.buttons["登出"]
-        if !signOutButton.waitForExistence(timeout: 1) {
+        for _ in 0..<4 where !signOutButton.waitForExistence(timeout: 1) {
             app.swipeUp()
         }
         XCTAssertTrue(signOutButton.waitForExistence(timeout: 2))
@@ -1022,9 +1022,35 @@ final class CoupleSpaceUITests: XCTestCase {
         app.alerts.buttons["取消"].tap()
 
         let toolsButton = app.buttons["w1-technical-tools"]
+        for _ in 0..<4 where !toolsButton.waitForExistence(timeout: 1) {
+            app.swipeDown()
+        }
         XCTAssertTrue(toolsButton.waitForExistence(timeout: 1))
         toolsButton.tap()
         XCTAssertTrue(app.navigationBars["W1 技術驗證"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
+    func testAccountSettingsExplainsAllOtherSessionSignOutBeforeSubmitting() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        app.buttons["account-settings"].tap()
+
+        let otherSessionsButton = app.buttons["other-sessions-sign-out"]
+        if !otherSessionsButton.waitForExistence(timeout: 1) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(otherSessionsButton.waitForExistence(timeout: 2))
+        otherSessionsButton.tap()
+
+        let alert = app.alerts["登出其他所有登入？"]
+        XCTAssertTrue(alert.waitForExistence(timeout: 1))
+        XCTAssertTrue(alert.staticTexts["目前裝置會保持登入。其他裝置需要重新使用 Apple 登入；已簽發的存取權杖可能在到期前短暫有效。這不會解除配對、刪除共同內容或改變個人封存。"].exists)
+        alert.buttons["取消"].tap()
+        XCTAssertFalse(alert.exists)
     }
 
     @MainActor
