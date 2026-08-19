@@ -2,6 +2,37 @@
 
 本清單驗證 PD-043 接受的 W13 路徑：「從 session A 執行 `.others`，保留 A 並撤銷所有其他 session」。它不是逐一裝置撤銷驗收；若需求改為清單或指定 target，依 [W13 capability record](../../docs/architecture/02-w13-auth-session-capability.md) 停止並另立產品／架構決策。
 
+## 2026-08-19 三台 Simulator 交接卡
+
+這是切片 7 完成時的測試環境對照，供下一個開發 session 辨識現有 fixture。`S`、`P` 都是測試帳號的邏輯代號；不在 Git 記錄 Apple 帳號姓名、email、Apple identifier、raw Supabase user UUID、JWT 或 refresh token。Simulator 的 Auth／Apple 登入狀態可能在重開、token refresh 或手動切換帳號後改變，因此下表是交接基線，不是永久授權真相。
+
+| 裝置代號 | Simulator／iOS | UDID | 登入帳號 | W13 角色 | 切片完成時狀態 |
+| --- | --- | --- | --- | --- | --- |
+| A | iPhone 17 Pro／iOS 26.5 | `98B44B29-01D7-4750-8597-D75599F34554` | `S` | `.others` 呼叫端／應保留的目前 session | 已登入；撤銷後 refresh 與 remote read 正常。 |
+| B | iPhone 17 Pro Max／iOS 26.5 | `5B23A61A-F3DA-48AB-BD68-FBB1CCE9449D` | `S` | 其他 session／撤銷觀察目標 | 舊 session 已被拒並清除；已重新以 Apple 驗證建立可用 session，背景／前景後 refresh 與 remote read 正常。 |
+| C | iPhone 17／iOS 26.5 | `B1205133-D87F-4AA4-9F39-DAF07403146A` | `P` | relationship 另一位 owner／不同 user 控制組 | 已登入；A 執行 `S` 的 `.others` 前後皆不受影響。 |
+
+帳號與資料對應：
+
+| 邏輯帳號 | 使用裝置 | 與目前 relationship 的關係 | 本人舊個人封存 |
+| --- | --- | --- | --- |
+| `S` | A、B | active owner | archive 指紋 `9FF517E636D8`；來源 relationship 指紋 `30BE04486C70`；item count `4`。 |
+| `P` | C | active owner／`S` 的另一位 relationship member | archive 指紋 `48EA519E7187`；來源 relationship 指紋 `30BE04486C70`；item count `4`。 |
+
+三台在切片完成時都可讀到目前 active relationship 指紋 `1971C4CFD7A1`、active members `2`、`shared_items` count `1`。這個 active relationship 與兩份 personal archive 所屬的舊 archived relationship `30BE04486C70` 是不同資料；不得因驗證 session 而解除目前配對、刪除封存或重新建立 relationship。
+
+A、B 是同一個 Supabase user `S` 的兩個隔離 local Auth container，但本次 JWT 都沒有 optional `session_id`。因此只能把 A／B 當作測試流程角色，不能宣稱已取得兩個可列出、可穩定顯示或可指定撤銷的 session identity。C 的 `P` 是不同 Supabase user；C 不是 `.others` 的撤銷目標。
+
+下一個 session 若要恢復 probe，可先確認三台仍為 Booted，再以各自 UDID 啟動：
+
+```sh
+xcrun simctl launch 98B44B29-01D7-4750-8597-D75599F34554 com.titus.CoupleSpace --session-capability-probe
+xcrun simctl launch 5B23A61A-F3DA-48AB-BD68-FBB1CCE9449D com.titus.CoupleSpace --session-capability-probe
+xcrun simctl launch B1205133-D87F-4AA4-9F39-DAF07403146A com.titus.CoupleSpace --session-capability-probe
+```
+
+接手後先在 A／B／C 各按一次「讀取遠端受保護資料」，核對上述 relationship、member、shared item 與各自 archive 基線。若任何一台回到 Apple 登入、帳號角色不同或數值不符，先記錄新狀態並重建基線；不要直接再按「登出所有其他 session」。
+
 ## 前置條件
 
 - 使用可清理的 Supabase **test project**、同一個可重複登入的測試 Apple account、兩支真實 iPhone A／B（或兩個隔離 iOS client container）。不得連線 production。
