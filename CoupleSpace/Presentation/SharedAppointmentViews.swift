@@ -610,14 +610,15 @@ struct SharedAppointmentComposerView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(appointmentID == nil ? "建立" : "儲存") {
-                        Task {
-                            let succeeded: Bool
-                            if let appointmentID {
-                                succeeded = await model.update(id: appointmentID, draft: draft)
-                            } else {
-                                succeeded = await model.create(draft)
+                        if let appointmentID {
+                            Task {
+                                if await model.update(id: appointmentID, draft: draft) {
+                                    dismiss()
+                                }
                             }
-                            if succeeded { dismiss() }
+                        } else {
+                            Task { _ = await model.create(draft) }
+                            dismiss()
                         }
                     }
                     .disabled(

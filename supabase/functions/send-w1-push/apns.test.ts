@@ -19,6 +19,8 @@ Deno.test("generic payload contains routing metadata but no private content", ()
   assertEquals(payload.aps.alert.title, "CoupleSpace 有新動態");
   assertEquals(payload.aps.alert.body, "打開 App 查看");
   assertEquals(payload.aps.badge, 4);
+  assertEquals(payload.aps["content-available"], 1);
+  assertEquals(payload.event_kind, "chat_message_created");
   assert(!encoded.includes(eventID));
   assert(!encoded.includes("relationship"));
   assert(!encoded.includes("sender"));
@@ -45,6 +47,8 @@ Deno.test("appointment lifecycle payloads are generic", () => {
     assertEquals(payload.aps.alert.title, "CoupleSpace 有新動態");
     assertEquals(payload.aps.alert.body, "打開 App 查看");
     assertEquals(payload.aps.badge, 2);
+    assertEquals(payload.aps["content-available"], 1);
+    assertEquals(payload.event_kind, eventKind);
   }
 });
 

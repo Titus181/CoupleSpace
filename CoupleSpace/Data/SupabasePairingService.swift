@@ -35,6 +35,15 @@ private struct PairingAcceptanceResponse: Decodable {
 
 private struct PairingRelationshipRow: Decodable {
     let id: UUID
+    let status: String
+}
+
+private struct PairingRelationshipLifecycleParameters: Encodable {
+    let targetRelationshipID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case targetRelationshipID = "target_relationship_id"
+    }
 }
 
 private struct PairingMembershipRow: Decodable {
@@ -65,6 +74,28 @@ private struct PairingArchivedItemIdentityRow: Decodable {
 
 private struct PairingPersonalArchiveRow: Decodable {
     let id: UUID
+    let relationshipID: UUID
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case relationshipID = "relationship_id"
+    }
+}
+
+private struct PairingPersonalArchiveItemRow: Decodable {
+    let clientID: UUID
+    let itemKind: String
+    let createdAt: Date
+    let textContent: String?
+    let mediaByteSize: Int64?
+
+    enum CodingKeys: String, CodingKey {
+        case clientID = "client_id"
+        case itemKind = "item_kind"
+        case createdAt = "created_at"
+        case textContent = "text_content"
+        case mediaByteSize = "media_byte_size"
+    }
 }
 
 protocol PairingRemoteServing {
@@ -74,10 +105,28 @@ protocol PairingRemoteServing {
     func acceptInvitation(identifier: String) async throws -> UUID
     func declineInvitation(identifier: String) async throws
     func cancelInvitation() async throws
+    func unpairingReadiness(relationshipID: UUID) async throws -> UnpairingReadiness
+    func beginUnpairing(relationshipID: UUID) async throws
+    func sealPersonalArchive(relationshipID: UUID) async throws -> PersonalArchive
+    func ownPersonalArchive() async throws -> PersonalArchive?
+    func personalArchive(relationshipID: UUID) async throws -> PersonalArchive?
+    func preparePersonalArchiveExport(
+        archive: PersonalArchive
+    ) async throws -> PersonalArchiveExportPreparation
 }
 
 extension PairingRemoteServing {
     func cachedRelationship(userID: UUID) async -> PairingRelationship? { nil }
+
+    func ownPersonalArchive() async throws -> PersonalArchive? { nil }
+
+    func personalArchive(relationshipID _: UUID) async throws -> PersonalArchive? { nil }
+}
+
+struct PersonalArchiveExportPreparation {
+    let document: PersonalArchiveExportDocument
+    let fileName: String
+    let stagingURL: URL
 }
 
 final class SupabasePairingService: PairingRemoteServing {
@@ -107,23 +156,32 @@ final class SupabasePairingService: PairingRemoteServing {
         do {
             let relationships: [PairingRelationshipRow] = try await client
                 .from("relationships")
-                .select("id")
-                .eq("status", value: "active")
+                .select("id,status")
                 .limit(1)
                 .execute()
                 .value
 
             guard let relationship = relationships.first else {
                 if let previous = try? relationshipSnapshotStore.load(userID: session.user.id) {
-                    try await reconcileConversationOutboxAfterRelationshipClosed(
-                        userID: session.user.id,
-                        relationshipID: previous.relationshipID
-                    )
+                    let didReconcileClosedRelationship: Bool
+                    do {
+                        try await reconcileConversationOutboxAfterRelationshipClosed(
+                            userID: session.user.id,
+                            relationshipID: previous.relationshipID
+                        )
+                        didReconcileClosedRelationship = true
+                    } catch {
+                        didReconcileClosedRelationship = false
+                    }
                     await LocalSharedAppointmentReminderScheduler(
                         relationshipID: previous.relationshipID
                     ).removeAll()
+                    if didReconcileClosedRelationship {
+                        relationshipSnapshotStore.clear(userID: session.user.id)
+                    }
+                } else {
+                    relationshipSnapshotStore.clear(userID: session.user.id)
                 }
-                relationshipSnapshotStore.clear(userID: session.user.id)
                 ConversationSnapshotStore().clearAll(userID: session.user.id)
                 ConversationPhotoCacheStore().clearAll(userID: session.user.id)
                 TodaySnapshotStore().clearAll(userID: session.user.id)
@@ -138,7 +196,11 @@ final class SupabasePairingService: PairingRemoteServing {
                 .eq("membership_status", value: "active")
                 .execute()
                 .value
-            let result = PairingRelationship(id: relationship.id, memberCount: members.count)
+            let result = PairingRelationship(
+                id: relationship.id,
+                memberCount: members.count,
+                status: relationship.status
+            )
             if let previous = try? relationshipSnapshotStore.load(userID: session.user.id),
                previous.relationshipID != result.id {
                 try await reconcileConversationOutboxAfterRelationshipClosed(
@@ -156,7 +218,7 @@ final class SupabasePairingService: PairingRemoteServing {
             try? relationshipSnapshotStore.save(
                 RelationshipSnapshot(
                     relationshipID: result.id,
-                    status: "active",
+                    status: result.status,
                     memberCount: result.memberCount
                 ),
                 userID: session.user.id
@@ -170,6 +232,150 @@ final class SupabasePairingService: PairingRemoteServing {
                     memberCount: snapshot.memberCount
                 )
             }
+            throw error
+        }
+    }
+
+    func unpairingReadiness(relationshipID: UUID) async throws -> UnpairingReadiness {
+        let session = try await client.auth.session
+        let userID = session.user.id
+        let conversationStore = ConversationOutboxStore()
+        var pendingCount = try conversationStore.load(
+            userID: userID,
+            relationshipID: relationshipID
+        ).entries.count
+        for appointmentID in conversationStore.appointmentDiscussionScopeIDs(
+            userID: userID,
+            relationshipID: relationshipID
+        ) {
+            pendingCount += try ConversationOutboxStore(appointmentScopeID: appointmentID)
+                .load(userID: userID, relationshipID: relationshipID)
+                .entries.count
+        }
+        pendingCount += try SharedAppointmentOutboxStore()
+            .load(userID: userID, relationshipID: relationshipID)
+            .entries.count
+        pendingCount += try SharedAppointmentOperationOutboxStore()
+            .load(userID: userID, relationshipID: relationshipID)
+            .entries.count
+        return pendingCount == 0 ? .ready : .pendingContent(count: pendingCount)
+    }
+
+    func beginUnpairing(relationshipID: UUID) async throws {
+        try await client
+            .rpc(
+                "begin_unpairing",
+                params: PairingRelationshipLifecycleParameters(
+                    targetRelationshipID: relationshipID
+                )
+            )
+            .execute()
+        await LocalSharedAppointmentReminderScheduler(relationshipID: relationshipID).removeAll()
+    }
+
+    func sealPersonalArchive(relationshipID: UUID) async throws -> PersonalArchive {
+        let archiveID: UUID = try await client
+            .rpc(
+                "seal_personal_archive",
+                params: PairingRelationshipLifecycleParameters(
+                    targetRelationshipID: relationshipID
+                )
+            )
+            .execute()
+            .value
+        return PersonalArchive(id: archiveID, relationshipID: relationshipID)
+    }
+
+    func ownPersonalArchive() async throws -> PersonalArchive? {
+        let archives: [PairingPersonalArchiveRow] = try await client
+            .from("personal_archives")
+            .select("id,relationship_id")
+            .order("sealed_at", ascending: false)
+            .limit(1)
+            .execute()
+            .value
+        return archives.first.map {
+            PersonalArchive(id: $0.id, relationshipID: $0.relationshipID)
+        }
+    }
+
+    func personalArchive(relationshipID: UUID) async throws -> PersonalArchive? {
+        let archives: [PairingPersonalArchiveRow] = try await client
+            .from("personal_archives")
+            .select("id,relationship_id")
+            .eq("relationship_id", value: relationshipID)
+            .order("sealed_at", ascending: false)
+            .limit(1)
+            .execute()
+            .value
+        return archives.first.map {
+            PersonalArchive(id: $0.id, relationshipID: $0.relationshipID)
+        }
+    }
+
+    func preparePersonalArchiveExport(
+        archive: PersonalArchive
+    ) async throws -> PersonalArchiveExportPreparation {
+        try PersonalArchiveExportStaging.cleanupAbandoned()
+        _ = try await client.auth.session
+        let rows: [PairingPersonalArchiveItemRow] = try await client
+            .from("personal_archive_items")
+            .select("client_id,item_kind,created_at,text_content,media_byte_size")
+            .eq("archive_id", value: archive.id)
+            .order("created_at", ascending: true)
+            .order("client_id", ascending: true)
+            .execute()
+            .value
+        let items = rows.map { row in
+            PersonalArchiveExportItem(
+                clientID: row.clientID,
+                kind: row.itemKind,
+                createdAt: row.createdAt,
+                text: row.textContent,
+                photoFile: row.itemKind == "photo"
+                    ? PersonalArchiveExportPackage.photoFileName(clientID: row.clientID)
+                    : nil
+            )
+        }
+        let package = try PersonalArchiveExportPackage(
+            relationshipID: archive.relationshipID,
+            exportedAt: .now,
+            items: items
+        )
+        let requiredBytes = PersonalArchiveExportCapacityPolicy.requiredBytes(
+            manifestByteCount: try package.manifestData().count,
+            photoByteSizes: rows
+                .filter { $0.itemKind == "photo" }
+                .map(\.mediaByteSize)
+        )
+        guard PersonalArchiveExportCapacityPolicy.permitsStaging(
+            requiredBytes: requiredBytes,
+            availableBytes: PersonalArchiveExportCapacityPolicy.availableBytes(
+                at: FileManager.default.temporaryDirectory
+            )
+        ) else {
+            throw PersonalArchiveExportError.insufficientStagingCapacity
+        }
+
+        var staging = try PersonalArchiveExportStaging(package: package)
+        do {
+            for row in rows where row.itemKind == "photo" {
+                let data = try await client.storage
+                    .from("couplespace-w1-photos")
+                    .download(path: "\(archive.relationshipID.uuidString.lowercased())/\(row.clientID.uuidString.lowercased()).jpg")
+                try staging.writePhoto(clientID: row.clientID, jpegData: data)
+            }
+            let fileName = "CoupleSpace-personal-archive-\(archive.relationshipID.uuidString.lowercased().prefix(8))"
+            return try PersonalArchiveExportPreparation(
+                document: PersonalArchiveExportDocument(
+                    staging: staging,
+                    exportFileName: fileName
+                ),
+                fileName: fileName,
+                stagingURL: staging.directoryURL
+            )
+        } catch {
+            try? staging.remove()
             throw error
         }
     }

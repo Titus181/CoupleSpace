@@ -110,6 +110,9 @@ struct AppSkeletonTests {
         #expect(AppLaunchOptions(arguments: []).isUITesting == false)
         #expect(AppLaunchOptions(arguments: ["--other", "--ui-testing"]).isUITesting)
         #expect(AppLaunchOptions(arguments: ["--ui-testing-pairing"]).isPairingUITesting)
+        #expect(AppLaunchOptions(
+            arguments: ["--ui-testing", "--ui-testing-formal-unpairing"]
+        ).isFormalUnpairingUITesting)
     }
 
     @Test func timeFormatUsesTheSelectedHourConvention() {
@@ -250,12 +253,68 @@ struct AppSkeletonTests {
             fireDate: now.addingTimeInterval(3_600),
             title: "共同約定提醒",
             body: "你有一筆即將開始的共同約定。",
+            badge: nil,
             userInfo: [:]
         )])
         #expect(requests[0].title.contains("私人晚餐標題") == false)
         #expect(requests[0].body.contains("私人地點") == false)
         #expect(requests[0].body.contains("私人註記") == false)
+        #expect(requests[0].badge == nil)
         #expect(requests[0].userInfo.isEmpty)
+    }
+
+    @MainActor
+    @Test func appointmentReminderPolicyKeepsOneIdentifierWhenTheSameAppointmentIsRescheduled() throws {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let appointmentID = UUID()
+        func appointment(reminderAt: Date) -> SharedAppointment {
+            SharedAppointment(
+                id: appointmentID,
+                creatorUserID: UUID(),
+                title: "不應出現在通知的標題",
+                startsAt: now.addingTimeInterval(7_200),
+                location: "不應出現在通知的地點",
+                note: "不應出現在通知的註記",
+                reminderAt: reminderAt,
+                status: .scheduled,
+                sourceMessageID: nil,
+                createdAt: now,
+                updatedAt: now
+            )
+        }
+
+        let original = try #require(SharedAppointmentReminderPolicy.requests(
+            for: [appointment(reminderAt: now.addingTimeInterval(1_800))],
+            identifierPrefix: "test.",
+            now: now
+        ).first)
+        let rescheduled = try #require(SharedAppointmentReminderPolicy.requests(
+            for: [appointment(reminderAt: now.addingTimeInterval(3_600))],
+            identifierPrefix: "test.",
+            now: now
+        ).first)
+
+        #expect(original.identifier == rescheduled.identifier)
+        #expect(original.appointmentID == rescheduled.appointmentID)
+        #expect(original.fireDate != rescheduled.fireDate)
+        #expect(rescheduled.badge == nil)
+        #expect(rescheduled.userInfo.isEmpty)
+    }
+
+    @Test func backgroundPushRefreshesOnlyAppointmentReminderLifecycleEvents() {
+        #expect(BackgroundAppointmentReminderRefreshPolicy.requiresRefresh(userInfo: [
+            "event_kind": "appointment_created",
+        ]))
+        #expect(BackgroundAppointmentReminderRefreshPolicy.requiresRefresh(userInfo: [
+            "event_kind": "appointment_updated",
+        ]))
+        #expect(BackgroundAppointmentReminderRefreshPolicy.requiresRefresh(userInfo: [
+            "event_kind": "appointment_cancelled",
+        ]))
+        #expect(BackgroundAppointmentReminderRefreshPolicy.requiresRefresh(userInfo: [
+            "event_kind": "chat_message_created",
+        ]) == false)
+        #expect(BackgroundAppointmentReminderRefreshPolicy.requiresRefresh(userInfo: [:]) == false)
     }
 
     @MainActor
@@ -2843,6 +2902,135 @@ struct AppSkeletonTests {
     }
 
     @MainActor
+    @Test func pairingModelRestoresClosingRelationshipAndCompletesItsPersonalArchive() async {
+        let relationship = PairingRelationship(
+            id: UUID(),
+            memberCount: 2,
+            status: "closing"
+        )
+        let service = PairingRemoteServiceFake(
+            currentRelationship: relationship,
+            invitation: PairingInvitation(
+                relationshipID: UUID(),
+                token: UUID(),
+                shortCode: "7K3MW9QP",
+                expiresAt: .now
+            ),
+            acceptedRelationshipID: UUID()
+        )
+        let model = PairingModel(service: service)
+
+        await model.refreshForAuthenticatedSession(userID: UUID())
+        #expect(model.state == .closing(relationship))
+
+        let archive = PersonalArchive(id: UUID(), relationshipID: relationship.id)
+        service.currentRelationshipValue = nil
+        service.personalArchiveValue = archive
+        await model.sealPersonalArchive()
+
+        #expect(service.sealedRelationshipIDs == [relationship.id])
+        #expect(model.state == .archived(archive))
+        #expect(model.statusMessage == "解除配對已完成；你的個人封存可以匯出。")
+
+        model.resetForAuthenticatedSession()
+        await model.refreshForAuthenticatedSession(userID: UUID())
+        #expect(model.state == .archived(archive))
+
+        await model.createOrRetryInvitation()
+        #expect(model.state == .waiting(
+            PairingRelationship(id: service.invitation.relationshipID, memberCount: 1),
+            invitation: service.invitation
+        ))
+    }
+
+    @MainActor
+    @Test func pairingModelBeginsAndSealsFromOneConfirmedUserAction() async {
+        let relationship = PairingRelationship(id: UUID(), memberCount: 2)
+        let archive = PersonalArchive(id: UUID(), relationshipID: relationship.id)
+        let service = PairingRemoteServiceFake(
+            currentRelationship: relationship,
+            invitation: PairingInvitation(
+                relationshipID: UUID(),
+                token: UUID(),
+                shortCode: "7K3MW9QP",
+                expiresAt: .now
+            ),
+            acceptedRelationshipID: UUID()
+        )
+        service.personalArchiveByRelationshipID[relationship.id] = archive
+        let model = PairingModel(service: service, initialState: .paired(relationship))
+
+        await model.beginUnpairingAndSealPersonalArchive(hasInFlightContent: false)
+
+        #expect(service.begunUnpairingRelationshipIDs == [relationship.id])
+        #expect(service.sealedRelationshipIDs == [relationship.id])
+        #expect(model.state == .closing(PairingRelationship(
+            id: relationship.id,
+            memberCount: 2,
+            status: "closing"
+        )))
+        #expect(model.closingPersonalArchive == archive)
+        #expect(model.statusMessage == "你的個人封存已安全保存，等待另一方完成。")
+    }
+
+    @MainActor
+    @Test func pairingModelBlocksUnpairingWhenContentIsStillPendingOrSending() async {
+        let relationship = PairingRelationship(id: UUID(), memberCount: 2)
+        let service = PairingRemoteServiceFake(
+            currentRelationship: relationship,
+            invitation: PairingInvitation(
+                relationshipID: UUID(),
+                token: UUID(),
+                shortCode: "7K3MW9QP",
+                expiresAt: .now
+            ),
+            acceptedRelationshipID: UUID()
+        )
+        let model = PairingModel(service: service, initialState: .paired(relationship))
+
+        await model.beginUnpairingAndSealPersonalArchive(hasInFlightContent: true)
+        #expect(service.begunUnpairingRelationshipIDs.isEmpty)
+        #expect(model.state == .paired(relationship))
+        #expect(model.statusMessage?.contains("正在傳送") == true)
+
+        service.unpairingReadinessValue = .pendingContent(count: 2)
+        await model.beginUnpairingAndSealPersonalArchive(hasInFlightContent: false)
+        #expect(service.begunUnpairingRelationshipIDs.isEmpty)
+        #expect(model.statusMessage?.contains("2 筆待送內容") == true)
+    }
+
+    @MainActor
+    @Test func pairingModelLeavesClosingWithoutRestartAfterPartnerCompletesArchive() async {
+        let relationship = PairingRelationship(
+            id: UUID(),
+            memberCount: 2,
+            status: "closing"
+        )
+        let archive = PersonalArchive(id: UUID(), relationshipID: relationship.id)
+        let service = PairingRemoteServiceFake(
+            currentRelationship: relationship,
+            invitation: PairingInvitation(
+                relationshipID: UUID(),
+                token: UUID(),
+                shortCode: "7K3MW9QP",
+                expiresAt: Date(timeIntervalSince1970: 2_000_000_000)
+            ),
+            acceptedRelationshipID: UUID()
+        )
+        service.personalArchiveValue = archive
+        let model = PairingModel(service: service, initialState: .closing(relationship))
+
+        await model.sealPersonalArchive()
+        #expect(model.state == .closing(relationship))
+        #expect(model.statusMessage == "你的個人封存已建立，等待另一方完成。")
+
+        service.currentRelationshipValue = nil
+        await model.refresh()
+        #expect(model.state == .archived(archive))
+        #expect(model.statusMessage == nil)
+    }
+
+    @MainActor
     @Test func pairingModelIgnoresAResponseFromThePreviousAuthenticatedSession() async {
         let service = SuspendedPairingRemoteServiceFake()
         let model = PairingModel(service: service)
@@ -3449,6 +3637,11 @@ private final class PairingRemoteServiceFake: PairingRemoteServing {
     var acceptedIdentifiers: [String] = []
     var declinedIdentifiers: [String] = []
     var cancelInvitationCallCount = 0
+    var sealedRelationshipIDs: [UUID] = []
+    var begunUnpairingRelationshipIDs: [UUID] = []
+    var personalArchiveValue: PersonalArchive?
+    var personalArchiveByRelationshipID: [UUID: PersonalArchive] = [:]
+    var unpairingReadinessValue: UnpairingReadiness = .ready
 
     init(
         currentRelationship: PairingRelationship?,
@@ -3479,6 +3672,41 @@ private final class PairingRemoteServiceFake: PairingRemoteServing {
 
     func cancelInvitation() async throws {
         cancelInvitationCallCount += 1
+    }
+
+    func unpairingReadiness(relationshipID _: UUID) async throws -> UnpairingReadiness {
+        unpairingReadinessValue
+    }
+
+    func beginUnpairing(relationshipID: UUID) async throws {
+        begunUnpairingRelationshipIDs.append(relationshipID)
+        if let relationship = currentRelationshipValue {
+            currentRelationshipValue = PairingRelationship(
+                id: relationship.id,
+                memberCount: relationship.memberCount,
+                status: "closing"
+            )
+        }
+    }
+
+    func sealPersonalArchive(relationshipID: UUID) async throws -> PersonalArchive {
+        sealedRelationshipIDs.append(relationshipID)
+        return personalArchiveByRelationshipID[relationshipID]
+            ?? PersonalArchive(id: UUID(), relationshipID: relationshipID)
+    }
+
+    func ownPersonalArchive() async throws -> PersonalArchive? {
+        personalArchiveValue
+    }
+
+    func personalArchive(relationshipID: UUID) async throws -> PersonalArchive? {
+        personalArchiveByRelationshipID[relationshipID]
+    }
+
+    func preparePersonalArchiveExport(
+        archive _: PersonalArchive
+    ) async throws -> PersonalArchiveExportPreparation {
+        throw NSError(domain: "PairingRemoteServiceFake", code: 1)
     }
 }
 
@@ -3528,6 +3756,20 @@ private final class SuspendedPairingRemoteServiceFake: PairingRemoteServing {
     func declineInvitation(identifier: String) async throws {}
 
     func cancelInvitation() async throws {}
+
+    func unpairingReadiness(relationshipID _: UUID) async throws -> UnpairingReadiness { .ready }
+
+    func beginUnpairing(relationshipID _: UUID) async throws {}
+
+    func sealPersonalArchive(relationshipID: UUID) async throws -> PersonalArchive {
+        PersonalArchive(id: UUID(), relationshipID: relationshipID)
+    }
+
+    func preparePersonalArchiveExport(
+        archive _: PersonalArchive
+    ) async throws -> PersonalArchiveExportPreparation {
+        throw NSError(domain: "SuspendedPairingRemoteServiceFake", code: 1)
+    }
 }
 
 @MainActor

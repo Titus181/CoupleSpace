@@ -30,7 +30,9 @@ struct RootTabView: View {
     let relationshipToken: String?
     private let relationshipID: UUID?
     let technicalValidationClient: SupabaseClient?
+    let pairingModel: PairingModel?
     let onSignOut: () -> Void
+    let onRelationshipLifecycleChanged: @MainActor () async -> Void
     private let shouldActivateRemotePush: Bool
 
     init(
@@ -40,14 +42,18 @@ struct RootTabView: View {
         relationshipID: UUID? = nil,
         relationshipToken: String? = nil,
         technicalValidationClient: SupabaseClient? = nil,
-        onSignOut: @escaping () -> Void = {}
+        pairingModel: PairingModel? = nil,
+        onSignOut: @escaping () -> Void = {},
+        onRelationshipLifecycleChanged: @escaping @MainActor () async -> Void = {}
     ) {
         self.accountUserToken = accountUserToken
         self.accountStatusMessage = accountStatusMessage
         self.relationshipToken = relationshipToken
         self.relationshipID = relationshipID
         self.technicalValidationClient = technicalValidationClient
+        self.pairingModel = pairingModel
         self.onSignOut = onSignOut
+        self.onRelationshipLifecycleChanged = onRelationshipLifecycleChanged
         shouldActivateRemotePush = accountUserID != nil
             && relationshipID != nil
             && technicalValidationClient != nil
@@ -660,12 +666,15 @@ struct RootTabView: View {
                         momentModel: momentModel,
                         togetherNowModel: togetherNowModel,
                         sharedAppointmentModel: sharedAppointmentModel,
+                        conversationModel: conversationModel,
                         accountUserToken: accountUserToken,
                         accountStatusMessage: accountStatusMessage,
                         relationshipToken: relationshipToken,
                         technicalValidationClient: technicalValidationClient,
+                        pairingModel: pairingModel,
                         onOpenSourceMessage: openSourceMessage,
-                        onSignOut: onSignOut
+                        onSignOut: onSignOut,
+                        onRelationshipLifecycleChanged: onRelationshipLifecycleChanged
                     )
                 }
             }
@@ -845,12 +854,15 @@ private struct UsView: View {
     @ObservedObject var momentModel: MomentModel
     @ObservedObject var togetherNowModel: TogetherNowModel
     @ObservedObject var sharedAppointmentModel: SharedAppointmentModel
+    @ObservedObject var conversationModel: ConversationModel
     let accountUserToken: String?
     let accountStatusMessage: String?
     let relationshipToken: String?
     let technicalValidationClient: SupabaseClient?
+    let pairingModel: PairingModel?
     let onOpenSourceMessage: (MomentSource) -> Void
     let onSignOut: () -> Void
+    let onRelationshipLifecycleChanged: @MainActor () async -> Void
 
     var body: some View {
         NavigationStack {
@@ -913,7 +925,10 @@ private struct UsView: View {
                     statusMessage: accountStatusMessage,
                     relationshipToken: relationshipToken,
                     technicalValidationClient: technicalValidationClient,
-                    onSignOut: onSignOut
+                    pairingModel: pairingModel,
+                    hasInFlightContent: conversationModel.isSending || sharedAppointmentModel.isSaving,
+                    onSignOut: onSignOut,
+                    onRelationshipLifecycleChanged: onRelationshipLifecycleChanged
                 )
             }
             .sheet(isPresented: $isShowingSharedSchedule) {
@@ -947,7 +962,10 @@ private struct AccountSettingsView: View {
     let statusMessage: String?
     let relationshipToken: String?
     let technicalValidationClient: SupabaseClient?
+    let pairingModel: PairingModel?
+    let hasInFlightContent: Bool
     let onSignOut: () -> Void
+    let onRelationshipLifecycleChanged: @MainActor () async -> Void
 
     var body: some View {
         NavigationStack {
@@ -1005,6 +1023,23 @@ private struct AccountSettingsView: View {
                         LabeledContent("關係識別碼", value: relationshipToken)
                             .accessibilityIdentifier("relationship-token")
                         Text("雙方應看到相同的前 8 碼；這不是邀請碼。")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                if let pairingModel {
+                    Section("關係與資料") {
+                        NavigationLink {
+                            RelationshipAndDataSettingsView(
+                                pairingModel: pairingModel,
+                                hasInFlightContent: hasInFlightContent
+                            )
+                        } label: {
+                            Label("解除配對", systemImage: "person.2.slash")
+                        }
+                        .accessibilityIdentifier("open-unpairing-settings")
+                        Text("解除後，雙方各自保留只能由本人管理的唯讀封存。")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                     }
@@ -1068,10 +1103,68 @@ private struct AccountSettingsView: View {
 #if DEBUG
             .sheet(isPresented: $isShowingTechnicalValidation) {
                 if let technicalValidationClient {
-                    G1TechnicalSpikeView(supabaseClient: technicalValidationClient)
+                    G1TechnicalSpikeView(
+                        supabaseClient: technicalValidationClient,
+                        onRelationshipLifecycleChanged: onRelationshipLifecycleChanged
+                    )
                 }
             }
 #endif
+        }
+    }
+}
+
+private struct RelationshipAndDataSettingsView: View {
+    @ObservedObject var pairingModel: PairingModel
+    let hasInFlightContent: Bool
+    @State private var isConfirmingUnpairing = false
+
+    var body: some View {
+        Form {
+            Section {
+                Text("解除配對會停止這段共同空間的新內容。這個動作不能恢復原 relationship，但之後仍可建立新的配對。")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("解除後會保留") {
+                Label("雙方各自保留一份只屬於自己的唯讀封存", systemImage: "archivebox")
+                Label("對方不能刪除、匯出或管理你的封存", systemImage: "lock")
+                Label("完成後可匯出封存或建立新的配對", systemImage: "arrow.triangle.2.circlepath")
+            }
+
+            Section {
+                Button("解除配對", role: .destructive) {
+                    isConfirmingUnpairing = true
+                }
+                .disabled(pairingModel.isWorking)
+                .accessibilityIdentifier("begin-unpairing-from-settings")
+            }
+
+            if let statusMessage = pairingModel.statusMessage {
+                Section("狀態") {
+                    Text(statusMessage)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("unpairing-status")
+                }
+            }
+        }
+        .navigationTitle("關係與資料")
+        .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "確認解除配對？",
+            isPresented: $isConfirmingUnpairing,
+            titleVisibility: .visible
+        ) {
+            Button("開始解除配對", role: .destructive) {
+                Task {
+                    await pairingModel.beginUnpairingAndSealPersonalArchive(
+                        hasInFlightContent: hasInFlightContent
+                    )
+                }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("開始後，共同空間會停止新增內容，並依序建立你的個人封存。對方需使用自己的帳號建立自己的封存。")
         }
     }
 }

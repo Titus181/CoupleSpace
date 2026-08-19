@@ -3,10 +3,22 @@ import Foundation
 struct PairingRelationship: Equatable {
     let id: UUID
     let memberCount: Int
+    let status: String
+
+    init(id: UUID, memberCount: Int, status: String = "active") {
+        self.id = id
+        self.memberCount = memberCount
+        self.status = status
+    }
 
     var displayToken: String {
         String(id.uuidString.lowercased().prefix(8))
     }
+}
+
+struct PersonalArchive: Equatable {
+    let id: UUID
+    let relationshipID: UUID
 }
 
 struct PairingInvitation: Equatable {
@@ -26,6 +38,13 @@ enum PairingState: Equatable {
     case unpaired
     case waiting(PairingRelationship, invitation: PairingInvitation?)
     case paired(PairingRelationship)
+    case closing(PairingRelationship)
+    case archived(PersonalArchive)
+}
+
+enum UnpairingReadiness: Equatable {
+    case ready
+    case pendingContent(count: Int)
 }
 
 enum PairingInputPolicy {

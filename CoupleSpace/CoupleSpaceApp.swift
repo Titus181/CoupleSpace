@@ -35,7 +35,12 @@ struct CoupleSpaceApp: App {
             _pairingModel = StateObject(
                 wrappedValue: PairingModel(
                     client: client,
-                    initialState: options.isPairingUITesting ? .unpaired : .checking
+                    initialState: options.isFormalUnpairingUITesting
+                        ? .paired(PairingRelationship(
+                            id: UUID(uuidString: "F0000000-0000-0000-0000-000000000007")!,
+                            memberCount: 2
+                        ))
+                        : options.isPairingUITesting ? .unpaired : .checking
                 )
             )
         } catch {
@@ -51,7 +56,9 @@ struct CoupleSpaceApp: App {
                 supabaseClient: supabaseClient,
                 showsLaunchAnimation: !launchOptions.isUITesting,
                 bypassesAuthentication: launchOptions.isUITesting,
-                bypassesPairing: launchOptions.isUITesting && !launchOptions.isPairingUITesting
+                bypassesPairing: launchOptions.isUITesting
+                    && !launchOptions.isPairingUITesting
+                    && !launchOptions.isFormalUnpairingUITesting
             )
             .environment(\.locale, Locale(identifier: "zh-Hant-TW"))
         }

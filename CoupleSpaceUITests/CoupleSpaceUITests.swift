@@ -1096,6 +1096,25 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testFormalUnpairingEntryExplainsTheIrreversibleArchiveFlow() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-formal-unpairing"]
+        app.launch()
+
+        app.tabBars.buttons["我們"].tap()
+        XCTAssertTrue(app.buttons["account-settings"].waitForExistence(timeout: 2))
+        app.buttons["account-settings"].tap()
+        XCTAssertTrue(app.buttons["open-unpairing-settings"].waitForExistence(timeout: 2))
+        app.buttons["open-unpairing-settings"].tap()
+
+        XCTAssertTrue(app.navigationBars["關係與資料"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["雙方各自保留一份只屬於自己的唯讀封存"].exists)
+        XCTAssertTrue(app.staticTexts["對方不能刪除、匯出或管理你的封存"].exists)
+        app.buttons["begin-unpairing-from-settings"].tap()
+        XCTAssertTrue(app.buttons["開始解除配對"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         // This measures how long it takes to launch your application.
         measure(metrics: [XCTApplicationLaunchMetric()]) {

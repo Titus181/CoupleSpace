@@ -472,6 +472,18 @@ final class CoupleSpaceAppDelegate: UIResponder, UIApplicationDelegate, UNUserNo
 
     func application(
         _ application: UIApplication,
+        didReceiveRemoteNotification userInfo: [AnyHashable: Any],
+        fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
+    ) {
+        Task {
+            let result = await PushNotificationPlatformAdapter.shared
+                .reconcileAppointmentRemindersAfterBackgroundPush(userInfo: userInfo)
+            completionHandler(result)
+        }
+    }
+
+    func application(
+        _ application: UIApplication,
         didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data
     ) {
         Task { await PushNotificationPlatformAdapter.shared.receive(deviceToken: deviceToken) }

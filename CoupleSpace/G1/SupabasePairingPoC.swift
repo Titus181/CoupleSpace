@@ -453,6 +453,9 @@ final class SupabasePairingPoC: ObservableObject {
                     )
                 )
                 .execute()
+            await LocalSharedAppointmentReminderScheduler(
+                relationshipID: relationshipID
+            ).removeAll()
             lifecycleStatus = "關係已進入 closing；共同內容應停止新增"
             await refresh()
         } catch {
@@ -915,6 +918,9 @@ final class SupabasePairingPoC: ObservableObject {
                     : "關係 active；尚未開始解除配對"
             }
             if relationship.status == "closing" {
+                await LocalSharedAppointmentReminderScheduler(
+                    relationshipID: relationship.id
+                ).removeAll()
                 await reconcilePhotoOutboxAfterRelationshipClosed(
                     userID: session.user.id,
                     relationshipID: relationship.id,

@@ -29,6 +29,8 @@ struct SharedAppointmentReminderRequest: Equatable {
     let fireDate: Date
     let title: String
     let body: String
+    /// Local appointment reminders must not affect the app icon badge.
+    let badge: Int?
     let userInfo: [String: String]
 }
 
@@ -53,6 +55,7 @@ enum SharedAppointmentReminderPolicy {
                 fireDate: reminderAt,
                 title: title,
                 body: body,
+                badge: nil,
                 userInfo: [:]
             )
         }
@@ -117,12 +120,20 @@ final class LocalSharedAppointmentReminderScheduler: SharedAppointmentReminderSc
         if !staleIdentifiers.isEmpty {
             center.removePendingNotificationRequests(withIdentifiers: staleIdentifiers)
         }
+        let delivered = await center.deliveredNotifications()
+        let staleDeliveredIdentifiers = delivered
+            .map(\.request.identifier)
+            .filter { $0.hasPrefix(identifierPrefix) && !desiredIdentifiers.contains($0) }
+        if !staleDeliveredIdentifiers.isEmpty {
+            center.removeDeliveredNotifications(withIdentifiers: staleDeliveredIdentifiers)
+        }
 
         for request in requests {
             let content = UNMutableNotificationContent()
             content.title = request.title
             content.body = request.body
             content.sound = .default
+            content.badge = request.badge.map(NSNumber.init(value:))
             content.userInfo = request.userInfo
             let components = Calendar.autoupdatingCurrent.dateComponents(
                 [.calendar, .timeZone, .year, .month, .day, .hour, .minute, .second],
@@ -139,8 +150,12 @@ final class LocalSharedAppointmentReminderScheduler: SharedAppointmentReminderSc
     func removeAll() async {
         let pending = await center.pendingNotificationRequests()
         let identifiers = pending.map(\.identifier).filter { $0.hasPrefix(identifierPrefix) }
-        guard !identifiers.isEmpty else { return }
         center.removePendingNotificationRequests(withIdentifiers: identifiers)
+
+        let delivered = await center.deliveredNotifications()
+        let deliveredIdentifiers = delivered.map(\.request.identifier)
+            .filter { $0.hasPrefix(identifierPrefix) }
+        center.removeDeliveredNotifications(withIdentifiers: deliveredIdentifiers)
     }
 
     private static func authorization(

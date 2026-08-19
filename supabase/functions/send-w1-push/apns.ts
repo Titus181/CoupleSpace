@@ -71,7 +71,9 @@ export function genericPayload(eventID: string, eventKind: string, badgeCount = 
       },
       sound: "default",
       badge: Math.max(0, badgeCount),
+      "content-available": 1,
     },
+    event_kind: eventKind,
   };
 }
 

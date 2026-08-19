@@ -25,6 +25,17 @@ private struct RegisterPushDeviceParameters: Encodable {
     }
 }
 
+enum BackgroundAppointmentReminderRefreshPolicy {
+    static func requiresRefresh(userInfo: [AnyHashable: Any]) -> Bool {
+        guard let eventKind = userInfo["event_kind"] as? String else { return false }
+        return [
+            "appointment_created",
+            "appointment_updated",
+            "appointment_cancelled",
+        ].contains(eventKind)
+    }
+}
+
 @MainActor
 final class PushNotificationPlatformAdapter {
     static let shared = PushNotificationPlatformAdapter()
@@ -64,6 +75,31 @@ final class PushNotificationPlatformAdapter {
 
     func refreshAfterNotificationInteraction() {
         NotificationCenter.default.post(name: .coupleSpaceDidRequestSecureRefresh, object: nil)
+    }
+
+    func reconcileAppointmentRemindersAfterBackgroundPush(
+        userInfo: [AnyHashable: Any]
+    ) async -> UIBackgroundFetchResult {
+        guard BackgroundAppointmentReminderRefreshPolicy.requiresRefresh(userInfo: userInfo),
+              let client else { return .noData }
+        do {
+            let session = try await client.auth.session
+            guard let relationship = try RelationshipSnapshotStore().load(userID: session.user.id) else {
+                return .noData
+            }
+            let service = SupabaseSharedAppointmentService(
+                client: client,
+                currentUserID: session.user.id,
+                relationshipID: relationship.relationshipID
+            )
+            let appointments = try await service.fetchAppointments()
+            try await LocalSharedAppointmentReminderScheduler(
+                relationshipID: relationship.relationshipID
+            ).reconcile(appointments)
+            return .newData
+        } catch {
+            return .failed
+        }
     }
 
     func setContentPreviewEnabled(_ isEnabled: Bool) async {
