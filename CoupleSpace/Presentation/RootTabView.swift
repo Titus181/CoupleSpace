@@ -1215,6 +1215,7 @@ private struct UsView: View {
                 )
             }
         }
+        .toolbar(isShowingSharedSchedule ? .hidden : .automatic, for: .tabBar)
         .accessibilityIdentifier("us-screen")
         .onAppear {
             isShowingAccountSettings = false

@@ -537,6 +537,7 @@ final class CoupleSpaceUITests: XCTestCase {
         app.launchArguments = ["--ui-testing", "--ui-testing-w12-weekly-review"]
         app.launch()
 
+        XCTAssertTrue(app.descendants(matching: .any)["main-content"].waitForExistence(timeout: 3))
         app.tabBars.buttons["我們"].tap()
         XCTAssertTrue(
             app.descendants(matching: .any)["us-screen"].waitForExistence(timeout: 3)
@@ -806,6 +807,7 @@ final class CoupleSpaceUITests: XCTestCase {
         app.launchArguments = ["--ui-testing", "--ui-testing-w11-discussion"]
         app.launch()
 
+        XCTAssertTrue(app.descendants(matching: .any)["main-content"].waitForExistence(timeout: 3))
         app.tabBars.buttons["我們"].tap()
         let scheduleButton = app.buttons["open-shared-appointment-schedule"]
         XCTAssertTrue(scheduleButton.waitForExistence(timeout: 3))
@@ -820,6 +822,7 @@ final class CoupleSpaceUITests: XCTestCase {
             app.descendants(matching: .any)["appointment-discussion-screen"]
                 .waitForExistence(timeout: 2)
         )
+        XCTAssertTrue(app.tabBars.firstMatch.waitForNonExistence(timeout: 2))
         XCTAssertTrue(
             app.descendants(matching: .any)[
                 "appointment-event-a5000000-0000-0000-0000-000000000001"
@@ -834,6 +837,7 @@ final class CoupleSpaceUITests: XCTestCase {
         let input = app.descendants(matching: .any)["conversation-input"]
         XCTAssertTrue(input.waitForExistence(timeout: 1))
         input.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 2))
         input.typeText("我們兩點見")
         app.buttons["send-conversation-message"].tap()
         XCTAssertTrue(app.staticTexts["我們兩點見"].waitForExistence(timeout: 2))
@@ -843,10 +847,27 @@ final class CoupleSpaceUITests: XCTestCase {
         XCTAssertTrue(heart.waitForExistence(timeout: 2))
         heart.tap()
         XCTAssertTrue(app.staticTexts["愛心"].waitForExistence(timeout: 2))
+        XCTAssertTrue(
+            app.buttons["conversation-action-backdrop"].waitForNonExistence(timeout: 2)
+        )
 
         partnerMessage.press(forDuration: 1)
-        let saveMoment = app.buttons["收藏為 Moment"]
-        XCTAssertTrue(saveMoment.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.buttons["抱抱"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["收藏為 Moment"].exists)
+        app.buttons["conversation-action-backdrop"].tap()
+
+        let unsavedMessage = app.staticTexts["第二個約定來源訊息"]
+        XCTAssertTrue(unsavedMessage.waitForExistence(timeout: 2))
+        unsavedMessage.press(forDuration: 1)
+        XCTAssertTrue(app.buttons["收藏為 Moment"].waitForExistence(timeout: 2))
+        app.buttons["conversation-action-backdrop"].tap()
+
+        app.navigationBars["專屬討論"].buttons["約定詳情"].tap()
+        app.navigationBars["約定詳情"].buttons["共同日程"].tap()
+        XCTAssertTrue(app.navigationBars["共同日程"].waitForExistence(timeout: 2))
+        app.navigationBars["共同日程"].buttons["完成"].tap()
+        XCTAssertTrue(app.tabBars.firstMatch.waitForExistence(timeout: 2))
+        XCTAssertTrue(app.tabBars.buttons["我們"].isSelected)
     }
 
     @MainActor
