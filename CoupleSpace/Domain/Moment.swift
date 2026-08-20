@@ -86,8 +86,11 @@ struct MomentResponse: Codable, Identifiable, Equatable, Sendable {
 struct MomentQuestionAnswer: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let answererUserID: UUID
-    let content: String
+    let content: String?
     let createdAt: Date
+    var removedAt: Date? = nil
+
+    var isRemoved: Bool { removedAt != nil }
 }
 
 struct Moment: Codable, Identifiable, Equatable, Sendable {
@@ -143,6 +146,47 @@ struct MomentPageCursor: Equatable, Sendable {
 struct MomentPage: Equatable, Sendable {
     let moments: [Moment]
     let hasMore: Bool
+}
+
+struct RecentlyDeletedMoment: Identifiable, Equatable, Sendable {
+    let moment: Moment
+    let deletedAt: Date
+    let purgeAfter: Date
+
+    var id: UUID { moment.id }
+}
+
+struct MomentSyncHint: Equatable, Sendable {
+    let momentID: UUID
+    let isDeleted: Bool
+    let sourceMessageID: UUID?
+    let revision: Int64
+}
+
+enum MomentOperationIdentity: Hashable, Sendable {
+    case deleteMoment(UUID)
+    case restoreMoment(UUID)
+    case removeResponse(momentID: UUID, responseID: UUID)
+    case removeAnswer(momentID: UUID, answerID: UUID)
+
+    var storageKey: String {
+        switch self {
+        case let .deleteMoment(momentID):
+            "delete:\(momentID.uuidString.lowercased())"
+        case let .restoreMoment(momentID):
+            "restore:\(momentID.uuidString.lowercased())"
+        case let .removeResponse(momentID, responseID):
+            "response:\(momentID.uuidString.lowercased()):\(responseID.uuidString.lowercased())"
+        case let .removeAnswer(momentID, answerID):
+            "answer:\(momentID.uuidString.lowercased()):\(answerID.uuidString.lowercased())"
+        }
+    }
+}
+
+enum MomentRemoteChange: Equatable, Sendable {
+    case reloadFirstPage
+    case momentDeleted(UUID)
+    case momentChanged(UUID)
 }
 
 struct MomentWeeklyReview: Equatable, Sendable {

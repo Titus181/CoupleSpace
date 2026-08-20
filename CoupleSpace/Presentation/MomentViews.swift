@@ -59,6 +59,8 @@ struct TodayMomentView: View {
 
                     NextSharedAppointmentSection(
                         model: sharedAppointmentModel,
+                        savedMomentSourceIDs: Set(model.moments.compactMap(\.sourceMessageID)),
+                        hiddenMomentSourceIDs: model.hiddenMomentSourceMessageIDs,
                         onMomentSaved: { await model.refresh() }
                     )
 
@@ -138,7 +140,7 @@ struct MomentTimelineView: View {
                 ProgressView("正在整理共同時間線…")
             } else if model.moments.isEmpty {
                 VStack(spacing: 16) {
-                    weeklyReviewLink
+                    timelineLinks
                         .padding(.horizontal)
                     ContentUnavailableView(
                         "共同時間線",
@@ -149,7 +151,7 @@ struct MomentTimelineView: View {
             } else {
                 ScrollViewReader { proxy in
                     VStack(spacing: 0) {
-                        weeklyReviewLink
+                        timelineLinks
                             .padding(.horizontal)
                             .padding(.vertical, 8)
 
@@ -303,18 +305,29 @@ struct MomentTimelineView: View {
         model.moments.filter(contentFilter.includes)
     }
 
-    private var weeklyReviewLink: some View {
-        NavigationLink {
-            MomentWeeklyReviewView(
-                model: model,
-                togetherNowModel: togetherNowModel,
-                onOpenSourceMessage: onOpenSourceMessage
-            )
-        } label: {
-            Label("回顧最近 7 天", systemImage: "calendar.badge.clock")
-                .frame(maxWidth: .infinity)
+    private var timelineLinks: some View {
+        HStack {
+            NavigationLink {
+                MomentWeeklyReviewView(
+                    model: model,
+                    togetherNowModel: togetherNowModel,
+                    onOpenSourceMessage: onOpenSourceMessage
+                )
+            } label: {
+                Label("回顧最近 7 天", systemImage: "calendar.badge.clock")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+
+            NavigationLink {
+                RecentlyDeletedMomentsView(model: model)
+            } label: {
+                Label("最近刪除", systemImage: "trash")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("recently-deleted-moments")
         }
-        .buttonStyle(.bordered)
     }
 
     private func monthTitle(_ date: Date) -> String {
@@ -342,6 +355,74 @@ struct MomentTimelineView: View {
             components.month ?? 0,
             components.day ?? 0
         )
+    }
+}
+
+private struct RecentlyDeletedMomentsView: View {
+    @ObservedObject var model: MomentModel
+
+    var body: some View {
+        Group {
+            if model.isLoadingRecentlyDeleted && model.recentlyDeletedMoments.isEmpty {
+                ProgressView("正在讀取最近刪除…")
+            } else if model.recentlyDeletedMoments.isEmpty {
+                ContentUnavailableView(
+                    "最近沒有刪除的 Moment",
+                    systemImage: "trash",
+                    description: Text("只有你建立並在 30 天復原期限內的 Moment 會出現在這裡。")
+                )
+            } else {
+                List(model.recentlyDeletedMoments) { deleted in
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label(
+                            summary(for: deleted.moment),
+                            systemImage: symbol(for: deleted.moment)
+                        )
+                        .font(.headline)
+                        .accessibilityIdentifier("recently-deleted-moment")
+                        Text(
+                            "刪除於 \(CoupleSpaceDateFormat.string(deleted.deletedAt, date: .abbreviated, time: .shortened))"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        Text(
+                            "可復原至 \(CoupleSpaceDateFormat.string(deleted.purgeAfter, date: .abbreviated, time: .shortened))"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        Button("復原") {
+                            Task { await model.restore(deleted) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(model.activeLifecycleMomentIDs.contains(deleted.id))
+                        .accessibilityIdentifier("restore-moment")
+                    }
+                    .padding(.vertical, 4)
+                }
+                .refreshable { await model.loadRecentlyDeletedMoments() }
+            }
+        }
+        .navigationTitle("最近刪除")
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await model.loadRecentlyDeletedMoments() }
+    }
+
+    private func summary(for moment: Moment) -> String {
+        switch moment.content {
+        case let .mood(mood): mood.title
+        case let .text(text): text
+        case .photo: "照片 Moment"
+        case let .question(question): question.prompt
+        }
+    }
+
+    private func symbol(for moment: Moment) -> String {
+        switch moment.content {
+        case let .mood(mood): mood.symbol
+        case .text: "text.quote"
+        case .photo: "photo"
+        case .question: "questionmark.bubble"
+        }
     }
 }
 
@@ -541,6 +622,12 @@ struct MomentPhotoGridView: View {
                 onOpenSourceMessage: onOpenSourceMessage
             )
         }
+        .onChange(of: model.moments.map(\.id)) { _, visibleMomentIDs in
+            guard let selectedMoment,
+                  !visibleMomentIDs.contains(selectedMoment.id)
+            else { return }
+            self.selectedMoment = nil
+        }
     }
 
     private var photoSections: [MomentMonthSection] {
@@ -637,6 +724,12 @@ private struct MomentPhotoDetailView: View {
 }
 
 struct MomentCard: View {
+    private enum RemovalAction {
+        case moment
+        case response(MomentResponse)
+        case answer(MomentQuestionAnswer)
+    }
+
     let moment: Moment
     let photoData: Data?
     let authorLabel: String
@@ -646,9 +739,28 @@ struct MomentCard: View {
     @State private var isWritingResponse = false
     @State private var isChoosingEmoji = false
     @State private var isAnsweringQuestion = false
+    @State private var pendingRemoval: RemovalAction?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            if model.currentUserID == moment.creatorUserID {
+                HStack {
+                    Spacer()
+                    Menu {
+                        Button("刪除 Moment", role: .destructive) {
+                            pendingRemoval = .moment
+                        }
+                        .accessibilityIdentifier("delete-moment")
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(minWidth: 32, minHeight: 32)
+                    }
+                    .accessibilityLabel("更多 Moment 操作")
+                    .accessibilityIdentifier("moment-actions")
+                }
+                .frame(height: 20)
+            }
+
             switch moment.content {
             case let .mood(mood):
                 Label(mood.title, systemImage: mood.symbol)
@@ -692,6 +804,7 @@ struct MomentCard: View {
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+            .accessibilityIdentifier("moment-card-\(moment.id.uuidString.lowercased())")
 
             interactionContent
 
@@ -725,6 +838,31 @@ struct MomentCard: View {
         .sheet(isPresented: $isAnsweringQuestion) {
             MomentQuestionAnswerView(moment: moment, model: model)
         }
+        .confirmationDialog(
+            removalTitle,
+            isPresented: removalIsPresented,
+            titleVisibility: .visible
+        ) {
+            Button(removalButtonTitle, role: .destructive) {
+                let action = pendingRemoval
+                pendingRemoval = nil
+                Task {
+                    switch action {
+                    case .moment:
+                        await model.delete(moment)
+                    case let .response(response):
+                        await model.removeOwnResponse(from: moment, response: response)
+                    case let .answer(answer):
+                        await model.removeOwnAnswer(from: moment, answer: answer)
+                    case nil:
+                        break
+                    }
+                }
+            }
+            Button("取消", role: .cancel) { pendingRemoval = nil }
+        } message: {
+            Text(removalMessage)
+        }
     }
 
     @ViewBuilder
@@ -742,9 +880,23 @@ struct MomentCard: View {
         if let response = model.response(for: moment) {
             Divider()
             VStack(alignment: .leading, spacing: 4) {
-                Text(model.responseLabel(for: response, names: names))
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                HStack {
+                    Text(model.responseLabel(for: response, names: names))
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("moment-response")
+                    Spacer()
+                    if response.responderUserID == model.currentUserID {
+                        Button(role: .destructive) {
+                            pendingRemoval = .response(response)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("移除我的回應")
+                        .accessibilityIdentifier("remove-own-moment-response")
+                    }
+                }
                 switch response.content {
                 case let .emoji(emoji):
                     Text(emoji.symbol)
@@ -755,7 +907,6 @@ struct MomentCard: View {
                         .font(MomentResponsePolicy.normalizedEmoji(text) == nil ? .body : .title2)
                 }
             }
-            .accessibilityIdentifier("moment-response")
         } else if let currentUserID = model.currentUserID,
                   currentUserID != moment.creatorUserID
         {
@@ -798,25 +949,113 @@ struct MomentCard: View {
         Divider()
         if moment.isComplete {
             VStack(alignment: .leading, spacing: 12) {
+                Label("一起揭曉", systemImage: "lock.open")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("question-reveal")
                 ForEach(moment.questionAnswers) { answer in
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(model.answerLabel(for: answer, names: names))
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                        Text(answer.content)
+                        HStack {
+                            Text(model.answerLabel(for: answer, names: names))
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            if answer.answererUserID == model.currentUserID, !answer.isRemoved {
+                                Button(role: .destructive) {
+                                    pendingRemoval = .answer(answer)
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("移除我的回答")
+                                .accessibilityIdentifier("remove-own-moment-answer")
+                            }
+                        }
+                        if let content = answer.content {
+                            Text(content)
+                        } else {
+                            Label("回答已移除", systemImage: "minus.circle")
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("removed-question-answer")
+                        }
                     }
                 }
             }
-            .accessibilityIdentifier("question-reveal")
-        } else if model.currentUserHasAnswered(moment) {
-            Label("回答已送出，等對方有空時一起揭曉。", systemImage: "lock")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .accessibilityIdentifier("question-waiting")
+        } else if let currentUserID = model.currentUserID,
+                  let ownAnswer = moment.questionAnswers.first(where: {
+                      $0.answererUserID == currentUserID
+                  })
+        {
+            if ownAnswer.isRemoved {
+                Label("回答已移除；等對方完成後仍會一起揭曉。", systemImage: "minus.circle")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("removed-question-answer")
+            } else {
+                HStack {
+                    Label("回答已送出，等對方有空時一起揭曉。", systemImage: "lock")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("question-waiting")
+                    Spacer()
+                    Button(role: .destructive) {
+                        pendingRemoval = .answer(ownAnswer)
+                    } label: {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("移除我的回答")
+                    .accessibilityIdentifier("remove-own-moment-answer")
+                }
+            }
         } else {
             Button("回答這一題") { isAnsweringQuestion = true }
                 .buttonStyle(.borderedProminent)
                 .accessibilityIdentifier("answer-moment-question")
+        }
+    }
+
+    private var removalIsPresented: Binding<Bool> {
+        Binding(
+            get: { pendingRemoval != nil },
+            set: { if !$0 { pendingRemoval = nil } }
+        )
+    }
+
+    private var removalTitle: String {
+        switch pendingRemoval {
+        case .moment: "刪除這個 Moment？"
+        case .response: "移除你的回應？"
+        case .answer: "移除你的回答？"
+        case nil: "確認移除"
+        }
+    }
+
+    private var removalButtonTitle: String {
+        switch pendingRemoval {
+        case .moment: "刪除 Moment"
+        case .response: "移除回應"
+        case .answer: "移除回答"
+        case nil: "移除"
+        }
+    }
+
+    private var removalMessage: String {
+        switch pendingRemoval {
+        case .moment:
+            if moment.responses.isEmpty, moment.questionAnswers.isEmpty {
+                return "刪除後會立即從你們的共同畫面隱藏；你可在最近刪除中於 30 天內復原。"
+            }
+            return "伴侶的回應或共同回答會一起隱藏，復原時會原樣回來；你可在 30 天內復原。"
+        case .response:
+            return "只會移除你自己的回應，不會刪除這個 Moment。"
+        case .answer:
+            if moment.isComplete {
+                return "只會移除你的回答內容；共同揭曉仍會維持，並顯示已移除標記。"
+            }
+            return "只會移除你的回答內容，且無法重新作答；對方完成後會顯示已移除標記。"
+        case nil:
+            return ""
         }
     }
 }

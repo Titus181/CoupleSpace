@@ -4,13 +4,19 @@ import UIKit
 struct NextSharedAppointmentSection: View {
     @ObservedObject var model: SharedAppointmentModel
     @State private var isCreating = false
+    let savedMomentSourceIDs: Set<UUID>
+    let hiddenMomentSourceIDs: Set<UUID>
     let onMomentSaved: @MainActor () async -> Void
 
     init(
         model: SharedAppointmentModel,
+        savedMomentSourceIDs: Set<UUID> = [],
+        hiddenMomentSourceIDs: Set<UUID> = [],
         onMomentSaved: @escaping @MainActor () async -> Void = {}
     ) {
         self.model = model
+        self.savedMomentSourceIDs = savedMomentSourceIDs
+        self.hiddenMomentSourceIDs = hiddenMomentSourceIDs
         self.onMomentSaved = onMomentSaved
     }
 
@@ -37,6 +43,8 @@ struct NextSharedAppointmentSection: View {
                         SharedAppointmentDetailView(
                             appointmentID: appointment.id,
                             model: model,
+                            savedMomentSourceIDs: savedMomentSourceIDs,
+                            hiddenMomentSourceIDs: hiddenMomentSourceIDs,
                             onMomentSaved: onMomentSaved
                         )
                     } label: {
@@ -136,13 +144,19 @@ struct SharedAppointmentScheduleView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject var model: SharedAppointmentModel
     @State private var isCreating = false
+    let savedMomentSourceIDs: Set<UUID>
+    let hiddenMomentSourceIDs: Set<UUID>
     let onMomentSaved: @MainActor () async -> Void
 
     init(
         model: SharedAppointmentModel,
+        savedMomentSourceIDs: Set<UUID> = [],
+        hiddenMomentSourceIDs: Set<UUID> = [],
         onMomentSaved: @escaping @MainActor () async -> Void = {}
     ) {
         self.model = model
+        self.savedMomentSourceIDs = savedMomentSourceIDs
+        self.hiddenMomentSourceIDs = hiddenMomentSourceIDs
         self.onMomentSaved = onMomentSaved
     }
 
@@ -153,6 +167,8 @@ struct SharedAppointmentScheduleView: View {
                     NavigationLink {
                         SharedAppointmentCalendarView(
                             model: model,
+                            savedMomentSourceIDs: savedMomentSourceIDs,
+                            hiddenMomentSourceIDs: hiddenMomentSourceIDs,
                             onMomentSaved: onMomentSaved
                         )
                     } label: {
@@ -219,6 +235,8 @@ struct SharedAppointmentScheduleView: View {
             SharedAppointmentDetailView(
                 appointmentID: appointment.id,
                 model: model,
+                savedMomentSourceIDs: savedMomentSourceIDs,
+                hiddenMomentSourceIDs: hiddenMomentSourceIDs,
                 onMomentSaved: onMomentSaved
             )
         } label: {
@@ -245,13 +263,19 @@ struct SharedAppointmentScheduleView: View {
 private struct SharedAppointmentCalendarView: View {
     @ObservedObject var model: SharedAppointmentModel
     @State private var selectedDate = Date()
+    let savedMomentSourceIDs: Set<UUID>
+    let hiddenMomentSourceIDs: Set<UUID>
     let onMomentSaved: @MainActor () async -> Void
 
     init(
         model: SharedAppointmentModel,
+        savedMomentSourceIDs: Set<UUID> = [],
+        hiddenMomentSourceIDs: Set<UUID> = [],
         onMomentSaved: @escaping @MainActor () async -> Void = {}
     ) {
         self.model = model
+        self.savedMomentSourceIDs = savedMomentSourceIDs
+        self.hiddenMomentSourceIDs = hiddenMomentSourceIDs
         self.onMomentSaved = onMomentSaved
     }
 
@@ -283,6 +307,8 @@ private struct SharedAppointmentCalendarView: View {
                             SharedAppointmentDetailView(
                                 appointmentID: appointment.id,
                                 model: model,
+                                savedMomentSourceIDs: savedMomentSourceIDs,
+                                hiddenMomentSourceIDs: hiddenMomentSourceIDs,
                                 onMomentSaved: onMomentSaved
                             )
                         } label: {
@@ -324,6 +350,8 @@ struct AppointmentDiscussionView: View {
     let allowsSending: Bool
     let visibleInteractionBoundarySourceIdentity: UUID?
     let initialFocusMessageID: UUID?
+    let savedMomentSourceIDs: Set<UUID>
+    let hiddenMomentSourceIDs: Set<UUID>
     let onMomentSaved: @MainActor () async -> Void
 
     init(
@@ -334,6 +362,8 @@ struct AppointmentDiscussionView: View {
         allowsSending: Bool,
         visibleInteractionBoundarySourceIdentity: UUID?,
         initialFocusMessageID: UUID? = nil,
+        savedMomentSourceIDs: Set<UUID> = [],
+        hiddenMomentSourceIDs: Set<UUID> = [],
         onMomentSaved: @escaping @MainActor () async -> Void = {}
     ) {
         _discussionModel = StateObject(wrappedValue: discussionModel)
@@ -344,6 +374,8 @@ struct AppointmentDiscussionView: View {
         self.visibleInteractionBoundarySourceIdentity = visibleInteractionBoundarySourceIdentity
         _focusMessageID = State(initialValue: nil)
         self.initialFocusMessageID = initialFocusMessageID
+        self.savedMomentSourceIDs = savedMomentSourceIDs
+        self.hiddenMomentSourceIDs = hiddenMomentSourceIDs
         self.onMomentSaved = onMomentSaved
     }
 
@@ -362,6 +394,8 @@ struct AppointmentDiscussionView: View {
                 model: discussionModel,
                 sharedAppointmentModel: sharedAppointmentModel,
                 focusMessageID: $focusMessageID,
+                savedMomentSourceIDs: savedMomentSourceIDs,
+                hiddenMomentSourceIDs: hiddenMomentSourceIDs,
                 mode: .appointmentDiscussion(appointmentID),
                 embedsNavigationStack: false,
                 allowsSending: allowsSending,
@@ -416,15 +450,21 @@ struct SharedAppointmentDetailView: View {
     @State private var isEditing = false
     @State private var isConfirmingCancellation = false
     @State private var isPresented = false
+    let savedMomentSourceIDs: Set<UUID>
+    let hiddenMomentSourceIDs: Set<UUID>
     let onMomentSaved: @MainActor () async -> Void
 
     init(
         appointmentID: UUID,
         model: SharedAppointmentModel,
+        savedMomentSourceIDs: Set<UUID> = [],
+        hiddenMomentSourceIDs: Set<UUID> = [],
         onMomentSaved: @escaping @MainActor () async -> Void = {}
     ) {
         self.appointmentID = appointmentID
         self.model = model
+        self.savedMomentSourceIDs = savedMomentSourceIDs
+        self.hiddenMomentSourceIDs = hiddenMomentSourceIDs
         self.onMomentSaved = onMomentSaved
     }
 
@@ -472,6 +512,8 @@ struct SharedAppointmentDetailView: View {
                                     allowsSending: appointment.status == .scheduled,
                                     visibleInteractionBoundarySourceIdentity:
                                         appointment.interactionBoundarySourceIdentity,
+                                    savedMomentSourceIDs: savedMomentSourceIDs,
+                                    hiddenMomentSourceIDs: hiddenMomentSourceIDs,
                                     onMomentSaved: onMomentSaved
                                 )
                             } label: {

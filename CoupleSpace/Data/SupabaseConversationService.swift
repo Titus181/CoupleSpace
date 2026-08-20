@@ -569,6 +569,7 @@ final class SupabaseConversationService: ConversationRemoteServing {
                 .select("source_shared_item_client_id")
                 .eq("relationship_id", value: relationshipID)
                 .in("source_shared_item_client_id", values: messageIDs)
+                .is("deleted_at", value: nil)
                 .execute()
                 .value
         }

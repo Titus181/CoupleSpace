@@ -104,6 +104,7 @@ struct ConversationView: View {
     @Binding private var focusMessageID: UUID?
     @Binding private var appointmentDiscussionFocus: AppointmentDiscussionFocus?
     private let savedMomentSourceIDs: Set<UUID>
+    private let hiddenMomentSourceIDs: Set<UUID>
     private let onMomentSaved: @MainActor () async -> Void
     private let onVisibilityChanged: @MainActor (Bool) -> Void
     private let mode: ConversationPresentationMode
@@ -124,6 +125,7 @@ struct ConversationView: View {
         focusMessageID: Binding<UUID?> = .constant(nil),
         appointmentDiscussionFocus: Binding<AppointmentDiscussionFocus?> = .constant(nil),
         savedMomentSourceIDs: Set<UUID> = [],
+        hiddenMomentSourceIDs: Set<UUID> = [],
         mode: ConversationPresentationMode = .main,
         embedsNavigationStack: Bool = true,
         allowsSending: Bool = true,
@@ -135,6 +137,7 @@ struct ConversationView: View {
         _focusMessageID = focusMessageID
         _appointmentDiscussionFocus = appointmentDiscussionFocus
         self.savedMomentSourceIDs = savedMomentSourceIDs
+        self.hiddenMomentSourceIDs = hiddenMomentSourceIDs
         self.mode = mode
         self.embedsNavigationStack = embedsNavigationStack
         self.allowsSending = allowsSending
@@ -215,6 +218,8 @@ struct ConversationView: View {
                 visibleInteractionBoundarySourceIdentity:
                     appointment.interactionBoundarySourceIdentity,
                 initialFocusMessageID: focus.messageID,
+                savedMomentSourceIDs: savedMomentSourceIDs,
+                hiddenMomentSourceIDs: hiddenMomentSourceIDs,
                 onMomentSaved: onMomentSaved
             )
         } else {
@@ -297,6 +302,8 @@ struct ConversationView: View {
                                     allowsSending: entry.appointment.status == .scheduled,
                                     visibleInteractionBoundarySourceIdentity:
                                         entry.appointment.interactionBoundarySourceIdentity,
+                                    savedMomentSourceIDs: savedMomentSourceIDs,
+                                    hiddenMomentSourceIDs: hiddenMomentSourceIDs,
                                     onMomentSaved: onMomentSaved
                                 )
                             }
@@ -470,6 +477,8 @@ struct ConversationView: View {
                 SharedAppointmentDetailView(
                     appointmentID: appointment.id,
                     model: sharedAppointmentModel,
+                    savedMomentSourceIDs: savedMomentSourceIDs,
+                    hiddenMomentSourceIDs: hiddenMomentSourceIDs,
                     onMomentSaved: onMomentSaved
                 )
             } label: {
@@ -689,7 +698,9 @@ struct ConversationView: View {
     }
 
     private func isSavedAsMoment(_ message: ChatMessage) -> Bool {
-        savedMomentSourceIDs.contains(message.id) || model.savedMomentMessageIDs.contains(message.id)
+        guard !hiddenMomentSourceIDs.contains(message.id) else { return false }
+        return savedMomentSourceIDs.contains(message.id)
+            || model.savedMomentMessageIDs.contains(message.id)
     }
 
     private var actionMessage: ChatMessage? {
@@ -724,7 +735,12 @@ struct ConversationView: View {
         let reactionWidth = containerSize.width - (reactionInset * 2)
         let actionWidth = min(216, containerSize.width - (actionInset * 2))
         let reactionHeight: CGFloat = 54
-        let actionCount = (canSaveAsMoment(message) && !isSavedAsMoment(message) ? 1 : 0)
+        let actionCount = (
+            canSaveAsMoment(message)
+                && !isSavedAsMoment(message)
+                && !hiddenMomentSourceIDs.contains(message.id)
+            ? 1 : 0
+        )
             + (canCreateAppointment(from: message) ? 1 : 0)
         let actionHeight = CGFloat(actionCount * 46 + max(0, actionCount - 1) * 8)
         let itemSpacing: CGFloat = 8
@@ -914,7 +930,10 @@ struct ConversationView: View {
 
     @ViewBuilder
     private func saveMomentAction(for message: ChatMessage) -> some View {
-        if canSaveAsMoment(message) && !isSavedAsMoment(message) {
+        if canSaveAsMoment(message),
+           !isSavedAsMoment(message),
+           !hiddenMomentSourceIDs.contains(message.id)
+        {
             Button {
                 actionMessageID = nil
                 Task {

@@ -142,6 +142,8 @@ final class ConversationModel: ObservableObject {
             if !didLoadOlderMessages { hasMoreMessages = page.hasMore }
             applyPendingReactionAttempts()
             unreadCount = snapshot.unreadCount
+            let refreshedMessageIDs = Set(snapshot.messages.map(\.id))
+            savedMomentMessageIDs.subtract(refreshedMessageIDs)
             savedMomentMessageIDs.formUnion(snapshot.savedMomentMessageIDs)
             statusMessage = terminalDeliveryMessage
             loadCachedPhotos()
@@ -171,6 +173,8 @@ final class ConversationModel: ObservableObject {
                 limit: pageSize
             )
             mergeRemoteMessages(page.snapshot.messages, unresolvedMessages: [])
+            let refreshedMessageIDs = Set(page.snapshot.messages.map(\.id))
+            savedMomentMessageIDs.subtract(refreshedMessageIDs)
             savedMomentMessageIDs.formUnion(page.snapshot.savedMomentMessageIDs)
             hasMoreMessages = page.hasMore
             didLoadOlderMessages = true

@@ -347,6 +347,122 @@ final class CoupleSpaceUITests: XCTestCase {
     }
 
     @MainActor
+    func testCreatorDeletesMomentAcrossSurfacesAndRestoresItFromRecentlyDeleted() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w14-moment-deletion"]
+        app.launch()
+
+        let momentID = "e1000000-0000-0000-0000-000000000001"
+        let card = app.descendants(matching: .any)["moment-card-\(momentID)"]
+        XCTAssertTrue(card.waitForExistence(timeout: 3))
+        app.buttons["moment-actions"].tap()
+        let deleteMenuAction = app.buttons["delete-moment"]
+        XCTAssertTrue(deleteMenuAction.waitForExistence(timeout: 1))
+        deleteMenuAction.tap()
+        XCTAssertTrue(app.staticTexts["刪除這個 Moment？"].waitForExistence(timeout: 1))
+        app.buttons["刪除 Moment"].tap()
+        XCTAssertTrue(card.waitForNonExistence(timeout: 2))
+
+        app.tabBars.buttons["對話"].tap()
+        let sourceMessage = app.staticTexts["W14 Moment 的來源訊息"]
+        XCTAssertTrue(sourceMessage.waitForExistence(timeout: 2))
+        XCTAssertFalse(app.staticTexts["已收藏為 Moment"].exists)
+        sourceMessage.press(forDuration: 1)
+        XCTAssertFalse(app.buttons["收藏為 Moment"].exists)
+        app.buttons["conversation-action-backdrop"].tap()
+
+        app.tabBars.buttons["我們"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["moment-timeline"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.descendants(matching: .any)["moment-card-\(momentID)"].exists)
+        let weeklyReview = app.buttons["回顧最近 7 天"]
+        XCTAssertTrue(weeklyReview.waitForExistence(timeout: 2))
+        weeklyReview.tap()
+        XCTAssertTrue(app.navigationBars["這週的我們"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.descendants(matching: .any)["moment-card-\(momentID)"].exists)
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        app.buttons["照片"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["moment-photo-grid"].waitForExistence(timeout: 1))
+        XCTAssertFalse(app.buttons["shared-photo-\(momentID.uppercased())"].exists)
+
+        app.buttons["時間線"].tap()
+        let recentlyDeleted = app.buttons["最近刪除"]
+        XCTAssertTrue(recentlyDeleted.waitForExistence(timeout: 2))
+        recentlyDeleted.tap()
+        XCTAssertTrue(app.navigationBars["最近刪除"].waitForExistence(timeout: 2))
+        let restore = app.buttons["restore-moment"]
+        XCTAssertTrue(restore.waitForExistence(timeout: 2))
+        restore.tap()
+        XCTAssertTrue(restore.waitForNonExistence(timeout: 2))
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(
+            app.descendants(matching: .any)["moment-card-\(momentID)"].waitForExistence(timeout: 2)
+        )
+        app.buttons["照片"].tap()
+        XCTAssertTrue(app.buttons["shared-photo-\(momentID.uppercased())"].waitForExistence(timeout: 2))
+        app.tabBars.buttons["對話"].tap()
+        XCTAssertTrue(app.staticTexts["已收藏為 Moment"].waitForExistence(timeout: 2))
+    }
+
+    @MainActor
+    func testPartnerCanOnlyRemoveOwnMomentResponseAndAnswer() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w14-moment-partner"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["W14 共同揭曉題目"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["moment-actions"].exists)
+        let removeAnswer = app.buttons["remove-own-moment-answer"]
+        XCTAssertTrue(removeAnswer.waitForExistence(timeout: 2))
+        if !removeAnswer.isHittable {
+            app.swipeUp()
+        }
+        XCTAssertTrue(removeAnswer.isHittable)
+        removeAnswer.tap()
+        XCTAssertTrue(app.staticTexts["移除你的回答？"].waitForExistence(timeout: 1))
+        app.buttons["移除回答"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["question-reveal"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.descendants(matching: .any)["removed-question-answer"].exists)
+
+        app.tabBars.buttons["我們"].tap()
+        let responseButton = app.buttons["remove-own-moment-response"]
+        if !responseButton.waitForExistence(timeout: 1) {
+            app.swipeUp()
+        }
+        XCTAssertTrue(responseButton.waitForExistence(timeout: 2))
+        responseButton.tap()
+        XCTAssertTrue(app.staticTexts["移除你的回應？"].waitForExistence(timeout: 1))
+        app.buttons["移除回應"].tap()
+        XCTAssertTrue(responseButton.waitForNonExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["moment-actions"].exists)
+    }
+
+    @MainActor
+    func testOwnQuestionAnswerCanBeRemovedBeforeJointReveal() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["--ui-testing", "--ui-testing-w14-pre-reveal-answer"]
+        app.launch()
+
+        XCTAssertTrue(app.staticTexts["W14 尚未揭曉題目"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.descendants(matching: .any)["question-waiting"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["question-reveal"].exists)
+        let removeAnswer = app.buttons["remove-own-moment-answer"]
+        XCTAssertTrue(removeAnswer.waitForExistence(timeout: 2))
+        removeAnswer.tap()
+        XCTAssertTrue(app.staticTexts["移除你的回答？"].waitForExistence(timeout: 1))
+        app.buttons["移除回答"].tap()
+
+        XCTAssertTrue(
+            app.descendants(matching: .any)["removed-question-answer"]
+                .waitForExistence(timeout: 2)
+        )
+        XCTAssertFalse(app.descendants(matching: .any)["question-reveal"].exists)
+        XCTAssertFalse(app.buttons["answer-moment-question"].exists)
+        XCTAssertFalse(app.buttons["remove-own-moment-answer"].exists)
+        XCTAssertFalse(app.buttons["moment-actions"].exists)
+    }
+
+    @MainActor
     func testSharedTimelineGroupsMomentsAndJumpsToAnOlderMonth() throws {
         let app = XCUIApplication()
         app.launchArguments = ["--ui-testing", "--ui-testing-w12-monthly-timeline"]

@@ -1972,6 +1972,16 @@ struct AppSkeletonTests {
             relationshipID: relationshipID,
             momentID: momentID
         )
+        let operationIdentity = MomentOperationIdentity.deleteMoment(momentID)
+        let operationID = try store.loadOrCreateMomentOperationID(
+            for: operationIdentity,
+            userID: userID,
+            relationshipID: relationshipID
+        )
+        let reconstructedStore = TodaySnapshotStore(
+            defaults: defaults,
+            photoRootURL: photoRootURL
+        )
 
         #expect(try store.loadMoments(userID: userID, relationshipID: relationshipID) == [moment])
         #expect(try store.loadTogetherNow(userID: userID, relationshipID: relationshipID) == togetherNow)
@@ -1982,6 +1992,16 @@ struct AppSkeletonTests {
         ) == photoData)
         #expect(try store.loadMoments(userID: UUID(), relationshipID: relationshipID) == nil)
         #expect(try store.loadTogetherNow(userID: userID, relationshipID: UUID()) == nil)
+        #expect(reconstructedStore.momentOperationID(
+            for: operationIdentity,
+            userID: userID,
+            relationshipID: relationshipID
+        ) == operationID)
+        #expect(reconstructedStore.momentOperationID(
+            for: operationIdentity,
+            userID: UUID(),
+            relationshipID: relationshipID
+        ) == nil)
 
         store.clearAll(userID: userID)
         #expect(try store.loadMoments(userID: userID, relationshipID: relationshipID) == nil)
@@ -1990,6 +2010,11 @@ struct AppSkeletonTests {
             userID: userID,
             relationshipID: relationshipID,
             momentID: momentID
+        ) == nil)
+        #expect(reconstructedStore.momentOperationID(
+            for: operationIdentity,
+            userID: userID,
+            relationshipID: relationshipID
         ) == nil)
     }
 
@@ -2862,6 +2887,7 @@ struct AppSkeletonTests {
         #expect(model.moments == [first])
         #expect(model.authorLabel(for: first, names: nil) == "我留下的")
         #expect(service.isObserving)
+        #expect(service.firstFetchObservedState == true)
 
         #expect(await model.create(.text("  今天看到漂亮的天空  ")))
         #expect(model.moments.first?.content == .text("今天看到漂亮的天空"))
@@ -3087,6 +3113,1363 @@ struct AppSkeletonTests {
         #expect(service.questionAttemptIDs.count == 2)
         #expect(service.questionAttemptIDs[0].0 == service.questionAttemptIDs[1].0)
         #expect(service.questionAttemptIDs[0].1 == service.questionAttemptIDs[1].1)
+    }
+
+    @MainActor
+    @Test func momentLifecycleRetriesReuseStableOperationIDsAfterLostAcknowledgements() async throws {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let relationshipID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
+        let suiteName = "MomentOperationTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let photoRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MomentOperationTests.\(UUID().uuidString)", isDirectory: true)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: photoRootURL)
+        }
+        let moment = Moment(
+            id: UUID(),
+            creatorUserID: currentUserID,
+            content: .text("只套用一次"),
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let firstStore = TodaySnapshotStore(defaults: defaults, photoRootURL: photoRootURL)
+        let service = MomentRemoteServiceFake(moments: [moment], operationStore: firstStore)
+        let firstModel = MomentModel(service: service)
+        await firstModel.start()
+
+        service.deleteApplyThenFailRemaining = 1
+        #expect(await firstModel.delete(moment) == false)
+        let deleteIdentity = MomentOperationIdentity.deleteMoment(moment.id)
+        let persistedDeleteID = try #require(firstStore.momentOperationID(
+            for: deleteIdentity,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        ))
+        await firstModel.stop()
+
+        let secondStore = TodaySnapshotStore(defaults: defaults, photoRootURL: photoRootURL)
+        service.operationStore = secondStore
+        let secondModel = MomentModel(service: service)
+        await secondModel.start()
+        #expect(await secondModel.delete(moment))
+        #expect(service.deleteOperationIDs.count == 2)
+        #expect(service.deleteOperationIDs == [persistedDeleteID, persistedDeleteID])
+        #expect(service.deleteApplicationCount == 1)
+        #expect(!secondModel.moments.contains(where: { $0.id == moment.id }))
+        #expect(secondStore.momentOperationID(
+            for: deleteIdentity,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        ) == nil)
+
+        let deleted = try #require(secondModel.recentlyDeletedMoments.first)
+        service.restoreApplyThenFailRemaining = 1
+        #expect(await secondModel.restore(deleted) == false)
+        let restoreIdentity = MomentOperationIdentity.restoreMoment(moment.id)
+        let persistedRestoreID = try #require(secondStore.momentOperationID(
+            for: restoreIdentity,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        ))
+        await secondModel.stop()
+
+        let thirdStore = TodaySnapshotStore(defaults: defaults, photoRootURL: photoRootURL)
+        service.operationStore = thirdStore
+        let thirdModel = MomentModel(service: service)
+        await thirdModel.start()
+        #expect(await thirdModel.restore(deleted))
+        #expect(service.restoreOperationIDs.count == 2)
+        #expect(service.restoreOperationIDs == [persistedRestoreID, persistedRestoreID])
+        #expect(service.restoreApplicationCount == 1)
+        #expect(thirdModel.moments.filter { $0.id == moment.id }.count == 1)
+        #expect(thirdStore.momentOperationID(
+            for: restoreIdentity,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        ) == nil)
+    }
+
+    @MainActor
+    @Test func momentInteractionRemovalRetriesReuseDurableIDsAfterModelAndStoreRebuild() async throws {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let relationshipID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
+        let suiteName = "MomentInteractionOperationTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let photoRootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("MomentInteractionOperationTests.\(UUID().uuidString)")
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+            try? FileManager.default.removeItem(at: photoRootURL)
+        }
+        let response = MomentResponse(
+            id: UUID(),
+            responderUserID: currentUserID,
+            content: .emoji(.hug),
+            createdAt: .now
+        )
+        let responseMoment = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("回應"),
+            createdAt: .now,
+            responses: [response]
+        )
+        let answer = MomentQuestionAnswer(
+            id: UUID(),
+            answererUserID: currentUserID,
+            content: "回答",
+            createdAt: .now
+        )
+        let question = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .question(MomentQuestion(key: "understand_today", prompt: "題目")),
+            createdAt: .now,
+            questionAnswers: [answer]
+        )
+        let firstStore = TodaySnapshotStore(defaults: defaults, photoRootURL: photoRootURL)
+        let service = MomentRemoteServiceFake(
+            moments: [question, responseMoment],
+            operationStore: firstStore
+        )
+        let firstModel = MomentModel(service: service)
+        await firstModel.start()
+
+        service.removeResponseApplyThenFailRemaining = 1
+        #expect(await firstModel.removeOwnResponse(from: responseMoment, response: response) == false)
+        let responseIdentity = MomentOperationIdentity.removeResponse(
+            momentID: responseMoment.id,
+            responseID: response.id
+        )
+        let responseOperationID = try #require(firstStore.momentOperationID(
+            for: responseIdentity,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        ))
+        await firstModel.stop()
+
+        let secondStore = TodaySnapshotStore(defaults: defaults, photoRootURL: photoRootURL)
+        service.operationStore = secondStore
+        let secondModel = MomentModel(service: service)
+        await secondModel.start()
+        #expect(await secondModel.removeOwnResponse(from: responseMoment, response: response))
+        #expect(service.removeResponseOperationIDs == [responseOperationID, responseOperationID])
+        #expect(service.removeResponseApplicationCount == 1)
+        #expect(secondStore.momentOperationID(
+            for: responseIdentity,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        ) == nil)
+
+        service.removeAnswerApplyThenFailRemaining = 1
+        #expect(await secondModel.removeOwnAnswer(from: question, answer: answer) == false)
+        let answerIdentity = MomentOperationIdentity.removeAnswer(
+            momentID: question.id,
+            answerID: answer.id
+        )
+        let answerOperationID = try #require(secondStore.momentOperationID(
+            for: answerIdentity,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        ))
+        await secondModel.stop()
+
+        let thirdStore = TodaySnapshotStore(defaults: defaults, photoRootURL: photoRootURL)
+        service.operationStore = thirdStore
+        let thirdModel = MomentModel(service: service)
+        await thirdModel.start()
+        #expect(await thirdModel.removeOwnAnswer(from: question, answer: answer))
+        #expect(service.removeAnswerOperationIDs == [answerOperationID, answerOperationID])
+        #expect(service.removeAnswerApplicationCount == 1)
+        #expect(thirdStore.momentOperationID(
+            for: answerIdentity,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        ) == nil)
+    }
+
+    @MainActor
+    @Test func momentSupersededLifecycleReceiptClearsStaleDurableIdentityAndRefreshes() async throws {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let relationshipID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
+        let suiteName = "MomentSupersededOperationTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = TodaySnapshotStore(defaults: defaults)
+        let moment = Moment(
+            id: UUID(),
+            creatorUserID: currentUserID,
+            content: .text("跨裝置狀態"),
+            createdAt: .now
+        )
+        let service = MomentRemoteServiceFake(moments: [moment], operationStore: store)
+        let model = MomentModel(service: service)
+        await model.start()
+
+        let deleteIdentity = MomentOperationIdentity.deleteMoment(moment.id)
+        service.deleteSupersededRemaining = 1
+        #expect(await model.delete(moment) == false)
+        #expect(model.moments == [moment])
+        #expect(store.momentOperationID(
+            for: deleteIdentity,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        ) == nil)
+        #expect(await model.delete(moment))
+        #expect(service.deleteOperationIDs.count == 2)
+        #expect(service.deleteOperationIDs[0] != service.deleteOperationIDs[1])
+
+        let deleted = try #require(model.recentlyDeletedMoments.first)
+        let restoreIdentity = MomentOperationIdentity.restoreMoment(moment.id)
+        service.restoreSupersededRemaining = 1
+        #expect(await model.restore(deleted) == false)
+        #expect(model.moments.isEmpty)
+        #expect(store.momentOperationID(
+            for: restoreIdentity,
+            userID: currentUserID,
+            relationshipID: relationshipID
+        ) == nil)
+        #expect(await model.restore(deleted))
+        #expect(service.restoreOperationIDs.count == 2)
+        #expect(service.restoreOperationIDs[0] != service.restoreOperationIDs[1])
+    }
+
+    @MainActor
+    @Test func momentRestoreDuringRecentlyDeletedFetchCannotReviveStaleListEntry() async {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let moment = Moment(
+            id: UUID(),
+            creatorUserID: currentUserID,
+            content: .text("等待復原"),
+            createdAt: .now
+        )
+        let deleted = RecentlyDeletedMoment(
+            moment: moment,
+            deletedAt: Date(timeIntervalSince1970: 1_000),
+            purgeAfter: Date(timeIntervalSince1970: 1_000 + 30 * 86_400)
+        )
+        let service = MomentRemoteServiceFake(moments: [])
+        service.recentlyDeletedMoments = [deleted]
+        service.hiddenMomentIDs = [moment.id]
+        service.syncHints = [MomentSyncHint(
+            momentID: moment.id,
+            isDeleted: true,
+            sourceMessageID: nil,
+            revision: 1
+        )]
+        let model = MomentModel(service: service)
+        await model.start()
+        service.suspendFetchRecentlyDeleted = true
+        let loadDeleted = Task { await model.loadRecentlyDeletedMoments() }
+        guard await waitForLifecycleCondition({
+            service.fetchRecentlyDeletedContinuation != nil
+        }) else {
+            Issue.record("Recently deleted fetch did not suspend")
+            service.resumeFetchRecentlyDeleted()
+            await loadDeleted.value
+            return
+        }
+
+        #expect(await model.restore(deleted))
+        service.resumeFetchRecentlyDeleted()
+        await loadDeleted.value
+
+        #expect(model.recentlyDeletedMoments.isEmpty)
+        #expect(model.moments.contains { $0.id == moment.id })
+    }
+
+    @MainActor
+    @Test func delayedDeleteAcknowledgementCannotOverrideNewerRemoteRestore() async throws {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let moment = Moment(
+            id: UUID(),
+            creatorUserID: currentUserID,
+            content: .text("較新的復原應勝出"),
+            createdAt: .now
+        )
+        let service = MomentRemoteServiceFake(moments: [moment])
+        let model = MomentModel(service: service)
+        await model.start()
+        service.suspendDeleteAcknowledgement = true
+        let deletion = Task { await model.delete(moment) }
+        guard await waitForLifecycleCondition({
+            service.deleteAcknowledgementContinuation != nil
+        }) else {
+            Issue.record("Delete acknowledgement did not suspend")
+            service.resumeDeleteAcknowledgement()
+            _ = await deletion.value
+            return
+        }
+
+        _ = try await service.restoreMoment(id: moment.id, operationID: UUID())
+        await service.sendChange(.momentChanged(moment.id))
+        service.resumeDeleteAcknowledgement()
+
+        #expect(await deletion.value)
+        #expect(model.moments == [moment])
+        #expect(model.recentlyDeletedMoments.isEmpty)
+    }
+
+    @MainActor
+    @Test func successfulDeleteAckFailsClosedWhenReconciliationFails() async throws {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let target = Moment(
+            id: UUID(),
+            creatorUserID: currentUserID,
+            content: .text("刪除 ack 後不得殘留"),
+            createdAt: Date(timeIntervalSince1970: 200)
+        )
+        let unrelated = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("不相關更新"),
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let service = MomentRemoteServiceFake(moments: [target, unrelated])
+        let model = MomentModel(service: service)
+        await model.start()
+        service.suspendDeleteAcknowledgement = true
+        let deletion = Task { await model.delete(target) }
+        guard await waitForLifecycleCondition({
+            service.deleteAcknowledgementContinuation != nil
+        }) else {
+            Issue.record("Delete acknowledgement did not suspend")
+            service.resumeDeleteAcknowledgement()
+            _ = await deletion.value
+            return
+        }
+
+        await service.sendChange(.momentChanged(unrelated.id))
+        service.syncHintFailuresRemaining = 1
+        service.resumeDeleteAcknowledgement()
+
+        #expect(await deletion.value)
+        #expect(!model.moments.contains { $0.id == target.id })
+        #expect(service.cachedMomentsValue?.contains { $0.id == target.id } != true)
+        #expect(service.cacheEvictionMomentIDs.contains(target.id))
+    }
+
+    @MainActor
+    @Test func delayedResponseRemovalAcknowledgementCannotEraseNewerInteraction() async {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let oldResponse = MomentResponse(
+            id: UUID(),
+            responderUserID: currentUserID,
+            content: .emoji(.heart),
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let moment = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("較新的互動應勝出"),
+            createdAt: .now,
+            responses: [oldResponse]
+        )
+        let service = MomentRemoteServiceFake(moments: [moment])
+        let model = MomentModel(service: service)
+        await model.start()
+        service.suspendRemoveResponseAcknowledgement = true
+        let removal = Task {
+            await model.removeOwnResponse(from: moment, response: oldResponse)
+        }
+        guard await waitForLifecycleCondition({
+            service.removeResponseAcknowledgementContinuation != nil
+        }) else {
+            Issue.record("Response removal acknowledgement did not suspend")
+            service.resumeRemoveResponseAcknowledgement()
+            _ = await removal.value
+            return
+        }
+
+        let newerResponse = MomentResponse(
+            id: UUID(),
+            responderUserID: currentUserID,
+            content: .emoji(.hug),
+            createdAt: Date(timeIntervalSince1970: 200)
+        )
+        let newerMoment = Moment(
+            id: moment.id,
+            creatorUserID: moment.creatorUserID,
+            content: moment.content,
+            createdAt: moment.createdAt,
+            responses: [newerResponse]
+        )
+        service.moments = [newerMoment]
+        service.syncHints = [MomentSyncHint(
+            momentID: moment.id,
+            isDeleted: false,
+            sourceMessageID: nil,
+            revision: 2
+        )]
+        await service.sendChange(.reloadFirstPage)
+        service.resumeRemoveResponseAcknowledgement()
+
+        #expect(await removal.value)
+        #expect(model.moments.first?.responses == [newerResponse])
+    }
+
+    @MainActor
+    @Test func successfulInteractionRemovalAckRedactsTargetWhenReconciliationFails() async {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let response = MomentResponse(
+            id: UUID(),
+            responderUserID: currentUserID,
+            content: .text("移除後不得殘留"),
+            createdAt: .now
+        )
+        let target = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("互動 ack"),
+            createdAt: Date(timeIntervalSince1970: 200),
+            responses: [response]
+        )
+        let unrelated = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("不相關更新"),
+            createdAt: Date(timeIntervalSince1970: 100)
+        )
+        let service = MomentRemoteServiceFake(moments: [target, unrelated])
+        let model = MomentModel(service: service)
+        await model.start()
+        service.suspendRemoveResponseAcknowledgement = true
+        let removal = Task {
+            await model.removeOwnResponse(from: target, response: response)
+        }
+        guard await waitForLifecycleCondition({
+            service.removeResponseAcknowledgementContinuation != nil
+        }) else {
+            Issue.record("Response removal acknowledgement did not suspend")
+            service.resumeRemoveResponseAcknowledgement()
+            _ = await removal.value
+            return
+        }
+
+        await service.sendChange(.momentChanged(unrelated.id))
+        service.syncHintFailuresRemaining = 1
+        service.resumeRemoveResponseAcknowledgement()
+
+        #expect(await removal.value)
+        #expect(model.moments.first(where: { $0.id == target.id })?.responses.isEmpty == true)
+        #expect(service.cachedMomentsValue?.first(where: {
+            $0.id == target.id
+        })?.responses.isEmpty == true)
+        #expect(!service.cacheEvictionMomentIDs.contains(target.id))
+    }
+
+    @MainActor
+    @Test func unavailableLiveHintPrunesBeforeLaterTargetedHydrationThrows() async throws {
+        let unavailableID = try #require(UUID(
+            uuidString: "00000000-0000-0000-0000-000000000010"
+        ))
+        let failingID = try #require(UUID(
+            uuidString: "00000000-0000-0000-0000-000000000020"
+        ))
+        let sourceMessageID = UUID()
+        let unavailable = Moment(
+            id: unavailableID,
+            creatorUserID: UUID(),
+            content: .photo,
+            createdAt: Date(timeIntervalSince1970: 10),
+            sourceMessageID: sourceMessageID
+        )
+        let failing = Moment(
+            id: failingID,
+            creatorUserID: UUID(),
+            content: .text("later fetch throws"),
+            createdAt: Date(timeIntervalSince1970: 20)
+        )
+        let firstPage = (0..<50).map { index in
+            Moment(
+                id: UUID(),
+                creatorUserID: UUID(),
+                content: .text("page \(index)"),
+                createdAt: Date(timeIntervalSince1970: TimeInterval(1_000 - index))
+            )
+        }
+        let service = MomentRemoteServiceFake(moments: firstPage + [failing])
+        service.cachedMomentsValue = [unavailable]
+        service.cachedPhotoDataByMomentID[unavailable.id] = Data([0x01])
+        service.syncHints = [
+            MomentSyncHint(
+                momentID: unavailable.id,
+                isDeleted: false,
+                sourceMessageID: sourceMessageID,
+                revision: 1
+            ),
+            MomentSyncHint(
+                momentID: failing.id,
+                isDeleted: false,
+                sourceMessageID: nil,
+                revision: 1
+            ),
+        ]
+        service.fetchMomentFailureIDs = [failing.id]
+        let model = MomentModel(service: service)
+
+        await model.start()
+
+        #expect(!model.moments.contains { $0.id == unavailable.id })
+        #expect(model.photoDataByMomentID[unavailable.id] == nil)
+        #expect(service.cachedMomentsValue?.contains { $0.id == unavailable.id } != true)
+        #expect(service.cachedPhotoDataByMomentID[unavailable.id] == nil)
+        #expect(model.hiddenMomentSourceMessageIDs.contains(sourceMessageID))
+        #expect(Array(service.fetchMomentRequestIDs.prefix(2)) == [unavailable.id, failing.id])
+    }
+
+    @MainActor
+    @Test func deletedHintPrunesBeforeUnrelatedLiveHydrationFailure() async {
+        let sourceMessageID = UUID()
+        let deleted = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .photo,
+            createdAt: Date(timeIntervalSince1970: 10),
+            sourceMessageID: sourceMessageID
+        )
+        let liveOffPage = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("targeted fetch 將失敗"),
+            createdAt: Date(timeIntervalSince1970: 20)
+        )
+        let firstPage = (0..<50).map { index in
+            Moment(
+                id: UUID(),
+                creatorUserID: UUID(),
+                content: .text("page \(index)"),
+                createdAt: Date(timeIntervalSince1970: TimeInterval(1_000 - index))
+            )
+        }
+        let service = MomentRemoteServiceFake(moments: firstPage + [liveOffPage])
+        service.cachedMomentsValue = [deleted]
+        service.cachedPhotoDataByMomentID[deleted.id] = Data([0x01, 0x02])
+        service.syncHints = [
+            MomentSyncHint(
+                momentID: deleted.id,
+                isDeleted: true,
+                sourceMessageID: sourceMessageID,
+                revision: 1
+            ),
+            MomentSyncHint(
+                momentID: liveOffPage.id,
+                isDeleted: false,
+                sourceMessageID: nil,
+                revision: 1
+            ),
+        ]
+        service.fetchMomentFailureIDs = [liveOffPage.id]
+        let model = MomentModel(service: service)
+
+        await model.start()
+
+        #expect(!model.moments.contains { $0.id == deleted.id })
+        #expect(model.photoDataByMomentID[deleted.id] == nil)
+        #expect(service.cachedMomentsValue?.contains { $0.id == deleted.id } != true)
+        #expect(service.cachedPhotoDataByMomentID[deleted.id] == nil)
+        #expect(model.hiddenMomentSourceMessageIDs.contains(sourceMessageID))
+        #expect(service.fetchMomentRequestIDs.contains(liveOffPage.id))
+    }
+
+    @MainActor
+    @Test func inconsistentDeletedHintPrunesMemoryPhotoCacheAndSourceBeforeRetry() async {
+        let sourceMessageID = UUID()
+        let deleted = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .photo,
+            createdAt: .now,
+            sourceMessageID: sourceMessageID
+        )
+        let service = MomentRemoteServiceFake(moments: [deleted])
+        service.cachedMomentsValue = [deleted]
+        service.cachedPhotoDataByMomentID[deleted.id] = Data([0x01, 0x02])
+        service.syncHints = [MomentSyncHint(
+            momentID: deleted.id,
+            isDeleted: true,
+            sourceMessageID: sourceMessageID,
+            revision: 1
+        )]
+        service.failNextFetchAfterSuccessfulSnapshot = true
+        let model = MomentModel(service: service)
+
+        await model.start()
+
+        #expect(model.moments.isEmpty)
+        #expect(model.photoDataByMomentID[deleted.id] == nil)
+        #expect(service.cachedMomentsValue?.contains { $0.id == deleted.id } != true)
+        #expect(service.cachedPhotoDataByMomentID[deleted.id] == nil)
+        #expect(model.hiddenMomentSourceMessageIDs.contains(sourceMessageID))
+        #expect(service.cacheEvictionMomentIDs.contains(deleted.id))
+    }
+
+    @MainActor
+    @Test func momentRefreshPrunesHiddenCachedAndPreviouslyPaginatedRows() async throws {
+        let cached = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .photo,
+            createdAt: Date(timeIntervalSince1970: 10)
+        )
+        let cachedService = MomentRemoteServiceFake(moments: [])
+        cachedService.cachedMomentsValue = [cached]
+        cachedService.cachedPhotoDataByMomentID[cached.id] = Data([0x01])
+        cachedService.hiddenMomentIDs = [cached.id]
+        let cachedModel = MomentModel(service: cachedService)
+        await cachedModel.start()
+        #expect(cachedModel.moments.isEmpty)
+        #expect(cachedModel.photoDataByMomentID[cached.id] == nil)
+
+        let rows = (0..<55).map { index in
+            Moment(
+                id: UUID(),
+                creatorUserID: UUID(),
+                content: .text("row \(index)"),
+                createdAt: Date(timeIntervalSince1970: TimeInterval(1_000 - index))
+            )
+        }
+        let service = MomentRemoteServiceFake(moments: rows)
+        let model = MomentModel(service: service)
+        await model.start()
+        await model.loadMoreMoments()
+        let hidden = try #require(model.moments.last)
+        service.hiddenMomentIDs.insert(hidden.id)
+        service.moments.removeAll { $0.id == hidden.id }
+        await model.refresh()
+        #expect(!model.moments.contains(where: { $0.id == hidden.id }))
+        #expect(model.moments.count == 54)
+    }
+
+    @MainActor
+    @Test func momentSyncHintsRepairMissedRestoreAndChildRemovalOutsideFirstPage() async throws {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let sourceMessageID = UUID()
+        let response = MomentResponse(
+            id: UUID(),
+            responderUserID: currentUserID,
+            content: .emoji(.heart),
+            createdAt: Date(timeIntervalSince1970: 101)
+        )
+        let oldMoment = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("舊分頁 Moment"),
+            createdAt: Date(timeIntervalSince1970: 100),
+            sourceMessageID: sourceMessageID,
+            responses: [response]
+        )
+        let newerMoments = (0..<99).map { index in
+            Moment(
+                id: UUID(),
+                creatorUserID: UUID(),
+                content: .text("row \(index)"),
+                createdAt: Date(timeIntervalSince1970: TimeInterval(1_000 - index))
+            )
+        }
+        let service = MomentRemoteServiceFake(moments: newerMoments)
+        service.cachedMomentsValue = newerMoments + [oldMoment]
+        service.syncHints = [MomentSyncHint(
+            momentID: oldMoment.id,
+            isDeleted: true,
+            sourceMessageID: sourceMessageID,
+            revision: 1
+        )]
+        let model = MomentModel(service: service)
+
+        await model.start()
+        #expect(!model.moments.contains { $0.id == oldMoment.id })
+        #expect(model.hiddenMomentSourceMessageIDs == [sourceMessageID])
+
+        service.moments.append(oldMoment)
+        service.syncHints = [MomentSyncHint(
+            momentID: oldMoment.id,
+            isDeleted: false,
+            sourceMessageID: sourceMessageID,
+            revision: 2
+        )]
+        service.fetchMomentRequestIDs = []
+        await model.refresh()
+
+        #expect(model.moments.contains { $0.id == oldMoment.id })
+        #expect(model.hiddenMomentSourceMessageIDs.isEmpty)
+        #expect(service.fetchMomentRequestIDs == [oldMoment.id])
+
+        await model.loadMoreMoments()
+        #expect(model.moments.count == 100)
+        #expect(!model.hasMoreMoments)
+
+        let withoutResponse = Moment(
+            id: oldMoment.id,
+            creatorUserID: oldMoment.creatorUserID,
+            content: oldMoment.content,
+            createdAt: oldMoment.createdAt,
+            sourceMessageID: sourceMessageID
+        )
+        service.moments.removeAll { $0.id == oldMoment.id }
+        service.moments.append(withoutResponse)
+        service.syncHints = [
+            MomentSyncHint(
+                momentID: oldMoment.id,
+                isDeleted: false,
+                sourceMessageID: sourceMessageID,
+                revision: 3
+            ),
+            MomentSyncHint(
+                momentID: newerMoments[0].id,
+                isDeleted: false,
+                sourceMessageID: nil,
+                revision: 1
+            ),
+        ]
+        service.fetchMomentRequestIDs = []
+        await model.refresh()
+
+        let repaired = try #require(model.moments.first { $0.id == oldMoment.id })
+        #expect(repaired.responses.isEmpty)
+        #expect(service.fetchMomentRequestIDs == [oldMoment.id])
+        #expect(model.moments.count == 100)
+        #expect(!model.hasMoreMoments)
+    }
+
+    @MainActor
+    @Test func momentSyncHintsReadAllPagesBeyondPostgRESTRowCap() async throws {
+        let hints = try (1...1_001).map { index in
+            let suffix = String(format: "%012X", index)
+            return MomentSyncHint(
+                momentID: try #require(UUID(
+                    uuidString: "00000000-0000-0000-0000-\(suffix)"
+                )),
+                isDeleted: true,
+                sourceMessageID: nil,
+                revision: 1
+            )
+        }
+        let service = MomentRemoteServiceFake(moments: [])
+        service.syncHints = hints
+        let remote: MomentRemoteServing = service
+
+        let loaded = try await remote.fetchMomentSyncHints()
+
+        #expect(loaded.map(\.momentID) == hints.map(\.momentID))
+        #expect(service.syncHintPageRequests.count == 3)
+        #expect(service.syncHintPageRequests.map(\.limit) == [500, 500, 500])
+        #expect(service.syncHintPageRequests[0].after == nil)
+        #expect(service.syncHintPageRequests[1].after == hints[499].momentID)
+        #expect(service.syncHintPageRequests[2].after == hints[999].momentID)
+    }
+
+    @MainActor
+    @Test func staleCreateAcknowledgementCannotReviveDeletedPhotoOrCache() async throws {
+        let photoData = Data([0x01, 0x02, 0x03])
+        let service = MomentRemoteServiceFake(moments: [])
+        let model = MomentModel(service: service)
+        await model.start()
+        service.suspendCreateAcknowledgement = true
+        let create = Task { await model.create(.photo(photoData)) }
+        guard await waitForLifecycleCondition({
+            service.createAcknowledgementContinuation != nil
+        }) else {
+            Issue.record("Moment create acknowledgement did not suspend")
+            service.resumeCreateAcknowledgement()
+            _ = await create.value
+            return
+        }
+        let created = try #require(service.moments.first)
+
+        service.moments = []
+        service.hiddenMomentIDs.insert(created.id)
+        service.syncHints = [MomentSyncHint(
+            momentID: created.id,
+            isDeleted: true,
+            sourceMessageID: nil,
+            revision: 1
+        )]
+        await service.sendChange(.momentDeleted(created.id))
+        service.resumeCreateAcknowledgement()
+
+        #expect(await create.value)
+        #expect(model.moments.isEmpty)
+        #expect(model.photoDataByMomentID[created.id] == nil)
+        #expect(service.cachedMomentsValue?.contains { $0.id == created.id } != true)
+        #expect(service.cachedPhotoDataByMomentID[created.id] == nil)
+    }
+
+    @MainActor
+    @Test func acceptedResponseInvalidatesOlderFirstPageSnapshotWithoutBroadcast() async {
+        let parent = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("回應競態"),
+            createdAt: .now
+        )
+        let service = MomentRemoteServiceFake(moments: [parent])
+        let model = MomentModel(service: service)
+        await model.start()
+        service.suspendFetchMoments = true
+        service.returnCapturedMomentsAfterSuspension = true
+        let refresh = Task { await model.refresh() }
+        guard await waitForLifecycleCondition({ service.fetchMomentsContinuation != nil }) else {
+            Issue.record("Moment response race refresh did not suspend")
+            service.resumeFetchMoments()
+            await refresh.value
+            return
+        }
+
+        #expect(await model.respond(to: parent, with: .emoji(.heart)))
+        service.resumeFetchMoments()
+        await refresh.value
+
+        #expect(model.moments.first?.responses.count == 1)
+        #expect(service.cachedMomentsValue?.first?.responses.count == 1)
+    }
+
+    @MainActor
+    @Test func acceptedAnswerInvalidatesOlderFirstPageSnapshotWithoutBroadcast() async {
+        let question = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .question(MomentQuestion(key: "understand_today", prompt: "今天好嗎？")),
+            createdAt: .now
+        )
+        let service = MomentRemoteServiceFake(moments: [question])
+        let model = MomentModel(service: service)
+        await model.start()
+        service.suspendFetchMoments = true
+        service.returnCapturedMomentsAfterSuspension = true
+        let staleRefresh = Task { await model.refresh() }
+        guard await waitForLifecycleCondition({ service.fetchMomentsContinuation != nil }) else {
+            Issue.record("Moment answer race refresh did not suspend")
+            service.resumeFetchMoments()
+            await staleRefresh.value
+            return
+        }
+        let answer = Task { await model.answer(question, text: "很好") }
+        guard await waitForLifecycleCondition({ service.answerClientIDs.count == 1 }) else {
+            Issue.record("Moment answer acknowledgement did not complete")
+            service.resumeFetchMoments()
+            _ = await answer.value
+            await staleRefresh.value
+            return
+        }
+
+        service.resumeFetchMoments()
+        #expect(await answer.value)
+        await staleRefresh.value
+
+        #expect(model.moments.first?.questionAnswers.count == 1)
+        #expect(service.cachedMomentsValue?.first?.questionAnswers.count == 1)
+    }
+
+    @MainActor
+    @Test func staleResponseAcknowledgementCannotRestoreNewerRemoval() async throws {
+        let parent = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("等候回應"),
+            createdAt: .now
+        )
+        let service = MomentRemoteServiceFake(moments: [parent])
+        let model = MomentModel(service: service)
+        await model.start()
+        service.suspendCreateResponseAcknowledgement = true
+        let response = Task { await model.respond(to: parent, with: .emoji(.heart)) }
+        guard await waitForLifecycleCondition({
+            service.createResponseAcknowledgementContinuation != nil
+        }) else {
+            Issue.record("Moment response acknowledgement did not suspend")
+            service.resumeCreateResponseAcknowledgement()
+            _ = await response.value
+            return
+        }
+
+        service.moments[0].responses = []
+        service.syncHints = [MomentSyncHint(
+            momentID: parent.id,
+            isDeleted: false,
+            sourceMessageID: nil,
+            revision: 1
+        )]
+        await service.sendChange(.momentChanged(parent.id))
+        service.resumeCreateResponseAcknowledgement()
+
+        #expect(await response.value)
+        #expect(model.moments.first?.responses.isEmpty == true)
+        #expect(service.cachedMomentsValue?.first?.responses.isEmpty == true)
+    }
+
+    @MainActor
+    @Test func staleFirstPageCannotOverwriteAcceptedChildRemovalCacheOnRetryFailure() async throws {
+        let oldResponse = MomentResponse(
+            id: UUID(),
+            responderUserID: UUID(),
+            content: .text("已被另一台移除"),
+            createdAt: Date(timeIntervalSince1970: 101)
+        )
+        let original = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("快取邊界"),
+            createdAt: Date(timeIntervalSince1970: 100),
+            responses: [oldResponse]
+        )
+        let accepted = Moment(
+            id: original.id,
+            creatorUserID: original.creatorUserID,
+            content: original.content,
+            createdAt: original.createdAt
+        )
+        let service = MomentRemoteServiceFake(moments: [original])
+        let model = MomentModel(service: service)
+        await model.start()
+        service.suspendFetchMoments = true
+        service.returnCapturedMomentsAfterSuspension = true
+        service.failNextFetchAfterSuspendedSnapshot = true
+        let refresh = Task { await model.refresh() }
+        guard await waitForLifecycleCondition({ service.fetchMomentsContinuation != nil }) else {
+            Issue.record("Moment first-page refresh did not suspend")
+            service.resumeFetchMoments()
+            await refresh.value
+            return
+        }
+
+        service.moments = [accepted]
+        service.syncHints = [MomentSyncHint(
+            momentID: original.id,
+            isDeleted: false,
+            sourceMessageID: nil,
+            revision: 1
+        )]
+        await service.sendChange(.momentChanged(original.id))
+        service.resumeFetchMoments()
+        await refresh.value
+
+        #expect(model.moments == [accepted])
+        #expect(service.cachedMomentsValue == [accepted])
+
+        await model.stop()
+        service.fetchFailuresRemaining = 1
+        let restarted = MomentModel(service: service)
+        await restarted.start()
+        #expect(restarted.moments == [accepted])
+        #expect(restarted.moments.first?.responses.isEmpty == true)
+    }
+
+    @MainActor
+    @Test func momentDeleteDuringInitialRefreshCannotReviveStalePageSnapshot() async {
+        let sourceMessageID = UUID()
+        let moment = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("刪除前快照"),
+            createdAt: .now,
+            sourceMessageID: sourceMessageID
+        )
+        let service = MomentRemoteServiceFake(moments: [moment])
+        service.suspendFetchMoments = true
+        service.returnCapturedMomentsAfterSuspension = true
+        let model = MomentModel(service: service)
+        let start = Task { await model.start() }
+        guard await waitForLifecycleCondition({ service.fetchMomentsContinuation != nil }) else {
+            Issue.record("Initial Moment fetch did not suspend")
+            service.resumeFetchMoments()
+            await start.value
+            return
+        }
+
+        service.moments = []
+        service.hiddenMomentIDs.insert(moment.id)
+        service.syncHints = [MomentSyncHint(
+            momentID: moment.id,
+            isDeleted: true,
+            sourceMessageID: sourceMessageID,
+            revision: 1
+        )]
+        await service.sendChange(.momentDeleted(moment.id))
+        service.resumeFetchMoments()
+        await start.value
+
+        #expect(model.moments.isEmpty)
+        #expect(model.hiddenMomentSourceMessageIDs == [sourceMessageID])
+        #expect(service.cachedMomentsValue?.contains { $0.id == moment.id } != true)
+        #expect(service.cacheEvictionMomentIDs.contains(moment.id))
+    }
+
+    @MainActor
+    @Test func momentDeleteDuringLoadMoreCannotMergeStalePageOrAdvanceItsCursor() async {
+        let sourceMessageID = UUID()
+        let rows = (0..<100).map { index in
+            Moment(
+                id: UUID(),
+                creatorUserID: UUID(),
+                content: .text("row \(index)"),
+                createdAt: Date(timeIntervalSince1970: TimeInterval(1_000 - index)),
+                sourceMessageID: index == 70 ? sourceMessageID : nil
+            )
+        }
+        let target = rows[70]
+        let service = MomentRemoteServiceFake(moments: rows)
+        let model = MomentModel(service: service)
+        await model.start()
+        service.suspendFetchMoments = true
+        service.returnCapturedMomentsAfterSuspension = true
+        let loadMore = Task { await model.loadMoreMoments() }
+        guard await waitForLifecycleCondition({ service.fetchMomentsContinuation != nil }) else {
+            Issue.record("Older Moment page did not suspend")
+            service.resumeFetchMoments()
+            await loadMore.value
+            return
+        }
+
+        service.moments.removeAll { $0.id == target.id }
+        service.hiddenMomentIDs.insert(target.id)
+        service.syncHints = [MomentSyncHint(
+            momentID: target.id,
+            isDeleted: true,
+            sourceMessageID: sourceMessageID,
+            revision: 1
+        )]
+        await service.sendChange(.momentDeleted(target.id))
+        service.resumeFetchMoments()
+        await loadMore.value
+
+        #expect(model.moments.count == 99)
+        #expect(!model.moments.contains { $0.id == target.id })
+        #expect(!model.hasMoreMoments)
+        #expect(model.hiddenMomentSourceMessageIDs.contains(sourceMessageID))
+    }
+
+    @MainActor
+    @Test func momentPhotoCompletionAfterDeleteCannotReviveMemoryOrPersistentCache() async {
+        let photo = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .photo,
+            createdAt: .now
+        )
+        let service = MomentRemoteServiceFake(moments: [photo])
+        service.remotePhotoDataByMomentID[photo.id] = Data([0x01, 0x02, 0x03])
+        let model = MomentModel(service: service)
+        await model.start()
+        service.suspendPhotoData = true
+        let loadPhoto = Task { await model.loadPhotoIfNeeded(photo) }
+        guard await waitForLifecycleCondition({ service.photoDataContinuation != nil }) else {
+            Issue.record("Photo download did not suspend")
+            service.resumePhotoData()
+            await loadPhoto.value
+            return
+        }
+
+        service.moments = []
+        service.hiddenMomentIDs.insert(photo.id)
+        service.syncHints = [MomentSyncHint(
+            momentID: photo.id,
+            isDeleted: true,
+            sourceMessageID: nil,
+            revision: 1
+        )]
+        await service.sendChange(.momentDeleted(photo.id))
+        service.resumePhotoData()
+        await loadPhoto.value
+
+        #expect(model.photoDataByMomentID[photo.id] == nil)
+        #expect(service.cachedPhotoDataByMomentID[photo.id] == nil)
+        #expect(service.cacheEvictionMomentIDs.filter { $0 == photo.id }.count >= 2)
+    }
+
+    @MainActor
+    @Test func momentOwnInteractionRemovalKeepsJointQuestionRevealed() async throws {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let partnerUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B2")!
+        let ownResponse = MomentResponse(
+            id: UUID(),
+            responderUserID: currentUserID,
+            content: .text("我的回應"),
+            createdAt: .now
+        )
+        let responseMoment = Moment(
+            id: UUID(),
+            creatorUserID: partnerUserID,
+            content: .text("伴侶的 Moment"),
+            createdAt: .now,
+            responses: [ownResponse]
+        )
+        let ownAnswer = MomentQuestionAnswer(
+            id: UUID(),
+            answererUserID: currentUserID,
+            content: "我的答案",
+            createdAt: .now
+        )
+        let question = Moment(
+            id: UUID(),
+            creatorUserID: partnerUserID,
+            content: .question(MomentQuestion(key: "understand_today", prompt: "題目")),
+            createdAt: .now,
+            questionAnswers: [
+                MomentQuestionAnswer(
+                    id: UUID(),
+                    answererUserID: partnerUserID,
+                    content: "伴侶答案",
+                    createdAt: .now
+                ),
+                ownAnswer,
+            ]
+        )
+        let service = MomentRemoteServiceFake(moments: [question, responseMoment])
+        let model = MomentModel(service: service)
+        await model.start()
+
+        #expect(await model.removeOwnResponse(from: responseMoment, response: ownResponse))
+        let withoutResponse = try #require(model.moments.first { $0.id == responseMoment.id })
+        #expect(withoutResponse.responses.isEmpty)
+
+        #expect(await model.removeOwnAnswer(from: question, answer: ownAnswer))
+        let redacted = try #require(model.moments.first { $0.id == question.id })
+        let marker = try #require(redacted.questionAnswers.first { $0.id == ownAnswer.id })
+        #expect(marker.content == nil)
+        #expect(marker.removedAt != nil)
+        #expect(redacted.isComplete)
+        #expect(model.currentUserHasAnswered(redacted))
+    }
+
+    @MainActor
+    @Test func momentOwnAnswerRemovalBeforeRevealKeepsAnsweredStateWithoutCompletingQuestion() async throws {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let ownAnswer = MomentQuestionAnswer(
+            id: UUID(),
+            answererUserID: currentUserID,
+            content: "尚未一起揭曉的回答",
+            createdAt: .now
+        )
+        let question = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .question(MomentQuestion(key: "understand_today", prompt: "題目")),
+            createdAt: .now,
+            questionAnswers: [ownAnswer]
+        )
+        let service = MomentRemoteServiceFake(moments: [question])
+        let model = MomentModel(service: service)
+        await model.start()
+
+        #expect(await model.removeOwnAnswer(from: question, answer: ownAnswer))
+        let updated = try #require(model.moments.first { $0.id == question.id })
+        let marker = try #require(updated.questionAnswers.first { $0.id == ownAnswer.id })
+        #expect(marker.content == nil)
+        #expect(marker.removedAt != nil)
+        #expect(!updated.isComplete)
+        #expect(model.currentUserHasAnswered(updated))
+    }
+
+    @MainActor
+    @Test func momentInteractionEmptyReceiptIsAcceptedWhenWholeMomentIsAlreadyHidden() async throws {
+        let currentUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+        let relationshipID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
+        let suiteName = "MomentEmptyReceiptTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let store = TodaySnapshotStore(defaults: defaults)
+        let response = MomentResponse(
+            id: UUID(),
+            responderUserID: currentUserID,
+            content: .emoji(.heart),
+            createdAt: .now
+        )
+        let responseMoment = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("已被整筆刪除"),
+            createdAt: .now,
+            responses: [response]
+        )
+        let responseService = MomentRemoteServiceFake(
+            moments: [responseMoment],
+            operationStore: store
+        )
+        let responseModel = MomentModel(service: responseService)
+        await responseModel.start()
+        responseService.removeResponseReturnsEmpty = true
+
+        #expect(await responseModel.removeOwnResponse(from: responseMoment, response: response))
+        #expect(responseModel.moments.isEmpty)
+        #expect(store.momentOperationID(
+            for: .removeResponse(momentID: responseMoment.id, responseID: response.id),
+            userID: currentUserID,
+            relationshipID: relationshipID
+        ) == nil)
+
+        let answer = MomentQuestionAnswer(
+            id: UUID(),
+            answererUserID: currentUserID,
+            content: "回答",
+            createdAt: .now
+        )
+        let question = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .question(MomentQuestion(key: "understand_today", prompt: "題目")),
+            createdAt: .now,
+            questionAnswers: [answer]
+        )
+        let answerService = MomentRemoteServiceFake(moments: [question], operationStore: store)
+        let answerModel = MomentModel(service: answerService)
+        await answerModel.start()
+        answerService.removeAnswerReturnsEmpty = true
+
+        #expect(await answerModel.removeOwnAnswer(from: question, answer: answer))
+        #expect(answerModel.moments.isEmpty)
+        #expect(store.momentOperationID(
+            for: .removeAnswer(momentID: question.id, answerID: answer.id),
+            userID: currentUserID,
+            relationshipID: relationshipID
+        ) == nil)
+    }
+
+    @MainActor
+    @Test func momentLifecycleBroadcastPrunesAndTargetedlyReloadsOneMoment() async throws {
+        let original = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("原內容"),
+            createdAt: .now
+        )
+        let service = MomentRemoteServiceFake(moments: [original])
+        let model = MomentModel(service: service)
+        await model.start()
+
+        await service.sendChange(.momentDeleted(original.id))
+        #expect(model.moments.isEmpty)
+
+        let updated = Moment(
+            id: original.id,
+            creatorUserID: original.creatorUserID,
+            content: .text("復原後內容"),
+            createdAt: original.createdAt
+        )
+        service.moments = [updated]
+        service.hiddenMomentIDs.remove(original.id)
+        await service.sendChange(.momentChanged(original.id))
+        #expect(model.moments == [updated])
+    }
+
+    @MainActor
+    @Test func momentDeleteBroadcastUsesDurableHintToHidePageExternalSourceImmediately() async {
+        let unrelated = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("目前頁面"),
+            createdAt: .now
+        )
+        let deletedMomentID = UUID()
+        let sourceMessageID = UUID()
+        let service = MomentRemoteServiceFake(moments: [unrelated])
+        let model = MomentModel(service: service)
+        await model.start()
+
+        service.syncHints = [MomentSyncHint(
+            momentID: deletedMomentID,
+            isDeleted: true,
+            sourceMessageID: sourceMessageID,
+            revision: 1
+        )]
+        await service.sendChange(.momentDeleted(deletedMomentID))
+
+        #expect(model.moments == [unrelated])
+        #expect(model.hiddenMomentSourceMessageIDs == [sourceMessageID])
+    }
+
+    @MainActor
+    @Test func staleDeleteBroadcastCannotHideMomentRestoredAtNewerRevision() async {
+        let sourceMessageID = UUID()
+        let restored = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("已在另一台復原"),
+            createdAt: .now,
+            sourceMessageID: sourceMessageID
+        )
+        let service = MomentRemoteServiceFake(moments: [restored])
+        service.syncHints = [MomentSyncHint(
+            momentID: restored.id,
+            isDeleted: false,
+            sourceMessageID: sourceMessageID,
+            revision: 2
+        )]
+        let model = MomentModel(service: service)
+        await model.start()
+
+        await service.sendChange(.momentDeleted(restored.id))
+
+        #expect(model.moments == [restored])
+        #expect(!model.hiddenMomentSourceMessageIDs.contains(sourceMessageID))
+    }
+
+    @MainActor
+    @Test func staleTargetedFetchCannotRewriteCacheAfterNewerDelete() async {
+        let moment = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .text("舊 targeted snapshot"),
+            createdAt: .now
+        )
+        let service = MomentRemoteServiceFake(moments: [moment])
+        service.syncHints = [MomentSyncHint(
+            momentID: moment.id,
+            isDeleted: false,
+            sourceMessageID: nil,
+            revision: 1
+        )]
+        let model = MomentModel(service: service)
+        await model.start()
+        service.suspendedFetchMomentID = moment.id
+        service.returnCapturedMomentAfterSuspension = true
+        let staleChange = Task { await service.sendChange(.momentChanged(moment.id)) }
+        guard await waitForLifecycleCondition({ service.fetchMomentContinuation != nil }) else {
+            Issue.record("Targeted Moment fetch did not suspend")
+            service.resumeFetchMoment()
+            await staleChange.value
+            return
+        }
+
+        service.moments = []
+        service.hiddenMomentIDs.insert(moment.id)
+        service.syncHints = [MomentSyncHint(
+            momentID: moment.id,
+            isDeleted: true,
+            sourceMessageID: nil,
+            revision: 2
+        )]
+        await service.sendChange(.momentDeleted(moment.id))
+        service.resumeFetchMoment()
+        await staleChange.value
+
+        #expect(model.moments.isEmpty)
+        #expect(service.cachedMomentsValue?.contains { $0.id == moment.id } != true)
+        #expect(service.cacheEvictionMomentIDs.contains(moment.id))
+    }
+
+    @MainActor
+    @Test func conversationRefreshRemovesDeletedMomentSourceMarker() async throws {
+        let source = ChatMessage(
+            id: UUID(),
+            senderUserID: UUID(),
+            body: "來源",
+            createdAt: .now
+        )
+        let service = ConversationRemoteServiceFake(
+            currentUserID: UUID(),
+            messages: [source],
+            unreadCount: 0
+        )
+        service.savedMomentMessageIDs = [source.id]
+        let model = ConversationModel(service: service)
+        await model.start()
+        #expect(model.savedMomentMessageIDs == [source.id])
+
+        service.savedMomentMessageIDs = []
+        await model.refresh()
+        #expect(model.savedMomentMessageIDs.isEmpty)
     }
 
     @Test func togetherNowPoliciesKeepNamesPrivateAndExpirationAbsolute() throws {
@@ -4999,27 +6382,79 @@ private enum TestServiceError: Error {
 @MainActor
 private final class MomentRemoteServiceFake: MomentRemoteServing {
     private let userID = UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!
+    private let relationshipID = UUID(uuidString: "00000000-0000-0000-0000-0000000000C1")!
     var moments: [Moment]
     var cachedMomentsValue: [Moment]?
     var cachedPhotoDataByMomentID: [UUID: Data] = [:]
     var fetchDelay: Duration = .zero
     var suspendFetchMoments = false
     var fetchMomentsContinuation: CheckedContinuation<Void, Never>?
+    var returnCapturedMomentsAfterSuspension = false
+    var failNextFetchAfterSuspendedSnapshot = false
+    var failNextFetchAfterSuccessfulSnapshot = false
     var fetchFailuresRemaining = 0
     var createdDrafts: [MomentDraft] = []
+    var suspendCreateAcknowledgement = false
+    var createAcknowledgementContinuation: CheckedContinuation<Void, Never>?
     var responseClientIDs: [UUID] = []
     var answerClientIDs: [UUID] = []
     var questionAttemptIDs: [(UUID, UUID)] = []
     var photoDataRequestIDs: [UUID] = []
+    var remotePhotoDataByMomentID: [UUID: Data] = [:]
+    var suspendPhotoData = false
+    var photoDataContinuation: CheckedContinuation<Void, Never>?
     var responseFailuresRemaining = 0
     var responseDelay: Duration = .zero
+    var suspendCreateResponseAcknowledgement = false
+    var createResponseAcknowledgementContinuation: CheckedContinuation<Void, Never>?
     var answerFailuresRemaining = 0
     var questionFailuresRemaining = 0
+    var hiddenMomentIDs: Set<UUID> = []
+    var syncHints: [MomentSyncHint] = []
+    var syncHintFailuresRemaining = 0
+    var syncHintPageRequests: [(after: UUID?, limit: Int)] = []
+    var fetchMomentRequestIDs: [UUID] = []
+    var fetchMomentFailureIDs: Set<UUID> = []
+    var suspendedFetchMomentID: UUID?
+    var fetchMomentContinuation: CheckedContinuation<Void, Never>?
+    var returnCapturedMomentAfterSuspension = false
+    var recentlyDeletedMoments: [RecentlyDeletedMoment] = []
+    var suspendFetchRecentlyDeleted = false
+    var fetchRecentlyDeletedContinuation: CheckedContinuation<Void, Never>?
+    var deleteOperationIDs: [UUID] = []
+    var restoreOperationIDs: [UUID] = []
+    var removeResponseOperationIDs: [UUID] = []
+    var removeAnswerOperationIDs: [UUID] = []
+    var deleteApplyThenFailRemaining = 0
+    var suspendDeleteAcknowledgement = false
+    var deleteAcknowledgementContinuation: CheckedContinuation<Void, Never>?
+    var restoreApplyThenFailRemaining = 0
+    var removeResponseApplyThenFailRemaining = 0
+    var removeAnswerApplyThenFailRemaining = 0
+    var suspendRemoveResponseAcknowledgement = false
+    var removeResponseAcknowledgementContinuation: CheckedContinuation<Void, Never>?
+    var deleteSupersededRemaining = 0
+    var restoreSupersededRemaining = 0
+    var removeResponseReturnsEmpty = false
+    var removeAnswerReturnsEmpty = false
+    var deleteApplicationCount = 0
+    var restoreApplicationCount = 0
+    var removeResponseApplicationCount = 0
+    var removeAnswerApplicationCount = 0
     var isObserving = false
-    private var onChange: (@MainActor () async -> Void)?
+    var firstFetchObservedState: Bool?
+    var cacheEvictionMomentIDs: [UUID] = []
+    var operationStore: TodaySnapshotStore?
+    private var deleteReceiptMomentByOperationID: [UUID: UUID] = [:]
+    private var restoreReceiptMomentByOperationID: [UUID: UUID] = [:]
+    private var removeResponseReceiptByOperationID: [UUID: (UUID, UUID)] = [:]
+    private var removeAnswerReceiptByOperationID: [UUID: (UUID, UUID)] = [:]
+    private var volatileOperationIDs: [MomentOperationIdentity: UUID] = [:]
+    private var onChange: (@MainActor (MomentRemoteChange) async -> Void)?
 
-    init(moments: [Moment]) {
+    init(moments: [Moment], operationStore: TodaySnapshotStore? = nil) {
         self.moments = moments
+        self.operationStore = operationStore
     }
 
     func currentUserID() async throws -> UUID { userID }
@@ -5030,8 +6465,27 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
         cachedPhotoDataByMomentID[momentID]
     }
 
+    func commitAcceptedMoments(_ moments: [Moment]) {
+        cachedMomentsValue = moments
+    }
+
+    func commitAcceptedPhotoData(_ data: Data, for momentID: UUID) {
+        cachedPhotoDataByMomentID[momentID] = data
+    }
+
+    func removeCachedMomentData(for momentID: UUID) {
+        cacheEvictionMomentIDs.append(momentID)
+        cachedMomentsValue?.removeAll { $0.id == momentID }
+        cachedPhotoDataByMomentID[momentID] = nil
+    }
+
     func fetchMoments() async throws -> [Moment] {
-        if suspendFetchMoments {
+        if firstFetchObservedState == nil {
+            firstFetchObservedState = isObserving
+        }
+        let capturedMoments = moments
+        let wasSuspended = suspendFetchMoments
+        if wasSuspended {
             await withCheckedContinuation { continuation in
                 fetchMomentsContinuation = continuation
             }
@@ -5041,14 +6495,145 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
             fetchFailuresRemaining -= 1
             throw TestServiceError.expected
         }
-        cachedMomentsValue = moments
-        return moments
+        if failNextFetchAfterSuccessfulSnapshot
+            || (wasSuspended && failNextFetchAfterSuspendedSnapshot)
+        {
+            failNextFetchAfterSuccessfulSnapshot = false
+            failNextFetchAfterSuspendedSnapshot = false
+            fetchFailuresRemaining += 1
+        }
+        let result = wasSuspended && returnCapturedMomentsAfterSuspension
+            ? capturedMoments
+            : moments
+        return result
+    }
+
+    func fetchMoment(id: UUID) async throws -> Moment? {
+        fetchMomentRequestIDs.append(id)
+        if fetchMomentFailureIDs.contains(id) {
+            throw TestServiceError.expected
+        }
+        let captured = moments.first { $0.id == id && !hiddenMomentIDs.contains($0.id) }
+        let wasSuspended = suspendedFetchMomentID == id
+        if wasSuspended {
+            await withCheckedContinuation { continuation in
+                fetchMomentContinuation = continuation
+            }
+        }
+        return wasSuspended && returnCapturedMomentAfterSuspension
+            ? captured
+            : moments.first { $0.id == id && !hiddenMomentIDs.contains($0.id) }
+    }
+
+    func fetchHiddenMomentIDs() async throws -> Set<UUID> { hiddenMomentIDs }
+
+    func fetchMomentSyncHints(after momentID: UUID?, limit: Int) async throws
+        -> [MomentSyncHint]
+    {
+        syncHintPageRequests.append((momentID, limit))
+        if syncHintFailuresRemaining > 0 {
+            syncHintFailuresRemaining -= 1
+            throw TestServiceError.expected
+        }
+        let allHints: [MomentSyncHint]
+        if !syncHints.isEmpty {
+            allHints = syncHints
+        } else {
+            allHints = hiddenMomentIDs.map { momentID in
+                let sourceMessageID = moments.first(where: { $0.id == momentID })?.sourceMessageID
+                    ?? cachedMomentsValue?.first(where: { $0.id == momentID })?.sourceMessageID
+                    ?? recentlyDeletedMoments.first(where: { $0.id == momentID })?.moment.sourceMessageID
+                return MomentSyncHint(
+                    momentID: momentID,
+                    isDeleted: true,
+                    sourceMessageID: sourceMessageID,
+                    revision: 1
+                )
+            }
+        }
+        let ordered = allHints.sorted { $0.momentID.uuidString < $1.momentID.uuidString }
+        return Array(ordered.lazy.filter {
+            guard let momentID else { return true }
+            return $0.momentID.uuidString > momentID.uuidString
+        }.prefix(limit))
+    }
+
+    func operationID(for identity: MomentOperationIdentity) throws -> UUID {
+        if let operationStore {
+            return try operationStore.loadOrCreateMomentOperationID(
+                for: identity,
+                userID: userID,
+                relationshipID: relationshipID
+            )
+        }
+        if let existing = volatileOperationIDs[identity] { return existing }
+        let created = UUID()
+        volatileOperationIDs[identity] = created
+        return created
+    }
+
+    func clearOperationID(for identity: MomentOperationIdentity) {
+        if let operationStore {
+            operationStore.clearMomentOperationID(
+                for: identity,
+                userID: userID,
+                relationshipID: relationshipID
+            )
+        } else {
+            volatileOperationIDs[identity] = nil
+        }
+    }
+
+    func fetchRecentlyDeletedMoments() async throws -> [RecentlyDeletedMoment] {
+        let captured = recentlyDeletedMoments
+        if suspendFetchRecentlyDeleted {
+            await withCheckedContinuation { continuation in
+                fetchRecentlyDeletedContinuation = continuation
+            }
+        }
+        return captured
     }
 
     func resumeFetchMoments() {
         suspendFetchMoments = false
         fetchMomentsContinuation?.resume()
         fetchMomentsContinuation = nil
+    }
+
+    func resumeFetchRecentlyDeleted() {
+        suspendFetchRecentlyDeleted = false
+        fetchRecentlyDeletedContinuation?.resume()
+        fetchRecentlyDeletedContinuation = nil
+    }
+
+    func resumeCreateAcknowledgement() {
+        suspendCreateAcknowledgement = false
+        createAcknowledgementContinuation?.resume()
+        createAcknowledgementContinuation = nil
+    }
+
+    func resumeCreateResponseAcknowledgement() {
+        suspendCreateResponseAcknowledgement = false
+        createResponseAcknowledgementContinuation?.resume()
+        createResponseAcknowledgementContinuation = nil
+    }
+
+    func resumeFetchMoment() {
+        suspendedFetchMomentID = nil
+        fetchMomentContinuation?.resume()
+        fetchMomentContinuation = nil
+    }
+
+    func resumeDeleteAcknowledgement() {
+        suspendDeleteAcknowledgement = false
+        deleteAcknowledgementContinuation?.resume()
+        deleteAcknowledgementContinuation = nil
+    }
+
+    func resumeRemoveResponseAcknowledgement() {
+        suspendRemoveResponseAcknowledgement = false
+        removeResponseAcknowledgementContinuation?.resume()
+        removeResponseAcknowledgementContinuation = nil
     }
 
     func createMoment(_ draft: MomentDraft, clientID: UUID) async throws -> Moment {
@@ -5067,6 +6652,11 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
             createdAt: Date(timeIntervalSince1970: 200)
         )
         moments.insert(moment, at: 0)
+        if suspendCreateAcknowledgement {
+            await withCheckedContinuation { continuation in
+                createAcknowledgementContinuation = continuation
+            }
+        }
         return moment
     }
 
@@ -5122,6 +6712,11 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
             createdAt: Date(timeIntervalSince1970: 300)
         )
         moments[index].responses.append(response)
+        if suspendCreateResponseAcknowledgement {
+            await withCheckedContinuation { continuation in
+                createResponseAcknowledgementContinuation = continuation
+            }
+        }
         return response
     }
 
@@ -5144,12 +6739,164 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
         return questionAnswer
     }
 
-    func photoData(for moment: Moment) async throws -> Data {
-        photoDataRequestIDs.append(moment.id)
-        return cachedPhotoDataByMomentID[moment.id] ?? Data()
+    func deleteMoment(id: UUID, operationID: UUID) async throws -> RecentlyDeletedMoment {
+        deleteOperationIDs.append(operationID)
+        if deleteSupersededRemaining > 0 {
+            deleteSupersededRemaining -= 1
+            throw MomentServiceError.operationSuperseded
+        }
+        if let receiptMomentID = deleteReceiptMomentByOperationID[operationID] {
+            guard receiptMomentID == id,
+                  let deleted = recentlyDeletedMoments.first(where: { $0.id == id })
+            else { throw TestServiceError.expected }
+            return deleted
+        }
+        let index = try #require(moments.firstIndex { $0.id == id })
+        let moment = moments.remove(at: index)
+        let deleted = RecentlyDeletedMoment(
+            moment: moment,
+            deletedAt: Date(timeIntervalSince1970: 1_000),
+            purgeAfter: Date(timeIntervalSince1970: 1_000 + 30 * 86_400)
+        )
+        recentlyDeletedMoments.append(deleted)
+        hiddenMomentIDs.insert(id)
+        setSyncHint(for: moment, isDeleted: true)
+        deleteReceiptMomentByOperationID[operationID] = id
+        deleteApplicationCount += 1
+        if suspendDeleteAcknowledgement {
+            await withCheckedContinuation { continuation in
+                deleteAcknowledgementContinuation = continuation
+            }
+        }
+        if deleteApplyThenFailRemaining > 0 {
+            deleteApplyThenFailRemaining -= 1
+            throw TestServiceError.expected
+        }
+        return deleted
     }
 
-    func startObservingChanges(_ onChange: @escaping @MainActor () async -> Void) async throws {
+    func restoreMoment(id: UUID, operationID: UUID) async throws -> Moment {
+        restoreOperationIDs.append(operationID)
+        if restoreSupersededRemaining > 0 {
+            restoreSupersededRemaining -= 1
+            throw MomentServiceError.operationSuperseded
+        }
+        if let receiptMomentID = restoreReceiptMomentByOperationID[operationID] {
+            guard receiptMomentID == id,
+                  let moment = moments.first(where: { $0.id == id })
+            else { throw TestServiceError.expected }
+            return moment
+        }
+        let index = try #require(recentlyDeletedMoments.firstIndex { $0.id == id })
+        let deleted = recentlyDeletedMoments.remove(at: index)
+        moments.append(deleted.moment)
+        hiddenMomentIDs.remove(id)
+        setSyncHint(for: deleted.moment, isDeleted: false)
+        restoreReceiptMomentByOperationID[operationID] = id
+        restoreApplicationCount += 1
+        if restoreApplyThenFailRemaining > 0 {
+            restoreApplyThenFailRemaining -= 1
+            throw TestServiceError.expected
+        }
+        return deleted.moment
+    }
+
+    func removeResponse(momentID: UUID, responseID: UUID, operationID: UUID) async throws
+        -> Moment?
+    {
+        removeResponseOperationIDs.append(operationID)
+        if let receipt = removeResponseReceiptByOperationID[operationID] {
+            guard receipt == (momentID, responseID) else { throw TestServiceError.expected }
+            return moments.first { $0.id == momentID && !hiddenMomentIDs.contains(momentID) }
+        }
+        if removeResponseReturnsEmpty {
+            if let moment = moments.first(where: { $0.id == momentID }) {
+                setSyncHint(for: moment, isDeleted: true)
+            }
+            moments.removeAll { $0.id == momentID }
+            hiddenMomentIDs.insert(momentID)
+            removeResponseReceiptByOperationID[operationID] = (momentID, responseID)
+            return nil
+        }
+        let momentIndex = try #require(moments.firstIndex { $0.id == momentID })
+        moments[momentIndex].responses.removeAll { $0.id == responseID }
+        let updated = moments[momentIndex]
+        removeResponseReceiptByOperationID[operationID] = (momentID, responseID)
+        removeResponseApplicationCount += 1
+        setSyncHint(for: updated, isDeleted: false)
+        if suspendRemoveResponseAcknowledgement {
+            await withCheckedContinuation { continuation in
+                removeResponseAcknowledgementContinuation = continuation
+            }
+        }
+        if removeResponseApplyThenFailRemaining > 0 {
+            removeResponseApplyThenFailRemaining -= 1
+            throw TestServiceError.expected
+        }
+        return updated
+    }
+
+    func removeAnswer(momentID: UUID, answerID: UUID, operationID: UUID) async throws -> Moment? {
+        removeAnswerOperationIDs.append(operationID)
+        if let receipt = removeAnswerReceiptByOperationID[operationID] {
+            guard receipt == (momentID, answerID) else { throw TestServiceError.expected }
+            return moments.first { $0.id == momentID && !hiddenMomentIDs.contains(momentID) }
+        }
+        if removeAnswerReturnsEmpty {
+            if let moment = moments.first(where: { $0.id == momentID }) {
+                setSyncHint(for: moment, isDeleted: true)
+            }
+            moments.removeAll { $0.id == momentID }
+            hiddenMomentIDs.insert(momentID)
+            removeAnswerReceiptByOperationID[operationID] = (momentID, answerID)
+            return nil
+        }
+        let momentIndex = try #require(moments.firstIndex { $0.id == momentID })
+        let answerIndex = try #require(
+            moments[momentIndex].questionAnswers.firstIndex { $0.id == answerID }
+        )
+        let answer = moments[momentIndex].questionAnswers[answerIndex]
+        moments[momentIndex].questionAnswers[answerIndex] = MomentQuestionAnswer(
+            id: answer.id,
+            answererUserID: answer.answererUserID,
+            content: nil,
+            createdAt: answer.createdAt,
+            removedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let updated = moments[momentIndex]
+        removeAnswerReceiptByOperationID[operationID] = (momentID, answerID)
+        removeAnswerApplicationCount += 1
+        setSyncHint(for: updated, isDeleted: false)
+        if removeAnswerApplyThenFailRemaining > 0 {
+            removeAnswerApplyThenFailRemaining -= 1
+            throw TestServiceError.expected
+        }
+        return updated
+    }
+
+    func photoData(for moment: Moment) async throws -> Data {
+        photoDataRequestIDs.append(moment.id)
+        if suspendPhotoData {
+            await withCheckedContinuation { continuation in
+                photoDataContinuation = continuation
+            }
+        }
+        let data = remotePhotoDataByMomentID[moment.id]
+            ?? cachedPhotoDataByMomentID[moment.id]
+            ?? Data()
+        cachedPhotoDataByMomentID[moment.id] = data
+        return data
+    }
+
+    func resumePhotoData() {
+        suspendPhotoData = false
+        photoDataContinuation?.resume()
+        photoDataContinuation = nil
+    }
+
+    func startObservingChanges(
+        _ onChange: @escaping @MainActor (MomentRemoteChange) async -> Void
+    ) async throws {
         isObserving = true
         self.onChange = onChange
     }
@@ -5159,8 +6906,19 @@ private final class MomentRemoteServiceFake: MomentRemoteServing {
         onChange = nil
     }
 
-    func sendChange() async {
-        await onChange?()
+    func sendChange(_ change: MomentRemoteChange = .reloadFirstPage) async {
+        await onChange?(change)
+    }
+
+    private func setSyncHint(for moment: Moment, isDeleted: Bool) {
+        let revision = (syncHints.first { $0.momentID == moment.id }?.revision ?? 0) + 1
+        syncHints.removeAll { $0.momentID == moment.id }
+        syncHints.append(MomentSyncHint(
+            momentID: moment.id,
+            isDeleted: isDeleted,
+            sourceMessageID: moment.sourceMessageID,
+            revision: revision
+        ))
     }
 }
 

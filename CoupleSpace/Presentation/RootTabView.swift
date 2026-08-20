@@ -135,7 +135,110 @@ struct RootTabView: View {
             let arguments = ProcessInfo.processInfo.arguments
             let uiTestUserID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D1")!
             let uiTestPartnerID = UUID(uuidString: "00000000-0000-0000-0000-0000000000D2")!
-            if arguments.contains("--ui-testing-w10-chat") {
+            if arguments.contains("--ui-testing-w14-moment-deletion") {
+                let momentID = UUID(
+                    uuidString: "E1000000-0000-0000-0000-000000000001"
+                )!
+                let sourceMessageID = UUID(
+                    uuidString: "E4000000-0000-0000-0000-000000000001"
+                )!
+                let pixel = Data(base64Encoded:
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+                )!
+                service = InMemoryMomentService(
+                    userID: uiTestUserID,
+                    moments: [Moment(
+                        id: momentID,
+                        creatorUserID: uiTestUserID,
+                        content: .photo,
+                        createdAt: .now,
+                        sourceMessageID: sourceMessageID,
+                        responses: [MomentResponse(
+                            id: UUID(
+                                uuidString: "E2000000-0000-0000-0000-000000000001"
+                            )!,
+                            responderUserID: uiTestPartnerID,
+                            content: .text("我也很喜歡這張"),
+                            createdAt: .now
+                        )]
+                    )],
+                    photoDataByMomentID: [momentID: pixel]
+                )
+            } else if arguments.contains("--ui-testing-w14-pre-reveal-answer") {
+                service = InMemoryMomentService(
+                    userID: uiTestUserID,
+                    moments: [Moment(
+                        id: UUID(
+                            uuidString: "E1000000-0000-0000-0000-000000000004"
+                        )!,
+                        creatorUserID: uiTestPartnerID,
+                        content: .question(MomentQuestion(
+                            key: "recent_small_happiness",
+                            prompt: "W14 尚未揭曉題目"
+                        )),
+                        createdAt: .now,
+                        questionAnswers: [MomentQuestionAnswer(
+                            id: UUID(
+                                uuidString: "E3000000-0000-0000-0000-000000000004"
+                            )!,
+                            answererUserID: uiTestUserID,
+                            content: "先保密的回答",
+                            createdAt: .now
+                        )]
+                    )]
+                )
+            } else if arguments.contains("--ui-testing-w14-moment-partner") {
+                service = InMemoryMomentService(
+                    userID: uiTestUserID,
+                    moments: [
+                        Moment(
+                            id: UUID(
+                                uuidString: "E1000000-0000-0000-0000-000000000002"
+                            )!,
+                            creatorUserID: uiTestPartnerID,
+                            content: .question(MomentQuestion(
+                                key: "recent_small_happiness",
+                                prompt: "W14 共同揭曉題目"
+                            )),
+                            createdAt: .now,
+                            questionAnswers: [
+                                MomentQuestionAnswer(
+                                    id: UUID(
+                                        uuidString: "E3000000-0000-0000-0000-000000000001"
+                                    )!,
+                                    answererUserID: uiTestPartnerID,
+                                    content: "一起散步",
+                                    createdAt: .now
+                                ),
+                                MomentQuestionAnswer(
+                                    id: UUID(
+                                        uuidString: "E3000000-0000-0000-0000-000000000002"
+                                    )!,
+                                    answererUserID: uiTestUserID,
+                                    content: "一起吃早餐",
+                                    createdAt: .now
+                                ),
+                            ]
+                        ),
+                        Moment(
+                            id: UUID(
+                                uuidString: "E1000000-0000-0000-0000-000000000003"
+                            )!,
+                            creatorUserID: uiTestPartnerID,
+                            content: .text("W14 伴侶建立的 Moment"),
+                            createdAt: .now.addingTimeInterval(-1),
+                            responses: [MomentResponse(
+                                id: UUID(
+                                    uuidString: "E2000000-0000-0000-0000-000000000002"
+                                )!,
+                                responderUserID: uiTestUserID,
+                                content: .text("我的回應"),
+                                createdAt: .now
+                            )]
+                        ),
+                    ]
+                )
+            } else if arguments.contains("--ui-testing-w10-chat") {
                 let sourceMessageID = UUID(uuidString: "D4000000-0000-0000-0000-000000000010")!
                 service = InMemoryMomentService(
                     userID: uiTestUserID,
@@ -586,6 +689,14 @@ struct RootTabView: View {
                     )
                 }
                 seededPhotoDataByMessageID = [:]
+            } else if arguments.contains("--ui-testing-w14-moment-deletion") {
+                seededMessages = [ChatMessage(
+                    id: UUID(uuidString: "E4000000-0000-0000-0000-000000000001")!,
+                    senderUserID: uiTestPartnerID,
+                    body: "W14 Moment 的來源訊息",
+                    createdAt: .now
+                )]
+                seededPhotoDataByMessageID = [:]
             } else if arguments.contains("--ui-testing-w11-source-routing") {
                 seededMessages = [ChatMessage(
                     id: UUID(uuidString: "D4000000-0000-0000-0000-000000000030")!,
@@ -685,6 +796,7 @@ struct RootTabView: View {
                         focusMessageID: $conversationFocusMessageID,
                         appointmentDiscussionFocus: $appointmentDiscussionFocus,
                         savedMomentSourceIDs: Set(momentModel.moments.compactMap(\.sourceMessageID)),
+                        hiddenMomentSourceIDs: momentModel.hiddenMomentSourceMessageIDs,
                         onMomentSaved: { await momentModel.refresh() },
                         onVisibilityChanged: { isPresented in
                             isMainConversationPresented = isPresented
@@ -1097,6 +1209,8 @@ private struct UsView: View {
             .sheet(isPresented: $isShowingSharedSchedule) {
                 SharedAppointmentScheduleView(
                     model: sharedAppointmentModel,
+                    savedMomentSourceIDs: Set(momentModel.moments.compactMap(\.sourceMessageID)),
+                    hiddenMomentSourceIDs: momentModel.hiddenMomentSourceMessageIDs,
                     onMomentSaved: { await momentModel.refresh() }
                 )
             }
