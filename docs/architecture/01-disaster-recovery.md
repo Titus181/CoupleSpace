@@ -1,7 +1,7 @@
 ---
 title: 一人營運災難復原規格
 status: active
-last_updated: 2026-08-13
+last_updated: 2026-08-20
 ---
 
 # 一人營運災難復原規格
@@ -165,6 +165,7 @@ database_artifact_id／sha256
 storage_snapshot_at
 storage object_id／path／bytes／sha256／reference type
 deletion_journal_sequence
+deletion_journal_event_hash
 backup workflow version
 verification result
 ```
@@ -178,11 +179,15 @@ verification result
 ### Tombstone 最小內容
 
 - 不可重用的 event UUID 與遞增 sequence。
-- server timestamp、actor user、relationship／account scope。
+- stable operation ID、server timestamp、不可回連 live Auth identity 的 opaque actor ref 或 `system`、relationship／account scope。
 - entity type 與精確 entity／object identity。
-- action：delete、unpair、archive delete、account delete 或 GC。
+- action 採 W14 canonical 名稱：`content_delete`、`unpair`、`archive_delete`、`account_delete` 或 `object_gc`。
 - 已核准生命週期規則版本及 event hash。
 - 不保存訊息正文、照片內容、Moment 文案、Emoji 值、回答或約定文字。
+
+W14 的[資料生命週期與基本匯出契約](03-w14-data-lifecycle-contract.md#audit-與-tombstone)是 tombstone 欄位名稱、actor 去連結、action enum、hash chain、compaction checkpoint 與 condition-based retirement 的 canonical refinement；每個 recovery manifest 必須同時綁定 deletion journal sequence 與該筆 event hash。本文件的備份天數候選不得改變該資料生命週期語意。
+
+尚無任何 deletion event 的空 journal manifest 固定記錄 `deletion_journal_sequence = 0` 與 64 個小寫 ASCII `0` 的 `deletion_journal_event_hash`；不得以 `null`、空字串或省略欄位表示。
 
 ### 寫入與完成語意
 

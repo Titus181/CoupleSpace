@@ -1,7 +1,7 @@
 ---
 title: 技術決策紀錄
 status: active
-last_updated: 2026-08-13
+last_updated: 2026-08-20
 ---
 
 # 技術決策紀錄
@@ -48,7 +48,7 @@ last_updated: 2026-08-13
 - 正式訊息、Moment、共同約定及其討論的完整資料模型。
 - 照片的確切上市額度、顯示尺寸、壓縮品質、正式 upload queue、自動重試與清理細節；PD-019 已確認產品只需共同回顧畫質、不提供原始畫質備份，PD-021 的 30 張／1 GB 研究邊界及拒絕清理已通過 W1 遠端實測，但尚未成為永久上市規格。PD-022 已接受不按時間自動到期，並沿用 relationship／個人封存／明確刪除／最後引用 GC 的既有生命週期。
 - production／TestFlight 的 APNs token、worker、送達與鎖定畫面實測細節；development sandbox 的兩支真實 iPhone 雙向背景／終止／鎖定送達已通過。
-- 個人封存的正式匯出格式、交付方式與大型資料處理；W1 已有 version 1 JSON manifest＋UUID JPEG 資料夾候選，以及依封存照片 byte size 執行的下載前暫存容量預檢，但尚未接受為最終產品契約，也未完成大型真機與低磁碟實測。
+- 個人封存的正式匯出格式、交付方式與大型資料處理；其中正式基本匯出 v1 的格式與資料範圍已由 [TD-004](#td-004正式基本匯出-v1-與資料刪除稽核契約) 接受，取代本項「尚未接受為最終產品契約」的不確定性。交付機制、大型真機、低磁碟與中斷續傳仍是後續實作／release gate。
 - Moment、共同約定、照片等其他正式內容的 outbox 排程、長時間退避、背景執行與長佇列上限；正式文字聊天的前景排程已由 TD-002 定案。
 - Firebase 作為事故備援或未來替代方案；v1 不為未採用的第二套後端預建 adapter。
 
@@ -102,7 +102,7 @@ last_updated: 2026-08-13
 #### 技術不變量
 
 - Database backup／PITR 只保護 database 與 Storage metadata，不得視為實際 object backup。
-- 每個可用 recovery point 均須有 manifest，綁定 database artifact、schema version、Storage object identity／bytes／checksum 與 deletion journal sequence。
+- 每個可用 recovery point 均須有 manifest，綁定 database artifact、schema version、Storage object identity／bytes／checksum，以及 deletion journal sequence 與該筆 event hash。
 - 還原以 Database 引用集合為準；缺少任何被引用 object、checksum mismatch、tombstone 斷裂、RLS／Auth 無法重建或 reference integrity 失敗時保持隔離。
 - App 透過離線 private key 簽署、內嵌 public key 驗證的最小 service manifest 取得 endpoint、publishable key、事故 mode 與 status URL；manifest 不承載秘密或一般產品 feature flags。
 - 事故模式為 `normal／degraded／read_only／recovery`。一致性未知時停止不具可靠持久 Outbox 的寫入；舊主站失去 production 寫入權後不得自動復權。
@@ -124,3 +124,27 @@ last_updated: 2026-08-13
 - **自動跨區切換：拒絕。** 在資料一致性與失敗範圍未知時可能製造雙主分叉；早期產品以明確唯讀及人工冷重建為較安全取捨。
 
 完整操作規格與尚未完成證據見[一人營運災難復原規格](../architecture/01-disaster-recovery.md)。
+
+### TD-004：正式基本匯出 v1 與資料刪除稽核契約
+
+- **狀態：** accepted
+- **日期：** 2026-08-20
+- **決策：** W14 採 versioned 基本匯出與 server-authoritative deletion operation；任何 migration、RPC 或 runtime 實作都必須先符合本決策及 PD-045，不得由實作者補猜帳號刪除語意。
+
+#### Export v1
+
+- 套件固定包含 `manifest.json`、`data.json` 與 `media/<opaque-id>.jpg`；manifest 記錄 format version 及 package UTC snapshot，並為每個媒體記錄 bytes、MIME 與 SHA-256。資料以 opaque stable ID 保持 Moment／互動、聊天／Reaction、照片、共同約定／事件／討論及其完整來源關聯，不暴露 live Auth UUID。
+- `unpaired_account` scope 匯出本人 profile 資料；`active_relationship` scope 匯出本人在 `snapshot_at` 可見的 relationship 資料；`personal_archive` scope 只匯出本人擁有的封存，且 snapshot 必須沿用 closing boundary。`closing` 不從變動中的共同資料產生正式套件，須等待本人封存完成後改以 `personal_archive` 匯出。
+- 套件包含顯示名稱、匯出者設定的私人伴侶稱呼、在 `snapshot_at` 可見且未過期的目前狀態，以及有權取得的 Moment、互動、聊天、Reaction、照片、共同約定、事件、討論與來源關聯。不得包含伴侶設定的私人稱呼、不可見或已過期狀態、session、push device、Outbox、未讀狀態、操作 receipt、內部 audit 或 tombstone。
+
+#### 刪除、audit 與 tombstone
+
+- 帳號刪除 preflight 必須在申請裝置有 `pending／sending／failed` Outbox work 時阻擋；server 使用穩定 `account_delete_operation_id` 冪等執行產品資料清理、同一快照雙份封存、owner-only archive delete、來源保留及最後引用 GC 排程。relationship seal 使用獨立 stable `closing_operation_id`／snapshot；active 刪帳首次建立，已在 closing 時則引用既有值，不得以 account operation 取代或建立第二份 snapshot。Auth 帳號刪除是整體冪等 operation 的最後一個外部副作用，重試時 Auth 已不存在視為該 operation 成功；回應遺失或重試不得重建資料、重複封存或改寫另一方封存。
+- audit 只保存完成授權、除錯與營運所需的事件種類、時間、結果及 opaque references，不保存名稱、私人稱呼、狀態正文、Moment／聊天／Reaction／約定／討論正文或照片內容。append-only tombstone 只保留防止復活及辨識刪除範圍所需的最小 opaque identity、operation／sequence、事件種類與時間，並須外送至 deletion journal；災難恢復在開放存取前依 sequence 重播，確保 account／archive／content／object deletion 不被舊備份復活。
+
+#### 隔離 fixture
+
+- 自動化 fixture 固定使用 A、B 與無關第三人 C，採 deterministic opaque IDs、UTC timestamps、media bytes／checksums 與來源圖；覆蓋未配對、active、closing、archived、單方 `archive_deleted`、帳號刪除與三種 export scope。
+- A／B 只能讀取、匯出或刪除各自被授權的 live／archive scope，不能讀取對方私人稱呼或刪除對方封存；C 對 A／B 的 profile、relationship、正文、媒體、來源、匯出、audit 與 tombstone 均無讀寫能力。A 刪帳後 B 的 archive-local actor／顯示名稱快照必須保留但不得含 live Auth link，C 的資料與授權保持不變。
+
+完整資料矩陣、schema 欄位、不變量與 fixture oracle 見[W14 資料生命週期與匯出契約](../architecture/03-w14-data-lifecycle-contract.md)。
