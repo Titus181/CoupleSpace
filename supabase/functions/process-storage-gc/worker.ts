@@ -27,7 +27,7 @@ type DiagnosticDetails = Record<string, string | number | boolean>;
 type Diagnostic = (event: string, details?: DiagnosticDetails) => void;
 
 type HandlerDependencies = {
-  serviceRoleKey?: string;
+  schedulerBearer?: string;
   gateway?: StorageGCGateway;
   diagnostic?: Diagnostic;
 };
@@ -73,9 +73,9 @@ export function createStorageGCHandler(
       return json({ error: "method_not_allowed" }, 405);
     }
 
-    const serviceRoleKey = dependencies.serviceRoleKey;
+    const schedulerBearer = dependencies.schedulerBearer;
     const gateway = dependencies.gateway;
-    if (!serviceRoleKey || !gateway) {
+    if (!schedulerBearer || !gateway) {
       diagnostic("storage_gc_request_failed", {
         result_code: "server_not_configured",
       });
@@ -90,7 +90,7 @@ export function createStorageGCHandler(
     const bearerMatch = authorization.match(/^Bearer ([^\s]+)$/i);
     if (
       !bearerMatch ||
-      !(await constantTimeEqual(bearerMatch[1], serviceRoleKey))
+      !(await constantTimeEqual(bearerMatch[1], schedulerBearer))
     ) {
       return json({ error: "invalid_authorization" }, 401);
     }

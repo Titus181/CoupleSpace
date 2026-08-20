@@ -6,7 +6,7 @@ import {
   StorageGCGateway,
 } from "./worker.ts";
 
-const serviceRoleKey = "service-role-secret";
+const schedulerBearer = "scheduler-bearer-secret";
 const jobOne: ClaimedStorageGCJob = {
   job_id: "job-private-one",
   claim_token: "claim-private-one",
@@ -79,7 +79,7 @@ function fakeGateway(options: FakeOptions = {}) {
   return { gateway, calls, failedJobs, completedJobs, deletedObjects };
 }
 
-function request(method = "POST", token = serviceRoleKey): Request {
+function request(method = "POST", token = schedulerBearer): Request {
   return new Request("https://example.invalid/process-storage-gc", {
     method,
     headers: { Authorization: `Bearer ${token}` },
@@ -90,10 +90,10 @@ async function body(response: Response): Promise<Record<string, unknown>> {
   return await response.json();
 }
 
-Deno.test("storage GC accepts POST with only the service role bearer token", async () => {
+Deno.test("storage GC accepts POST with only the configured scheduler bearer", async () => {
   const fake = fakeGateway();
   const handler = createStorageGCHandler({
-    serviceRoleKey,
+    schedulerBearer,
     gateway: fake.gateway,
     diagnostic: () => {},
   });
@@ -120,11 +120,24 @@ Deno.test("storage GC accepts POST with only the service role bearer token", asy
   assertEquals(fake.calls, ["purge:100", "claim:20"]);
 });
 
+Deno.test("storage GC fails closed without a configured scheduler bearer", async () => {
+  const fake = fakeGateway();
+  const handler = createStorageGCHandler({
+    gateway: fake.gateway,
+    diagnostic: () => {},
+  });
+
+  const response = await handler(request());
+  assertEquals(response.status, 500);
+  assertEquals(await body(response), { error: "server_not_configured" });
+  assertEquals(fake.calls, []);
+});
+
 Deno.test("empty GC run purges before claiming and returns counts only", async () => {
   const fake = fakeGateway();
   const logs: unknown[] = [];
   const handler = createStorageGCHandler({
-    serviceRoleKey,
+    schedulerBearer,
     gateway: fake.gateway,
     diagnostic: (event, details) => logs.push({ event, ...details }),
   });
@@ -263,7 +276,7 @@ Deno.test("storage deletion failure is recorded with a stable code and can retry
     },
   };
   const handler = createStorageGCHandler({
-    serviceRoleKey,
+    schedulerBearer,
     gateway,
     diagnostic: () => {},
   });
@@ -296,7 +309,7 @@ Deno.test("mixed GC outcomes are isolated and delete one object per call", async
     deleteFailures: new Set([jobTwo.object_path]),
   });
   const handler = createStorageGCHandler({
-    serviceRoleKey,
+    schedulerBearer,
     gateway: fake.gateway,
     diagnostic: () => {},
   });
@@ -334,7 +347,7 @@ Deno.test("completion failure leaves the lease intact and returns failure", asyn
     completionFailures: new Set([jobOne.job_id]),
   });
   const handler = createStorageGCHandler({
-    serviceRoleKey,
+    schedulerBearer,
     gateway: fake.gateway,
     diagnostic: () => {},
   });
@@ -362,7 +375,7 @@ Deno.test("responses and diagnostics never expose IDs paths content or provider 
   });
   const logs: unknown[] = [];
   const handler = createStorageGCHandler({
-    serviceRoleKey,
+    schedulerBearer,
     gateway: fake.gateway,
     diagnostic: (event, details) => logs.push({ event, ...details }),
   });

@@ -4,6 +4,8 @@ import { createStorageGCHandler, StorageGCGateway } from "./worker.ts";
 
 const projectURL = Deno.env.get("SUPABASE_URL");
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+// Hosted server keys and JWT-verifiable scheduler bearers are distinct.
+const schedulerBearer = Deno.env.get("STORAGE_GC_SCHEDULER_BEARER");
 let gateway: StorageGCGateway | undefined;
 
 if (projectURL && serviceRoleKey) {
@@ -24,4 +26,4 @@ if (projectURL && serviceRoleKey) {
   });
 }
 
-Deno.serve(createStorageGCHandler({ serviceRoleKey, gateway }));
+Deno.serve(createStorageGCHandler({ schedulerBearer, gateway }));
