@@ -17,6 +17,14 @@ values
     ('d0000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000d1'),
     ('d0000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-0000000000d2');
 
+insert into storage.objects (bucket_id, name, owner_id, metadata)
+values (
+    'couplespace-w1-photos',
+    'd0000000-0000-0000-0000-000000000001/d1000000-0000-0000-0000-000000000002.jpg',
+    '00000000-0000-0000-0000-0000000000d1',
+    '{"size": 4096}'::jsonb
+);
+
 insert into public.shared_items (
     relationship_id, client_id, creator_user_id, item_kind, text_content, media_byte_size
 )

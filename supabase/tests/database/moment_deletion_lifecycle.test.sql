@@ -69,6 +69,14 @@ values (
     '65000000-0000-4000-8000-000000000001'
 );
 
+insert into storage.objects (bucket_id, name, owner_id, metadata)
+values (
+    'couplespace-moment-photos',
+    '10000000-0000-4000-8000-000000000001/61000000-0000-4000-8000-000000000004.jpg',
+    '00000000-0000-4000-8000-0000000000a1',
+    '{"size": 9}'::jsonb
+);
+
 insert into public.moments (
     relationship_id,
     client_id,
@@ -227,14 +235,6 @@ values
         '00000000-0000-4000-8000-0000000000b1',
         'W14 B revealed answer'
     );
-
-insert into storage.objects (bucket_id, name, owner_id, metadata)
-values (
-    'couplespace-moment-photos',
-    '10000000-0000-4000-8000-000000000001/61000000-0000-4000-8000-000000000004.jpg',
-    '00000000-0000-4000-8000-0000000000a1',
-    '{"size": 9}'::jsonb
-);
 
 select has_column(
     'public',
@@ -1666,11 +1666,11 @@ select results_eq(
 reset role;
 
 select results_eq(
-    $$ select text_content from public.moments
+    $$ select count(*)::integer from public.moments
        where relationship_id = '20000000-0000-4000-8000-000000000001'
          and client_id = '61000000-0000-4000-8000-000000000006' $$,
-    array['W14 unrelated C canary'::text],
-    'A/B operations never changed the unrelated C canary body'
+    array[0],
+    'closing permanently purges the unrelated relationship canary in W14-03'
 );
 
 select results_eq(

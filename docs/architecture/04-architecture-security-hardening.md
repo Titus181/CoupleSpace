@@ -69,7 +69,7 @@ Critical／High finding 在 Gate C／D 前必須為 `verified`，或以完整可
 
 | ID | Evidence | Severity | Delivery | Release impact | 摘要 |
 | --- | --- | --- | --- | --- | --- |
-| `HARD-SEC-001` | `confirmed-static`＋`unverified-external` | High | `backlog` | Gate C 前 | Checked-in Function 若部署且可達，會接受一般 authenticated user 觸發使用 service role 的全域 Storage GC worker。 |
+| `HARD-SEC-001` | `mitigated-local`＋`unverified-external` | High | `W14-03` | 部署／排程後才可關閉 | Checked-in Function 已改為 service-only RPC／lease worker；linked／production migration、Function 與 scheduler 尚未部署驗證。 |
 | `HARD-SEC-002` | `confirmed-static` | High | `backlog` | Gate C 前 | `shared_items` 仍有 authenticated direct INSERT surface，可繞過 canonical RPC 的部分 server-owned 語意。 |
 | `HARD-SEC-003` | `confirmed-static`＋`inference-needs-verification` | High | `backlog` | Gate C／D 前 | Storage upload 在 finalize quota 前可形成未受相同額度限制的 orphan objects。 |
 | `HARD-REL-001` | `confirmed-static` | High | `backlog` | Gate C blocker | Repo 未見 `PrivacyInfo.xcprivacy`；required-reason API 尚未完成清冊與 archive 驗證。 |
@@ -86,20 +86,21 @@ Critical／High finding 在 Gate C／D 前必須為 `verified`，或以完整可
 
 ## Server authority 與 Storage
 
-### HARD-SEC-001：全域 Storage GC ambient authority
+### HARD-SEC-001：全域 Storage GC ambient authority（本機修正，遠端待驗證）
 
 **目前證據**
 
-- `supabase/functions/process-storage-gc/index.ts` 只以 `auth.getUser(accessToken)` 確認任一有效使用者。
-- 驗證後立即使用 `SUPABASE_SERVICE_ROLE_KEY` 讀取全域 `storage_gc_queue`、刪除 Storage objects 並移除／更新 queue row。
-- caller 不能由目前 API 任意指定 object path；風險是一般使用者可觸發全域高權限 worker、提早執行刪除、製造 concurrency／資源消耗，而不是已證明任意檔案刪除。
-- linked／production 是否已部署此版本且可由外部 user JWT 呼叫仍是 `unverified-external`；source-level capability 不等於遠端暴露已確認。
+- W14-03 checked-in handler 只接受與 `SUPABASE_SERVICE_ROLE_KEY` constant-time 相符的 bearer；anonymous、缺 header 與一般 end-user JWT 均在進入 purge／claim 前拒絕，不再呼叫 `auth.getUser` 把任一登入者升權。
+- worker 只經 `purge_expired_moments`、`claim_storage_gc_jobs`、`fail_storage_gc_job`、`complete_storage_gc_job` RPC；queue／media graph／audit／tombstone 對 authenticated 與 service role 均無直接 table grant。
+- claim 使用 `SKIP LOCKED`、opaque object identity、五分鐘 lease、最後引用與同 path object ID 重驗；Storage failure、lease expiry與 completion retry 保留 body-free audit／terminal receipt，不保存 provider 原始錯誤或在 response／log 暴露 path。
+- focused Function tests 7／7、W14-03 pgTAP 74／74 與本機完整 pgTAP 33 files／745 tests 已 fresh PASS；完整自動化入口也已納入 GC Function test。
+- linked／production migration、Function version 與獨立 scheduler 尚未部署；因此目前只能記 `mitigated-local`，不能宣稱 30 天 sweep 已在遠端自動執行或外部 authority finding 已完全關閉。
 
-**修正方向**
+**剩餘關閉動作**
 
-- 改為排程器或 service-to-service 專用授權，不接受一般 end-user JWT 作 worker authorization。
-- 以 transaction／RPC atomic claim、lease、`SKIP LOCKED`、retry cap 與 backoff 處理並行 worker。
-- log 只保留 queue／result metadata，不保存私人路徑、signed URL 或內容。
+- 經獨立核准部署 migration 044 與新版 Function，再建立只持有 server credential 的 scheduler；不由 App 或一般 user session 觸發。
+- 在 linked target 驗證 anonymous／一般 authenticated user 均為拒絕、scheduler identity 可執行、兩個並行 invocation 不重複刪除，並保留失敗通知與 freshness 監控證據。
+- production 排程與 dead-man monitoring 仍須遵守 TD-003；本機 server-time／fault-injection PASS 不能取代遠端 schedule evidence。
 
 **關閉證據**
 

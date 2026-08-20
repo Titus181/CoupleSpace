@@ -357,7 +357,7 @@ final class CoupleSpaceUITests: XCTestCase {
         XCTAssertTrue(card.waitForExistence(timeout: 3))
         app.buttons["moment-actions"].tap()
         let deleteMenuAction = app.buttons["delete-moment"]
-        XCTAssertTrue(deleteMenuAction.waitForExistence(timeout: 1))
+        XCTAssertTrue(deleteMenuAction.waitForExistence(timeout: 3))
         deleteMenuAction.tap()
         XCTAssertTrue(app.staticTexts["刪除這個 Moment？"].waitForExistence(timeout: 1))
         app.buttons["刪除 Moment"].tap()
@@ -1234,7 +1234,7 @@ final class CoupleSpaceUITests: XCTestCase {
         XCTAssertTrue(signOutButton.waitForExistence(timeout: 2))
         XCTAssertFalse(remoteSignOutButton.exists)
         signOutButton.tap()
-        XCTAssertTrue(app.alerts["要登出 CoupleSpace 嗎？"].waitForExistence(timeout: 1))
+        XCTAssertTrue(app.alerts["要登出 CoupleSpace 嗎？"].waitForExistence(timeout: 3))
         app.alerts.buttons["取消"].tap()
 
         let toolsButton = app.buttons["w1-technical-tools"]

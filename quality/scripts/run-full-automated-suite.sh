@@ -86,6 +86,7 @@ fi
 run_step "Supabase pgTAP" rtk supabase test db
 run_step "Supabase local schema lint" rtk supabase db lint --local
 run_step "Push payload unit tests" deno test supabase/functions/send-w1-push/apns.test.ts
+run_step "Storage GC worker unit tests" deno test supabase/functions/process-storage-gc/index.test.ts
 
 run_step "Full iPhone scheme" \
     rtk xcodebuild test \

@@ -27,6 +27,14 @@ values (
     now() + interval '1 day'
 );
 
+insert into storage.objects (bucket_id, name, owner_id, metadata)
+values (
+    'couplespace-w1-photos',
+    'a0000000-0000-0000-0000-000000000001/a2000000-0000-0000-0000-000000000002.jpg',
+    '00000000-0000-0000-0000-0000000000a1',
+    '{"size": 2048}'::jsonb
+);
+
 insert into public.shared_items (
     relationship_id, client_id, creator_user_id, item_kind,
     text_content, media_byte_size, appointment_client_id

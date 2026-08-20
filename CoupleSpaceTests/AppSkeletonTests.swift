@@ -4380,6 +4380,64 @@ struct AppSkeletonTests {
     }
 
     @MainActor
+    @Test func momentPurgeSignalClearsRecentlyDeletedAndCannotReviveCachedPhoto() async {
+        let sourceMessageID = UUID()
+        let moment = Moment(
+            id: UUID(),
+            creatorUserID: UUID(),
+            content: .photo,
+            createdAt: Date(timeIntervalSince1970: 100),
+            sourceMessageID: sourceMessageID
+        )
+        let deleted = RecentlyDeletedMoment(
+            moment: moment,
+            deletedAt: Date(timeIntervalSince1970: 1_000),
+            purgeAfter: Date(timeIntervalSince1970: 1_000 + 30 * 86_400)
+        )
+        let durableHint = MomentSyncHint(
+            momentID: moment.id,
+            isDeleted: true,
+            sourceMessageID: sourceMessageID,
+            revision: 2
+        )
+        let service = MomentRemoteServiceFake(moments: [])
+        service.cachedMomentsValue = [moment]
+        service.cachedPhotoDataByMomentID[moment.id] = Data([0x01, 0x02])
+        service.recentlyDeletedMoments = [deleted]
+        service.fetchFailuresRemaining = 1
+        let model = MomentModel(service: service)
+
+        await model.start()
+        await model.loadRecentlyDeletedMoments()
+        #expect(model.moments == [moment])
+        #expect(model.photoDataByMomentID[moment.id] == Data([0x01, 0x02]))
+        #expect(model.recentlyDeletedMoments == [deleted])
+
+        service.recentlyDeletedMoments = []
+        service.hiddenMomentIDs = [moment.id]
+        service.syncHints = [durableHint]
+        await service.sendChange(.momentDeleted(moment.id))
+
+        #expect(model.recentlyDeletedMoments.isEmpty)
+        #expect(model.moments.isEmpty)
+        #expect(model.photoDataByMomentID[moment.id] == nil)
+        #expect(service.cachedMomentsValue?.contains { $0.id == moment.id } != true)
+        #expect(service.cachedPhotoDataByMomentID[moment.id] == nil)
+        #expect(model.hiddenMomentSourceMessageIDs == [sourceMessageID])
+        #expect(service.syncHints == [durableHint])
+
+        await model.stop()
+        let restartedModel = MomentModel(service: service)
+        await restartedModel.start()
+        await restartedModel.loadRecentlyDeletedMoments()
+
+        #expect(restartedModel.recentlyDeletedMoments.isEmpty)
+        #expect(restartedModel.moments.isEmpty)
+        #expect(restartedModel.photoDataByMomentID[moment.id] == nil)
+        #expect(restartedModel.hiddenMomentSourceMessageIDs == [sourceMessageID])
+    }
+
+    @MainActor
     @Test func staleDeleteBroadcastCannotHideMomentRestoredAtNewerRevision() async {
         let sourceMessageID = UUID()
         let restored = Moment(
