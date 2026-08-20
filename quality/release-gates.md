@@ -1,6 +1,6 @@
 ---
 status: active
-last_updated: 2026-08-19
+last_updated: 2026-08-20
 ---
 
 # CoupleSpace 版本發布閘門
@@ -10,6 +10,7 @@ last_updated: 2026-08-19
 ## Gate A：每次行為改動
 
 - 指出受影響的 catalog ID、風險與最低可靠測試層級。
+- 若變更架構層級或信任邊界，對照[架構與資訊安全強化計畫](../docs/architecture/04-architecture-security-hardening.md)記錄受影響的 `HARD-*`；尚未關閉項目不得省略。
 - 新功能加入測試；bug fix 在可行時先加入能重現問題的 regression。
 - affected tests 與 affected target build 通過。
 - 資料格式、權限、migration 或產品行為改變時同步文件。
@@ -22,10 +23,12 @@ last_updated: 2026-08-19
 - Watch 或 shared behavior 受影響時，Watch suite 通過。
 - Harness、適用 Agent Evals 與 `git diff --check` 通過。
 - migration、RLS、通知、分析、刪除與資料生命週期變更經人工 review。
+- Auth、RLS／RPC、Storage、Edge Function、push、私密本機保存、匯出／刪除、entitlement 或 Release capability 變更完成架構與 security diff review，並記錄適用 `HARD-*` 的處理結果。
 
 ## Gate C：TestFlight release candidate
 
 - 執行 `quality/scripts/run-full-automated-suite.sh --reset-local-database`。
+- 建立並檢查實際 Release archive：privacy manifest／report、signed entitlements、Info.plist、APNs environment，以及 PoC／debug／test bypass surface；強化計畫中適用的 Gate C blocker 必須為 `verified`，或以完整可重現證據記為 `not_reproduced`。
 - 使用兩支真實 iPhone、兩個 Apple 身分完成所有適用 `manual/` 清單。
 - 若版本影響 W8–W11 的聊天、離線快照、Moment 來源或共同約定，依 `manual/w8-w11-regression.md` 的順序完成整合回歸；其中連結的個別 manual 清單仍是詳細步驟 SSOT。
 - 若版本影響 W13 的同帳號多裝置、目前裝置登出／重新登入恢復、App Lock、推播、未讀／badge、本機提醒或解除配對整合，完整執行 `manual/w13-integration.md`；Simulator preflight 不能取代其中的兩支真實 iPhone 證據。已退役 `SESSION-001` 不重跑，但必須確認正式 inventory／remote-revoke UI 與 runtime 均已移除。

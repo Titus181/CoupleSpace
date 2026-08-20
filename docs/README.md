@@ -1,7 +1,7 @@
 ---
 title: 方心（CoupleSpace）產品文件索引
 status: active
-last_updated: 2026-08-15
+last_updated: 2026-08-20
 ---
 
 # 方心（CoupleSpace）產品文件
@@ -38,6 +38,7 @@ last_updated: 2026-08-15
 13. [iPhone 核心畫面與功能佈局概念](design/02-iphone-core-screen-concepts.md)
 14. [伴侶邀請、短配對碼與配對儀式](design/03-partner-invitation-and-pairing.md)
 15. [上市、客服與版本發布營運](operations/03-launch-support-and-release.md)
+16. [架構與資訊安全強化計畫](architecture/04-architecture-security-hardening.md)
 
 ## 文件維護原則
 

@@ -40,6 +40,16 @@
 | Watch suite（適用時） |  |  |  |  |
 | Harness／Evals／diff check |  |  |  |  |
 
+## 架構與資訊安全強化證據
+
+| 項目 | 結果 | Finding／tool version | Artifact／log | 備註 |
+| --- | --- | --- | --- | --- |
+| Architecture／security diff review |  |  |  | 記錄適用 `HARD-*`、blocking findings 與處理結果 |
+| Gate C `HARD-*` blockers |  |  |  | 所有適用 Critical／High 須為 `verified`，或以完整可重現證據記為 `not_reproduced`；不得使用 `WAIVED` |
+| Privacy manifest／Xcode privacy report |  |  |  | 記錄 first-party、embedded dependencies 與 required-reason API 結果 |
+| Release signed entitlements／Info.plist |  |  |  | 核對 APNs environment、CloudKit、PoC／debug／test bypass surface |
+| Secret／dependency／SAST／milestone scan |  |  |  | 未建立的工具填 `BLOCKED`，不得留白或假裝 PASS |
+
 ## 人工證據
 
 | ID | 結果 | 裝置／環境 | 安全證據 | 備註 |

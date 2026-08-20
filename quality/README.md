@@ -14,6 +14,7 @@
 
 - [測試目錄](test-catalog.md)：穩定 ID、責任層級、實際程式位置與必要 gate。
 - [版本發布閘門](release-gates.md)：開發、合併、TestFlight 與正式發布的阻擋規則。
+- [架構與資訊安全強化計畫](../docs/architecture/04-architecture-security-hardening.md)：以穩定 finding ID 追蹤架構／資安落差、修正順序與關閉證據。
 - [回歸紀錄](regression-history.md)：曾經發生的缺陷及其永久 regression。
 - [W8–W11 完整改版回歸](manual/w8-w11-regression.md)：把基本聊天、可靠傳送、聊天照片／回應／收藏及共同約定編排成一套可重跑流程。
 - [版本驗證紀錄模板](release-record-template.md)：每個 release candidate 的可稽核結果。
