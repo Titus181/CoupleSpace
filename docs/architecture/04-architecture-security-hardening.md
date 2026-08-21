@@ -1,7 +1,7 @@
 ---
 title: CoupleSpace 架構與資訊安全強化計畫
 status: active
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 ---
 
 # CoupleSpace 架構與資訊安全強化計畫
@@ -25,6 +25,7 @@ last_updated: 2026-08-20
 
 - `confirmed-static`：目前 checkout 的程式、設定或 migration 可直接確認。
 - `inference-needs-verification`：靜態證據顯示風險，但影響須由本機、archive、Simulator、真機或遠端受控測試確認。
+- `verified-linked`：本輪已直接讀取並驗證 linked Supabase target；不外推為 production、其他 region 或正式 restore drill 證據。
 - `unverified-external`：屬簽署後 artifact、Supabase linked／production、Apple 服務、CI secrets 或營運狀態，本輪沒有讀取或驗證。
 
 ### Delivery
@@ -69,7 +70,7 @@ Critical／High finding 在 Gate C／D 前必須為 `verified`，或以完整可
 
 | ID | Evidence | Severity | Delivery | Release impact | 摘要 |
 | --- | --- | --- | --- | --- | --- |
-| `HARD-SEC-001` | `mitigated-local`＋`unverified-external` | High | `W14-03` | 部署／排程後才可關閉 | Checked-in Function 已改為 service-only RPC／lease worker；linked／production migration、Function 與 scheduler 尚未部署驗證。 |
+| `HARD-SEC-001` | `mitigated-local`＋`verified-linked` | High | `fixed` | linked 已驗證；dead-man／freshness monitor 前不可完全關閉 | service-only RPC／lease worker、migration 044、Function version 6 與 Vault-backed scheduler 已在 linked target 驗證；production 與獨立失聯監控仍待後續 gate。 |
 | `HARD-SEC-002` | `confirmed-static` | High | `backlog` | Gate C 前 | `shared_items` 仍有 authenticated direct INSERT surface，可繞過 canonical RPC 的部分 server-owned 語意。 |
 | `HARD-SEC-003` | `confirmed-static`＋`inference-needs-verification` | High | `backlog` | Gate C／D 前 | Storage upload 在 finalize quota 前可形成未受相同額度限制的 orphan objects。 |
 | `HARD-REL-001` | `confirmed-static` | High | `backlog` | Gate C blocker | Repo 未見 `PrivacyInfo.xcprivacy`；required-reason API 尚未完成清冊與 archive 驗證。 |
@@ -86,21 +87,24 @@ Critical／High finding 在 Gate C／D 前必須為 `verified`，或以完整可
 
 ## Server authority 與 Storage
 
-### HARD-SEC-001：全域 Storage GC ambient authority（本機修正，遠端待驗證）
+### HARD-SEC-001：全域 Storage GC ambient authority（本機與 linked 已修正，營運監控待驗證）
 
 **目前證據**
 
-- W14-03 checked-in handler 只接受與 `SUPABASE_SERVICE_ROLE_KEY` constant-time 相符的 bearer；anonymous、缺 header 與一般 end-user JWT 均在進入 purge／claim 前拒絕，不再呼叫 `auth.getUser` 把任一登入者升權。
+- W14-03 checked-in handler 只接受與 `STORAGE_GC_SCHEDULER_BEARER` constant-time 相符的 bearer；hosted server client 另由 `SUPABASE_SERVICE_ROLE_KEY` 建立。anonymous、缺 header 與一般 end-user JWT 均在進入 purge／claim 前拒絕，不再呼叫 `auth.getUser` 把任一登入者升權。
 - worker 只經 `purge_expired_moments`、`claim_storage_gc_jobs`、`fail_storage_gc_job`、`complete_storage_gc_job` RPC；queue／media graph／audit／tombstone 對 authenticated 與 service role 均無直接 table grant。
 - claim 使用 `SKIP LOCKED`、opaque object identity、五分鐘 lease、最後引用與同 path object ID 重驗；Storage failure、lease expiry與 completion retry 保留 body-free audit／terminal receipt，不保存 provider 原始錯誤或在 response／log 暴露 path。
-- focused Function tests 7／7、W14-03 pgTAP 74／74 與本機完整 pgTAP 33 files／745 tests 已 fresh PASS；完整自動化入口也已納入 GC Function test。
-- linked／production migration、Function version 與獨立 scheduler 尚未部署；因此目前只能記 `mitigated-local`，不能宣稱 30 天 sweep 已在遠端自動執行或外部 authority finding 已完全關閉。
+- focused Function tests 8／8、W14-03 pgTAP 80／80 與本機完整 pgTAP 33 files／751 tests 已 fresh PASS；完整自動化入口也已納入 GC Function test。
+- linked target `CoupleSpace-W1-Dev` 已套用 migration 044；第二次 dry-run 為 up to date，linked `public` schema error lint 為空，四個 worker RPC 只允許 `service_role`，queue／media graph／audit／tombstone tables 對 anonymous 與 authenticated 均無直接讀寫權。
+- `process-storage-gc` 已部署為 ACTIVE version 6 且 `verify_jwt = true`；缺 header 與一般 client JWT 的遠端 smoke 均為 HTTP 401。scheduler job `w14-moment-purge-storage-gc-v1` 每小時第 17 分執行，credential 只由 Vault／Function secret 提供，cron command 未嵌入明文且 pg_net timeout 為 60 秒。
+- 2026-08-21 00:17 UTC 的自然 cron run 成功，pg_net 實際回 HTTP 200、未 timeout／error，`purged／queued／claimed／completed／failed` 五個 counts 均為 0；這只證明 linked 空佇列授權與呼叫鏈，不外推為 production、有工作量時的並行刪除或正式 restore replay。
 
 **剩餘關閉動作**
 
-- 經獨立核准部署 migration 044 與新版 Function，再建立只持有 server credential 的 scheduler；不由 App 或一般 user session 觸發。
-- 在 linked target 驗證 anonymous／一般 authenticated user 均為拒絕、scheduler identity 可執行、兩個並行 invocation 不重複刪除，並保留失敗通知與 freshness 監控證據。
-- production 排程與 dead-man monitoring 仍須遵守 TD-003；本機 server-time／fault-injection PASS 不能取代遠端 schedule evidence。
+- 建立獨立 dead-man／freshness monitor 與失敗通知；scheduler 本身及 pg_net 六小時 response retention 不能取代失聯告警。
+- 在不傷及真實資料的受控 linked fixture 驗證兩個並行 invocation 不重複刪除；目前 deterministic local fault-injection 已成立，但空佇列 HTTP 200 不能外推此點。
+- 建立 legacy service-role JWT 的 rotation runbook；`STORAGE_GC_SCHEDULER_BEARER` 目前仍是高權限 legacy JWT，相容性分離不代表權限縮小。
+- production 排程仍須獨立核准並遵守 TD-003；本機 server-time／fault-injection與 linked dev PASS 不能取代 production 或正式 restore replay。
 
 **關閉證據**
 
